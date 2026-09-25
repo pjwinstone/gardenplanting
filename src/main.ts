@@ -1,5 +1,5 @@
-import { initAuth } from './msalAuth';
-import { mount } from './ui';
+import { initAuth, getAuthInitResult } from './msalAuth';
+import { mount, applyAuthReady } from './ui';
 
 async function boot(): Promise<void> {
   const root = document.querySelector<HTMLElement>('#app');
@@ -10,9 +10,11 @@ async function boot(): Promise<void> {
   root.innerHTML =
     '<p style="font-family:system-ui;padding:1.5rem">Starting Garden Survey…</p>';
 
+  // Finish redirect handshake before the UI paints signed-out.
   await initAuth();
   root.innerHTML = '';
   mount(root);
+  applyAuthReady(getAuthInitResult());
 }
 
 boot().catch((err) => {

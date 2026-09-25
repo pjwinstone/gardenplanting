@@ -16,10 +16,20 @@ export function readMsalEnv(): MsalEnvConfig | null {
   if (!clientId) return null;
   const tenantId =
     (import.meta.env.VITE_MSAL_TENANT_ID as string | undefined)?.trim() || 'common';
-  const redirectUri =
-    (import.meta.env.VITE_MSAL_REDIRECT_URI as string | undefined)?.trim() ||
-    `${window.location.origin}${import.meta.env.BASE_URL}`;
+  const fromEnv = (import.meta.env.VITE_MSAL_REDIRECT_URI as string | undefined)?.trim();
+  const fallback = `${window.location.origin}${import.meta.env.BASE_URL}`;
+  const redirectUri = ensureTrailingSlash(fromEnv || fallback);
   return { clientId, tenantId, redirectUri };
+}
+
+function ensureTrailingSlash(uri: string): string {
+  try {
+    const u = new URL(uri, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    if (!u.pathname.endsWith('/')) u.pathname += '/';
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return uri.endsWith('/') ? uri : `${uri}/`;
+  }
 }
 
 export function msalConfigured(): boolean {

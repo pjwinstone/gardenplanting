@@ -31,7 +31,7 @@ import {
   importGardenJson,
   loadDocument,
 } from './storage';
-import { isSignedIn, signIn, signOut, subscribeAuth } from './msalAuth';
+import { isSignedIn, signIn, signOut, subscribeAuth, type AuthInitResult } from './msalAuth';
 import { loadGardenFromOneDrive, saveGardenToOneDrive } from './onedrive';
 import {
   getCloudStatus,
@@ -134,6 +134,52 @@ export function mount(root: HTMLElement): void {
   render();
 }
 
+/**
+ * After MSAL init: show real errors, welcome signed-in users, and try OneDrive load
+ * when returning from a Microsoft redirect.
+ */
+export function applyAuthReady(init: AuthInitResult): void {
+  if (!init.configured) return;
+
+  if (init.error) {
+    setCloudMessage(`Microsoft sign-in problem: ${init.error}`);
+    return;
+  }
+
+  if (!init.signedIn) {
+    // Keep the default “Not signed in…” line; no silent failure after a redirect attempt.
+    return;
+  }
+
+  const who = init.accountLabel ? ` as ${init.accountLabel}` : '';
+  if (init.fromRedirect) {
+    setCloudMessage(`Signed in${who}. Loading garden.json from OneDrive…`);
+    void restoreFromOneDriveAfterSignIn();
+  } else {
+    setCloudMessage(`Signed in${who}. Session restored on this device.`);
+  }
+}
+
+async function restoreFromOneDriveAfterSignIn(): Promise<void> {
+  if (!isSignedIn()) return;
+  setCloudBusy(true);
+  const result = await loadGardenFromOneDrive();
+  setCloudBusy(false);
+  if (!result.ok) {
+    // Missing file is normal on first save — still signed in.
+    if (result.missing) {
+      setCloudMessage(
+        `Signed in. No garden.json on OneDrive yet — use Save to OneDrive when ready.`,
+      );
+      return;
+    }
+    setCloudMessage(`Signed in, but could not load from OneDrive: ${result.error}`);
+    return;
+  }
+  setDoc(result.doc, null);
+  setCloudMessage(`Signed in. Loaded from OneDrive (${getCloudStatus().pathHint}).`);
+}
+
 function onShellClick(e: Event): void {
   const target = (e.target as HTMLElement | null)?.closest?.('[data-cmd]') as HTMLElement | null;
   if (!target) return;
@@ -228,10 +274,13 @@ function onShellClick(e: Event): void {
 
 async function onSignIn(): Promise<void> {
   setCloudBusy(true);
-  setCloudMessage('Opening Microsoft sign-in…');
+  setCloudMessage('Opening Microsoft sign-in (redirect)…');
   const result = await signIn();
-  setCloudBusy(false);
-  if (!result.ok) setCloudMessage(result.error ?? 'Sign-in failed.');
+  // loginRedirect navigates away on success; only clear busy on failure.
+  if (!result.ok) {
+    setCloudBusy(false);
+    setCloudMessage(result.error ?? 'Sign-in failed.');
+  }
 }
 
 async function onSignOut(): Promise<void> {

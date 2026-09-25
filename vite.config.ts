@@ -9,6 +9,11 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // Let MSAL redirect return URLs (code/state/error) hit the network/document
+        // instead of a stale cached shell that can drop the auth response.
+        navigateFallbackDenylist: [/\?code=/, /\?error=/, /\?state=/],
+      },
       manifest: {
         name: 'Garden Survey',
         short_name: 'GardenSurvey',
