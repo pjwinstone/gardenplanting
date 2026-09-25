@@ -74,7 +74,7 @@ export function canTransition(
       }
       return {
         ok: false,
-        reason: `Cannot start house from ${mode}. Finish or return to Start / Review first.`,
+        reason: `Cannot start house from ${mode}. Finish this step, run Done with this setup, or start a New garden first.`,
       };
     }
 
@@ -84,7 +84,7 @@ export function canTransition(
           return {
             ok: false,
             reason:
-              'House rectangle does not close yet. Measure the back wall and one diagonal before placing rod A.',
+              'House rectangle does not close yet. Measure the back wall, one side, and the diagonal before placing rod A.',
           };
         }
         return { ok: true, nextMode: 'PLACE_ROD_A' };
@@ -98,12 +98,17 @@ export function canTransition(
           reason: 'Already placing rod A. Put the belts on, then take the tie photo.',
         };
       }
+      if (mode === 'START') {
+        return {
+          ok: false,
+          reason: 'Rod A ready refused: start the house baseline first (Start Stage 2 field loop or Start house).',
+        };
+      }
       return {
         ok: false,
         reason: `Rod A ready is not legal in ${mode}. Complete the house baseline first.`,
       };
     }
-
     case 'take_tie_photo': {
       if (mode === 'PLACE_ROD_A') {
         if (!rodAPlaced(doc) && doc.points.every((p) => p.id !== 'A1')) {
@@ -122,7 +127,7 @@ export function canTransition(
       }
       return {
         ok: false,
-        reason: `Take tie photo is not legal in ${mode}. Place rod A first.`,
+        reason: `Take tie photo is not legal in ${mode}. Place rod A first (belts on both ends).`,
       };
     }
 
@@ -170,12 +175,18 @@ export function canTransition(
         }
         return { ok: true, nextMode: 'OCCUPY' };
       }
+      if (mode === 'HOUSE_BASELINE' || mode === 'PLACE_ROD_A' || mode === 'START') {
+        return {
+          ok: false,
+          reason:
+            'Cannot occupy yet — finish the house–rod tie first (house tapes → rod A → tie photo), then Occupy.',
+        };
+      }
       return {
         ok: false,
         reason: `Cannot occupy from ${mode}. Get a house–rod tie first, or restore a live control.`,
       };
     }
-
     case 'another_photo_yaw': {
       if (mode === 'OCCUPY' || mode === 'OCCUPY_EXTRA_YAW') {
         if (!doc.session.currentOccupyId) {
@@ -269,10 +280,9 @@ export function canTransition(
       }
       return {
         ok: false,
-        reason: `Adjust is not legal in ${mode}. Collect house + rod tie (and preferably an occupy) first.`,
+        reason: `Adjust is not legal in ${mode}. Finish the house–rod tie and at least one occupy (or Load synthetic demo), then Adjust.`,
       };
     }
-
     case 'done_with_setup': {
       if (mode === 'ADJUST' || mode === 'OCCUPY' || mode === 'REVIEW') {
         return { ok: true, nextMode: 'REVIEW' };

@@ -98,11 +98,17 @@ body {
 }
 
 .coach__residual,
+.coach__geometry,
 .coach__next {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.95rem;
   margin: 0.5rem 0 0;
   color: var(--moss);
+}
+
+.coach__geometry {
+  color: var(--moss-2);
+  font-weight: 600;
 }
 
 .refuse {
@@ -223,6 +229,67 @@ body {
 
 .btn--demo:hover {
   background: var(--moss-2);
+}
+
+.btn--stage2 {
+  background: var(--moss-2);
+  color: #f6f1e6;
+  border-color: var(--moss-2);
+  font-weight: 700;
+}
+
+.btn--stage2:hover {
+  background: var(--moss);
+}
+
+.stage2-checklist {
+  background: #f7faf5;
+  border: 1px solid var(--moss-2);
+  padding: 0.85rem 1.15rem;
+  margin-bottom: 1rem;
+}
+
+.stage2-checklist__title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 0.45rem;
+  color: var(--moss-2);
+}
+
+.stage2-checklist__intro {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.stage2-checklist__list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.stage2-checklist__item {
+  margin: 0.35rem 0;
+  font-size: 0.95rem;
+}
+
+.stage2-checklist__mode {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--moss);
+}
+
+.stage2-checklist__btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.step-panel__sub {
+  margin-top: 1.25rem !important;
+  font-size: 1rem !important;
+  color: var(--muted);
 }
 
 .step-panel {

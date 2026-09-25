@@ -4,7 +4,9 @@ Static PWA (Vite + TypeScript) for surveying a ~20×20 m UK garden. No backend. 
 
 **Live (GitHub Pages):** https://pjwinstone.github.io/gardenplanting/
 
-**Microsoft sign-in + OneDrive:** Stage 1 saves `garden.json` to OneDrive at `/Garden Survey/garden.json`. Setup steps (Entra SPA registration, permissions, env secrets): **[docs/entra-onedrive-setup.md](docs/entra-onedrive-setup.md)**.
+**Stage 2 — accurate measurements (field):** phone checklist → **[docs/stage-2-field-checklist.md](docs/stage-2-field-checklist.md)**. In the app: **Start Stage 2 field loop** / **Show Stage 2 checklist**.
+
+**Microsoft sign-in + OneDrive:** saves `garden.json` to personal OneDrive at `/Garden Survey/garden.json`. Setup: **[docs/entra-onedrive-setup.md](docs/entra-onedrive-setup.md)**.
 
 ## Run
 
@@ -25,7 +27,7 @@ Production build uses Vite `base` `/gardenplanting/` for project Pages. Deploy i
 
 ## Field loop (session modes)
 
-Exactly one mode at a time. The banner + coach always say where you are and what is legal next.
+Exactly one mode at a time. The banner + coach always say where you are and what is legal next. For the live garden, follow **[Stage 2 field checklist](docs/stage-2-field-checklist.md)** (also available in-app).
 
 1. **START** — New garden or load JSON (`Import garden.json` / `Load synthetic demo` / OneDrive load when signed in).
 2. **HOUSE_BASELINE** — Measure the back wall and one diagonal. Do not move on until the house rectangle closes. → *Start house*
@@ -59,6 +61,6 @@ Illegal mode buttons stay clickable and show a refusal sentence (they are not a 
 
 ## Modules
 
-`model.ts` · `modes.ts` · `adjustLayerA.ts` · `adjustLayerB.ts` · `photoGeometry.ts` · `storage.ts` · `planSvg.ts` · `tagsPrint.ts` · `coach.ts` · `ui.ts` · `msalAuth.ts` · `onedrive.ts` · `cloudStatus.ts` · `cloudConfig.ts`
+`model.ts` · `modes.ts` · `adjustLayerA.ts` · `adjustLayerB.ts` · `photoGeometry.ts` · `storage.ts` · `planSvg.ts` · `tagsPrint.ts` · `coach.ts` · `stage2Checklist.ts` · `ui.ts` · `msalAuth.ts` · `onedrive.ts` · `cloudStatus.ts` · `cloudConfig.ts`
 
 See `AGENTS.md` for the survey method (do not change without asking).

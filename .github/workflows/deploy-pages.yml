@@ -35,7 +35,7 @@ jobs:
           VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
           VITE_MSAL_TENANT_ID: ${{ secrets.VITE_MSAL_TENANT_ID }}
           VITE_MSAL_REDIRECT_URI: ${{ secrets.VITE_MSAL_REDIRECT_URI }}
-          VITE_APP_VERSION: 0.2.2
+          VITE_APP_VERSION: 0.3.0
           VITE_APP_BUILD: ${{ github.sha }}
         run: npm run build
 

@@ -41,6 +41,7 @@ import {
   subscribeCloud,
 } from './cloudStatus';
 import { buildStamp } from './buildInfo';
+import { STAGE2_FIELD_STEPS } from './stage2Checklist';
 
 export type View = 'survey' | 'tags';
 
@@ -48,6 +49,8 @@ export interface UiState {
   doc: GardenDocument;
   view: View;
   refuseMessage: string | null;
+  /** Show Stage 2 field checklist summary in the survey layout. */
+  showStage2Checklist: boolean;
 }
 
 type Listener = () => void;
@@ -56,6 +59,7 @@ let state: UiState = {
   doc: loadDocument() ?? emptyDocument(),
   view: 'survey',
   refuseMessage: null,
+  showStage2Checklist: false,
 };
 
 const listeners: Listener[] = [];
@@ -200,8 +204,23 @@ function onShellClick(e: Event): void {
     runMilestoneDemo();
     return;
   }
+  if (cmd === 'start-stage2') {
+    startStage2FieldLoop();
+    return;
+  }
+  if (cmd === 'toggle-stage2-checklist') {
+    setState({
+      showStage2Checklist: !state.showStage2Checklist,
+      refuseMessage: null,
+    });
+    return;
+  }
   if (cmd === 'new-garden') {
-    setDoc(emptyDocument(), null);
+    setState({
+      doc: emptyDocument(),
+      refuseMessage: null,
+      showStage2Checklist: false,
+    });
     return;
   }
   if (cmd === 'export') {
@@ -363,6 +382,11 @@ function buildSurveyView(): HTMLElement {
   if (coach.residualLine) {
     coachPanel.appendChild(el('p', { className: 'coach__residual', text: coach.residualLine }));
   }
+  if (coach.geometryLine) {
+    coachPanel.appendChild(
+      el('p', { className: 'coach__geometry', text: coach.geometryLine }),
+    );
+  }
   if (coach.nextButton) {
     coachPanel.appendChild(
       el('p', { className: 'coach__next', text: `Next: ${coach.nextButton}` }),
@@ -371,11 +395,16 @@ function buildSurveyView(): HTMLElement {
     coachPanel.appendChild(
       el('p', {
         className: 'coach__next',
-        text: 'Next: use the step panel below (or Load synthetic demo)',
+        text: 'Next: use the step panel below (Start Stage 2 or Load synthetic demo)',
       }),
     );
   }
   wrap.appendChild(coachPanel);
+
+  if (state.showStage2Checklist) {
+    wrap.appendChild(buildStage2ChecklistPanel());
+  }
+
   wrap.appendChild(buildCloudPanel());
 
   if (state.refuseMessage) {
@@ -413,6 +442,13 @@ function buildSurveyView(): HTMLElement {
   if (step) wrap.appendChild(step);
 
   const utils = el('div', { className: 'utils' });
+  utils.appendChild(
+    el('button', {
+      className: 'btn btn--util btn--stage2',
+      text: state.showStage2Checklist ? 'Hide Stage 2 checklist' : 'Show Stage 2 checklist',
+      attrs: { type: 'button', 'data-cmd': 'toggle-stage2-checklist' },
+    }),
+  );
   utils.appendChild(
     el('button', {
       className: 'btn btn--util btn--demo',
@@ -626,15 +662,89 @@ function buildCloudPanel(): HTMLElement {
   return panel;
 }
 
+function buildStage2ChecklistPanel(): HTMLElement {
+  const panel = el('section', {
+    className: 'stage2-checklist',
+    attrs: { 'data-testid': 'stage2-checklist', 'aria-label': 'Stage 2 field checklist' },
+  });
+  panel.appendChild(
+    el('h2', { className: 'stage2-checklist__title', text: 'Stage 2 field checklist' }),
+  );
+  panel.appendChild(
+    el('p', {
+      className: 'stage2-checklist__intro',
+      text: 'House → rod A → tie → occupy → (yaw) → leapfrog → rods moved → adjust. Full phone list: docs/stage-2-field-checklist.md',
+    }),
+  );
+  const list = el('ol', { className: 'stage2-checklist__list' });
+  for (const step of STAGE2_FIELD_STEPS) {
+    const item = el('li', { className: 'stage2-checklist__item' });
+    item.appendChild(
+      el('strong', { className: 'stage2-checklist__mode', text: step.modeLabel }),
+    );
+    item.appendChild(document.createTextNode(` — ${step.doThis} `));
+    item.appendChild(
+      el('span', { className: 'stage2-checklist__btn', text: `(${step.button})` }),
+    );
+    list.appendChild(item);
+  }
+  panel.appendChild(list);
+  return panel;
+}
+
+/** Begin Stage 2: show checklist and enter HOUSE_BASELINE from a clean garden. */
+function startStage2FieldLoop(): void {
+  const base =
+    state.doc.session.mode === 'START' && state.doc.points.length === 0
+      ? state.doc
+      : emptyDocument('Stage 2 garden');
+  const { doc, result } = applyTransition(base, 'start_house');
+  if (!result.ok) {
+    setState({
+      refuseMessage: result.reason ?? 'Could not start Stage 2.',
+      showStage2Checklist: true,
+    });
+    return;
+  }
+  setState({
+    doc,
+    view: 'survey',
+    refuseMessage: null,
+    showStage2Checklist: true,
+  });
+  const coach = buildCoach(doc);
+  speakCoachLine(coach.body[0] ?? '', doc.session.speakSteps);
+}
+
 function buildStepPanel(doc: GardenDocument): HTMLElement | null {
   const mode = doc.session.mode;
 
   if (mode === 'START') {
-    const panel = el('section', { className: 'step-panel' });
-    panel.appendChild(el('h2', { text: 'Milestone path' }));
+    const panel = el('section', { className: 'step-panel step-panel--stage2' });
+    panel.appendChild(el('h2', { text: 'Stage 2 — live garden' }));
     panel.appendChild(
       el('p', {
-        text: 'One click loads synthetic house + rod A + occupy photos and runs Adjust so the SVG plan appears. Or walk it: Load synthetic demo, then Adjust. Print tags anytime.',
+        text: 'Walk the real plot: house tapes → rod A → tie photo → occupy → (yaw) → leapfrog → rods moved → adjust. OneDrive auto-saves when signed in.',
+      }),
+    );
+    panel.appendChild(
+      el('button', {
+        className: 'btn btn--util btn--stage2',
+        text: 'Start Stage 2 field loop',
+        attrs: { type: 'button', 'data-cmd': 'start-stage2' },
+      }),
+    );
+    panel.appendChild(
+      el('button', {
+        className: 'btn btn--util',
+        text: state.showStage2Checklist ? 'Hide field checklist' : 'Show field checklist',
+        attrs: { type: 'button', 'data-cmd': 'toggle-stage2-checklist' },
+      }),
+    );
+    panel.appendChild(el('h2', { className: 'step-panel__sub', text: 'Milestone (dry run)' }));
+    panel.appendChild(
+      el('p', {
+        text: 'Synthetic house + rod A + occupies → Adjust draws the SVG plan. Use this indoors; Stage 2 is for the garden.',
       }),
     );
     panel.appendChild(
@@ -679,7 +789,7 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
       el('p', {
         text: rodAPlaced(doc)
           ? 'Rod A is declared at 4.000 m. Belts on both ends — take the tie photo.'
-          : 'Rod A is not on the map yet. Use Load synthetic demo, or New garden and start again.',
+          : 'Plant the physical rod where the house can see it, belts on both ends, then press Rod A ready (or it was declared when you pressed that button).',
       }),
     );
     return panel;
@@ -691,8 +801,8 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
     panel.appendChild(
       el('p', {
         text: tiePhotoReady(doc)
-          ? 'Four marks present. Occupy is legal.'
-          : 'Record two house corners and both ends of rod A. Milestone uses canned demo clicks.',
+          ? 'Four marks present. Occupy is legal — geometry is good enough to proceed.'
+          : 'In the garden: photograph two house corners and both rod ends, then record the four taps. Indoors, use demo clicks.',
       }),
     );
     if (!tiePhotoReady(doc)) {
@@ -736,8 +846,8 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
       el('p', {
         text:
           mode === 'OCCUPY'
-            ? 'Milestone: press Adjust to run Layer A then Layer B and draw the SVG plan. Print tags is always available below.'
-            : 'Plan should show house, rod A, and occupies. Open Print tags for A4 rod belts + FNC01–04.',
+            ? 'Field: keep occupying points, or Start leapfrog when you need rod B. Press Adjust when you want millimetre residuals on the plan.'
+            : 'Read the coach residuals in mm. Good enough (<~15 mm) → keep surveying. Over ~50 mm → remeasure. Print tags anytime.',
       }),
     );
     if (mode === 'ADJUST') {
