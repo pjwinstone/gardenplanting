@@ -67,6 +67,14 @@ body {
   letter-spacing: 0.02em;
 }
 
+.mode-banner__build {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: clamp(0.85rem, 2.8vw, 1rem);
+  margin: 0.55rem 0 0;
+  letter-spacing: 0.04em;
+  opacity: 0.9;
+}
+
 .coach {
   background: var(--coach);
   border: 1px solid var(--line);

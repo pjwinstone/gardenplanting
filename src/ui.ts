@@ -40,6 +40,7 @@ import {
   setLastSaveIso,
   subscribeCloud,
 } from './cloudStatus';
+import { buildStamp } from './buildInfo';
 
 export type View = 'survey' | 'tags';
 
@@ -296,6 +297,13 @@ function buildSurveyView(): HTMLElement {
   const banner = el('header', { className: 'mode-banner', attrs: { role: 'status' } });
   banner.appendChild(el('div', { className: 'mode-banner__label', text: 'Session mode' }));
   banner.appendChild(el('h1', { className: 'mode-banner__mode', text: coach.banner }));
+  banner.appendChild(
+    el('p', {
+      className: 'mode-banner__build',
+      text: buildStamp(),
+      attrs: { 'data-testid': 'build-stamp' },
+    }),
+  );
   wrap.appendChild(banner);
 
   const coachPanel = el('section', { className: 'coach', attrs: { 'aria-live': 'polite' } });
