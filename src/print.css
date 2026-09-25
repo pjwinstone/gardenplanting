@@ -1,0 +1,60 @@
+/* Print-only stylesheet for A4 rod belts + fence discs */
+
+@page {
+  size: A4;
+  margin: 12mm;
+}
+
+@media print {
+  body {
+    background: #fff !important;
+  }
+
+  #app {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .no-print,
+  .tags-toolbar,
+  .mode-banner,
+  .coach,
+  .actions,
+  .utils,
+  .plan,
+  .refuse {
+    display: none !important;
+  }
+
+  .tags-view,
+  .tags-host,
+  .print-sheet {
+    display: block !important;
+    border: none !important;
+    padding: 0 !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .tag-belt {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 4mm;
+  }
+
+  .tag-disc {
+    break-inside: avoid;
+  }
+
+  .wrap-how {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  .print-header h1,
+  .print-section-title,
+  .wrap-how h2 {
+    color: #000 !important;
+  }
+}

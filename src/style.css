@@ -1,0 +1,346 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap');
+
+:root {
+  --ink: #2a241c;
+  --muted: #5a5348;
+  --paper: #f3efe6;
+  --paper-2: #e7e0d2;
+  --moss: #1a3a2a;
+  --moss-2: #2f5d3a;
+  --clay: #c45c26;
+  --refuse: #8b1e1e;
+  --line: #cfc5b4;
+  --banner: #1a3a2a;
+  --coach: #fffdf8;
+  --shadow: 0 1px 0 rgba(42, 36, 28, 0.08);
+  font-family: 'Source Sans 3', Georgia, sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse at 10% 0%, #dfe8d8 0%, transparent 45%),
+    radial-gradient(ellipse at 90% 10%, #e8dcc8 0%, transparent 40%),
+    linear-gradient(165deg, #f6f1e6 0%, #ebe4d6 50%, #e2d8c6 100%);
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 3rem;
+}
+
+.mode-banner {
+  background: var(--banner);
+  color: #f6f1e6;
+  padding: 1.25rem 1.5rem;
+  border-radius: 2px;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.mode-banner__label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.mode-banner__mode {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 700;
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  margin: 0.2rem 0 0;
+  letter-spacing: 0.02em;
+}
+
+.coach {
+  background: var(--coach);
+  border: 1px solid var(--line);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.coach__title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 0.5rem;
+  color: var(--moss-2);
+}
+
+.coach__line {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: clamp(1.05rem, 2.4vw, 1.35rem);
+  margin: 0.35rem 0;
+}
+
+.coach__residual,
+.coach__next {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  margin: 0.5rem 0 0;
+  color: var(--moss);
+}
+
+.refuse {
+  background: #f8e8e4;
+  border: 1px solid var(--refuse);
+  color: var(--refuse);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-family: 'Source Sans 3', sans-serif;
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.btn {
+  font-family: 'Source Sans 3', sans-serif;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--moss);
+  background: #fffdf8;
+  color: var(--moss);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.btn:hover:not(:disabled) {
+  background: #e8f0ea;
+}
+
+.btn--suggested {
+  background: var(--moss);
+  color: #f6f1e6;
+  box-shadow: 0 0 0 2px #c5d9c8;
+}
+
+.btn--disabled,
+.btn:disabled {
+  opacity: 0.55;
+  cursor: pointer;
+  border-color: var(--muted);
+  color: var(--muted);
+  background: var(--paper-2);
+}
+
+.btn--disabled:hover {
+  outline: 1px dashed var(--refuse);
+}
+
+.btn--util,
+.btn--file {
+  border-color: var(--line);
+  color: var(--ink);
+  background: transparent;
+}
+
+.btn--demo {
+  background: var(--moss);
+  color: #f6f1e6;
+  border-color: var(--moss);
+  font-weight: 700;
+}
+
+.btn--demo:hover {
+  background: var(--moss-2);
+}
+
+.step-panel {
+  background: #fffdf8;
+  border: 1px solid var(--moss-2);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.step-panel--hint {
+  border-style: dashed;
+  border-color: var(--line);
+}
+
+.step-panel h2 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.1rem;
+  margin: 0 0 0.5rem;
+}
+
+.step-panel p {
+  margin: 0 0 0.75rem;
+}
+
+.step-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+}
+
+.field input {
+  font-family: 'Source Sans 3', sans-serif;
+  font-size: 1rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--line);
+  background: #fff;
+  width: 7rem;
+}
+
+.btn--file {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.utils {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.toggle {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  margin-left: 0.5rem;
+}
+
+.plan h2 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.25rem;
+  margin: 0 0 0.75rem;
+}
+
+.plan__svg {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.plan__svg svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.thumb {
+  margin: 0;
+  width: 96px;
+}
+
+.thumb img {
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  display: block;
+}
+
+.thumb figcaption {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.7rem;
+  margin-top: 0.25rem;
+  color: var(--muted);
+}
+
+.tags-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.print-sheet {
+  background: #fff;
+  color: #000;
+  padding: 1rem;
+  border: 1px solid var(--line);
+}
+
+.print-header h1 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.4rem;
+  margin: 0 0 0.25rem;
+}
+
+.print-section-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.9rem;
+  margin: 1rem 0 0.5rem;
+}
+
+.belt-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.disc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.wrap-how {
+  margin-top: 1.5rem;
+  border-top: 1px solid #000;
+  padding-top: 0.75rem;
+}
+
+.wrap-how h2 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.1rem;
+}
+
+.wrap-how ol {
+  padding-left: 1.25rem;
+}
+
+@media (max-width: 600px) {
+  #app {
+    padding: 0.75rem;
+  }
+
+  .actions .btn {
+    flex: 1 1 calc(50% - 0.5rem);
+  }
+}
