@@ -71,7 +71,7 @@ Vite + TypeScript. Modules: model.ts, modes.ts, adjustLayerA.ts, adjustLayerB.ts
 
 JSON document as previously specified (points, lines, polygons, observations, photos with thumbnails, setups).
 
-localStorage + export/import garden.json. OneDrive later.
+localStorage + export/import garden.json. OneDrive via Microsoft Graph (`/Garden Survey/garden.json`) when MSAL env is set — see `docs/entra-onedrive-setup.md`.
 
 ## First milestone
 1. Write this AGENTS.md.

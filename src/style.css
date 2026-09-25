@@ -107,6 +107,56 @@ body {
   font-weight: 600;
 }
 
+.cloud-status {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  padding: 0.85rem 1.15rem;
+  margin-bottom: 1rem;
+}
+
+.cloud-status__title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 0.45rem;
+  color: var(--moss-2);
+}
+
+.cloud-status__line {
+  margin: 0.25rem 0;
+  font-size: 0.98rem;
+}
+
+.cloud-status__line--ok {
+  color: var(--moss);
+  font-weight: 600;
+}
+
+.cloud-status__meta {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.cloud-status__msg {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.cloud-status__busy {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--clay);
+}
+
+.cloud-status__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

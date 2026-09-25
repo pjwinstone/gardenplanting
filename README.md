@@ -2,10 +2,15 @@
 
 Static PWA (Vite + TypeScript) for surveying a ~20×20 m UK garden. No backend. Session modes, a chatty coach, Layer A/B adjust, SVG plan, and A4 printable rod belts.
 
+**Live (GitHub Pages):** https://pjwinstone.github.io/gardenplanting/
+
+**Microsoft sign-in + OneDrive:** Stage 1 saves `garden.json` to OneDrive at `/Garden Survey/garden.json`. Setup steps (Entra SPA registration, permissions, env secrets): **[docs/entra-onedrive-setup.md](docs/entra-onedrive-setup.md)**.
+
 ## Run
 
 ```bash
 npm install
+cp .env.example .env.local   # optional until you have Entra IDs
 npm run dev
 ```
 
@@ -16,11 +21,13 @@ npm run build
 npm run preview
 ```
 
+Production build uses Vite `base` `/gardenplanting/` for project Pages. Deploy is automatic on push to `main` via `.github/workflows/deploy-pages.yml` (set Actions secrets listed in the Entra doc).
+
 ## Field loop (session modes)
 
 Exactly one mode at a time. The banner + coach always say where you are and what is legal next.
 
-1. **START** — New garden or load JSON (`Import garden.json` / `Load synthetic demo`).
+1. **START** — New garden or load JSON (`Import garden.json` / `Load synthetic demo` / OneDrive load when signed in).
 2. **HOUSE_BASELINE** — Measure the back wall and one diagonal. Do not move on until the house rectangle closes. → *Start house*
 3. **PLACE_ROD_A** — Put rod A where the house can see it. Both ends need toilet-roll belts. → *Rod A ready*
 4. **PHOTO_TIE_HOUSE_ROD** — Frame two house corners **and** both ends of rod A; tap those four marks. → *Take tie photo*
@@ -36,7 +43,7 @@ Illegal transitions are refused with a clear sentence (buttons stay disabled whe
 
 ## Demo path (milestone 1)
 
-1. Open the app (`npm run dev`).
+1. Open the app (`npm run dev` or the Pages URL).
 2. Click **Load synthetic demo** or **Run milestone demo (synthetic → Adjust)** — house 8×6 m, rod A 4.000 m, tie photo + two occupy photos; Adjust draws the SVG plan.
 3. If walking manually: after Load synthetic, click **Adjust**.
 4. Click **Print tags** — A4 sheet with rod belts (A1 A2 A0 B1 B2 B0) and FNC01–04.
@@ -46,11 +53,12 @@ Illegal mode buttons stay clickable and show a refusal sentence (they are not a 
 ## Data
 
 - Document: `points`, `lines`, `polygons`, `observations`, `photos` (thumbnails + clicks), `setups`.
-- Persisted in `localStorage`; **Export / Import** `garden.json`.
+- **localStorage** offline cache; **Export / Import** `garden.json`.
+- **OneDrive** source of truth when signed in: `/Garden Survey/garden.json` (coach panel shows signed-in state, last save, and plain-language errors).
 - Coach copy lives only in `src/coach.ts`.
 
 ## Modules
 
-`model.ts` · `modes.ts` · `adjustLayerA.ts` · `adjustLayerB.ts` · `photoGeometry.ts` · `storage.ts` · `planSvg.ts` · `tagsPrint.ts` · `coach.ts` · `ui.ts`
+`model.ts` · `modes.ts` · `adjustLayerA.ts` · `adjustLayerB.ts` · `photoGeometry.ts` · `storage.ts` · `planSvg.ts` · `tagsPrint.ts` · `coach.ts` · `ui.ts` · `msalAuth.ts` · `onedrive.ts` · `cloudStatus.ts` · `cloudConfig.ts`
 
 See `AGENTS.md` for the survey method (do not change without asking).

@@ -20,10 +20,12 @@
   .tags-toolbar,
   .mode-banner,
   .coach,
+  .cloud-status,
   .actions,
   .utils,
   .plan,
-  .refuse {
+  .refuse,
+  .step-panel {
     display: none !important;
   }
 

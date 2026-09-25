@@ -31,6 +31,15 @@ import {
   importGardenJson,
   loadDocument,
 } from './storage';
+import { isSignedIn, signIn, signOut, subscribeAuth } from './msalAuth';
+import { loadGardenFromOneDrive, saveGardenToOneDrive } from './onedrive';
+import {
+  getCloudStatus,
+  setCloudBusy,
+  setCloudMessage,
+  setLastSaveIso,
+  subscribeCloud,
+} from './cloudStatus';
 
 export type View = 'survey' | 'tags';
 
@@ -49,6 +58,9 @@ let state: UiState = {
 };
 
 const listeners: Listener[] = [];
+
+/** Debounce silent OneDrive backup after local edits when signed in. */
+let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function getState(): UiState {
   return state;
@@ -74,12 +86,32 @@ function setState(partial: Partial<UiState>): void {
         refuseMessage: `Working copy updated, but could not save to this browser (${saved.error}). Export garden.json to keep your work.`,
       };
     }
+    scheduleCloudBackup(partial.doc);
   }
   for (const fn of [...listeners]) fn();
 }
 
 function setDoc(doc: GardenDocument, refuse: string | null = null): void {
   setState({ doc, refuseMessage: refuse });
+}
+
+function scheduleCloudBackup(doc: GardenDocument): void {
+  if (!isSignedIn()) return;
+  if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(() => {
+    void quietCloudSave(doc);
+  }, 2500);
+}
+
+async function quietCloudSave(doc: GardenDocument): Promise<void> {
+  if (!isSignedIn()) return;
+  const result = await saveGardenToOneDrive(doc);
+  if (result.ok) {
+    setLastSaveIso(result.savedAt);
+    setCloudMessage(`Saved to OneDrive (${getCloudStatus().pathHint}).`);
+  } else {
+    setCloudMessage(`Could not auto-save to OneDrive: ${result.error}`);
+  }
 }
 
 export function mount(root: HTMLElement): void {
@@ -96,6 +128,8 @@ export function mount(root: HTMLElement): void {
     shell.appendChild(buildApp());
   };
   subscribe(render);
+  subscribeAuth(render);
+  subscribeCloud(render);
   render();
 }
 
@@ -173,6 +207,64 @@ function onShellClick(e: Event): void {
     setDoc(confirmAbTogether(state.doc), null);
     return;
   }
+  if (cmd === 'ms-signin') {
+    void onSignIn();
+    return;
+  }
+  if (cmd === 'ms-signout') {
+    void onSignOut();
+    return;
+  }
+  if (cmd === 'onedrive-save') {
+    void onOneDriveSave();
+    return;
+  }
+  if (cmd === 'onedrive-load') {
+    void onOneDriveLoad();
+    return;
+  }
+}
+
+async function onSignIn(): Promise<void> {
+  setCloudBusy(true);
+  setCloudMessage('Opening Microsoft sign-in…');
+  const result = await signIn();
+  setCloudBusy(false);
+  if (!result.ok) setCloudMessage(result.error ?? 'Sign-in failed.');
+}
+
+async function onSignOut(): Promise<void> {
+  setCloudBusy(true);
+  setCloudMessage('Signing out…');
+  const result = await signOut();
+  setCloudBusy(false);
+  if (!result.ok) setCloudMessage(result.error ?? 'Sign-out failed.');
+}
+
+async function onOneDriveSave(): Promise<void> {
+  setCloudBusy(true);
+  setCloudMessage('Saving garden.json to OneDrive…');
+  const result = await saveGardenToOneDrive(state.doc);
+  setCloudBusy(false);
+  if (result.ok) {
+    setLastSaveIso(result.savedAt);
+    setCloudMessage(`Saved to OneDrive (${getCloudStatus().pathHint}).`);
+  } else {
+    setCloudMessage(result.error);
+  }
+}
+
+async function onOneDriveLoad(): Promise<void> {
+  setCloudBusy(true);
+  setCloudMessage('Loading garden.json from OneDrive…');
+  const result = await loadGardenFromOneDrive();
+  setCloudBusy(false);
+  if (!result.ok) {
+    setCloudMessage(result.error);
+    return;
+  }
+  setDoc(result.doc, null);
+  setCloudMessage(`Loaded from OneDrive (${getCloudStatus().pathHint}). Browser cache updated.`);
 }
 
 function onShellChange(e: Event): void {
@@ -227,6 +319,7 @@ function buildSurveyView(): HTMLElement {
     );
   }
   wrap.appendChild(coachPanel);
+  wrap.appendChild(buildCloudPanel());
 
   if (state.refuseMessage) {
     wrap.appendChild(
@@ -358,6 +451,122 @@ function buildSurveyView(): HTMLElement {
   wrap.appendChild(plan);
 
   return wrap;
+}
+
+function buildCloudPanel(): HTMLElement {
+  const cloud = getCloudStatus();
+  const panel = el('section', {
+    className: 'cloud-status',
+    attrs: { 'aria-live': 'polite', 'data-testid': 'cloud-status' },
+  });
+  panel.appendChild(el('h2', { className: 'cloud-status__title', text: 'Microsoft / OneDrive' }));
+
+  if (!cloud.configured) {
+    panel.appendChild(
+      el('p', {
+        className: 'cloud-status__line',
+        text: 'Sign-in is not configured on this build yet. Local cache and Export/Import still work. See docs/entra-onedrive-setup.md.',
+      }),
+    );
+    return panel;
+  }
+
+  if (cloud.signedIn) {
+    panel.appendChild(
+      el('p', {
+        className: 'cloud-status__line cloud-status__line--ok',
+        text: `Signed in${cloud.accountLabel ? ` as ${cloud.accountLabel}` : ''}.`,
+      }),
+    );
+  } else {
+    panel.appendChild(
+      el('p', {
+        className: 'cloud-status__line',
+        text: 'Not signed in. Sign in to save the garden map to OneDrive across devices.',
+      }),
+    );
+  }
+
+  panel.appendChild(
+    el('p', {
+      className: 'cloud-status__line cloud-status__meta',
+      text: cloud.lastSaveLabel,
+    }),
+  );
+  panel.appendChild(
+    el('p', {
+      className: 'cloud-status__line cloud-status__meta',
+      text: `OneDrive path: ${cloud.pathHint}`,
+    }),
+  );
+
+  if (cloud.message) {
+    panel.appendChild(
+      el('p', {
+        className: 'cloud-status__line cloud-status__msg',
+        text: cloud.message,
+      }),
+    );
+  }
+  if (cloud.busy) {
+    panel.appendChild(
+      el('p', {
+        className: 'cloud-status__line cloud-status__busy',
+        text: 'Working…',
+      }),
+    );
+  }
+
+  const row = el('div', { className: 'cloud-status__actions' });
+  if (!cloud.signedIn) {
+    row.appendChild(
+      el('button', {
+        className: 'btn btn--util',
+        text: 'Sign in with Microsoft',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'ms-signin',
+          disabled: cloud.busy ? 'true' : undefined,
+        },
+      }),
+    );
+  } else {
+    row.appendChild(
+      el('button', {
+        className: 'btn btn--util',
+        text: 'Save to OneDrive',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'onedrive-save',
+          disabled: cloud.busy ? 'true' : undefined,
+        },
+      }),
+    );
+    row.appendChild(
+      el('button', {
+        className: 'btn btn--util',
+        text: 'Load from OneDrive',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'onedrive-load',
+          disabled: cloud.busy ? 'true' : undefined,
+        },
+      }),
+    );
+    row.appendChild(
+      el('button', {
+        className: 'btn btn--util',
+        text: 'Sign out',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'ms-signout',
+          disabled: cloud.busy ? 'true' : undefined,
+        },
+      }),
+    );
+  }
+  panel.appendChild(row);
+  return panel;
 }
 
 function buildStepPanel(doc: GardenDocument): HTMLElement | null {
