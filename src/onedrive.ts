@@ -118,6 +118,13 @@ async function readGraphError(res: Response): Promise<string> {
 }
 
 function plainGraphStatus(status: number, detail: string): string {
+  if (isSpoLicenseError(detail)) {
+    return (
+      'This Microsoft account’s organisation has no OneDrive/SharePoint licence. ' +
+      'Sign out, then sign in with a personal Microsoft account that has OneDrive ' +
+      '(for example outlook.com / hotmail.com / live.com) — not a work account without M365.'
+    );
+  }
   if (status === 401) {
     return 'Microsoft says the session expired. Sign in again.';
   }
@@ -131,4 +138,11 @@ function plainGraphStatus(status: number, detail: string): string {
     return `OneDrive is temporarily unavailable (${status}). Try again in a moment.`;
   }
   return detail || `OneDrive request failed (${status}).`;
+}
+
+/** Work tenants without SharePoint/OneDrive often return this Graph message. */
+function isSpoLicenseError(detail: string): boolean {
+  return /SPO\s*license|SharePointOnline|does not have a SPO|no SPO license|SPOLicense/i.test(
+    detail,
+  );
 }
