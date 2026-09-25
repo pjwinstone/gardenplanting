@@ -73,7 +73,7 @@ Repo → **Settings** → **Secrets and variables** → **Actions** → add repo
 | `VITE_MSAL_TENANT_ID` | `common` or your tenant GUID |
 | `VITE_MSAL_REDIRECT_URI` | `https://pjwinstone.github.io/gardenplanting/` |
 
-The workflow `.github/workflows/deploy-pages.yml` injects these at build time. Until secrets exist, the site still deploys; the Microsoft panel shows that sign-in is not configured, and local export/import still works.
+The workflow `.github/workflows/deploy-pages.yml` injects these at build time. Stage 1 Entra values are **configured via Actions secrets** (not a committed `.env`); rotate them in repo Settings if the Entra app IDs change.
 
 ---
 
@@ -88,12 +88,11 @@ Vite `base` is `/gardenplanting/` for this project site.
 
 ---
 
-## 5. What you must paste back
+## 5. Entra checklist (user-side)
 
-Only you can create the Entra app. Send (or set as secrets):
+Actions secrets for the hosted app are already set. Still confirm in Entra:
 
-1. **Application (client) ID**
-2. **Tenant** — either `common` or your **Directory (tenant) ID**
-3. Confirm redirect URIs include local + Pages URLs above
+1. SPA redirect URIs include `http://localhost:5173/` and `https://pjwinstone.github.io/gardenplanting/`
+2. Delegated Graph permissions: `User.Read` and `Files.ReadWrite`
 
 No client secret is required for Stage 1.
