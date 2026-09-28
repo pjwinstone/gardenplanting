@@ -111,8 +111,9 @@ export interface UiState {
 
 type Listener = () => void;
 
-/** Drag offset for the point dialogue — survives re-renders without setState thrash. */
-let pointDialogPos = { x: 12, y: 72 };
+/** Drag offset for the point dialogue — survives re-renders without setState thrash.
+ *  Default keeps clear of the bottom-right hamburger. */
+let pointDialogPos = { x: 12, y: 56 };
 
 const SEEN_BUILD_KEY = 'garden-survey-seen-build';
 
@@ -825,7 +826,7 @@ function buildSurveyView(): HTMLElement {
   plan.appendChild(planHost);
   wrap.appendChild(plan);
 
-  // Plan chrome: hamburger only (+ translucent point dialogue when open).
+  // Plan chrome: bottom-right hamburger only (+ translucent point dialogue when open).
   wrap.appendChild(buildHamburgerButton());
 
   if (state.pointDialog) {

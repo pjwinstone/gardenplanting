@@ -54,10 +54,11 @@ body {
   position: relative;
 }
 
-/* Floating hamburger — top-right */
+/* Floating hamburger — bottom-right (thumb zone) */
 .hamburger {
   position: fixed;
-  top: max(0.65rem, env(safe-area-inset-top));
+  top: auto;
+  bottom: max(0.65rem, env(safe-area-inset-bottom));
   right: max(0.65rem, env(safe-area-inset-right));
   z-index: 40;
   width: 2.75rem;
@@ -126,9 +127,10 @@ body {
   text-align: center;
 }
 
-/* Mode chip removed from plan — mode lives in the hamburger accordion. */
-.mode-hint {
-  display: none;
+/* No on-plan mode chip — mode lives in the hamburger accordion. */
+.mode-hint,
+.mode-hint__btn {
+  display: none !important;
 }
 
 /* Drawer accordion — one section open at a time */
