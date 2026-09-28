@@ -591,7 +591,6 @@ body {
   z-index: 25;
   background: rgba(246, 241, 230, 0.96);
   box-shadow: 0 2px 12px rgba(26, 36, 28, 0.15);
-  background: #fffdf8;
   border: 1px solid var(--moss-2);
   padding: 1rem 1.25rem;
   margin-bottom: 1rem;
