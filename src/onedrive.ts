@@ -3,6 +3,7 @@
 import type { GardenDocument } from './model';
 import { ONEDRIVE_FOLDER, ONEDRIVE_PATH } from './cloudConfig';
 import { acquireGraphToken } from './msalAuth';
+import { normalizeDocument } from './model';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 
@@ -102,7 +103,7 @@ export async function loadGardenFromOneDrive(): Promise<CloudLoadResult> {
     if (parsed?.version !== 1 || !Array.isArray(parsed.points)) {
       return { ok: false, error: 'OneDrive file is not a garden.json v1 document.' };
     }
-    return { ok: true, doc: parsed, loadedAt: new Date().toISOString() };
+    return { ok: true, doc: normalizeDocument(parsed), loadedAt: new Date().toISOString() };
   } catch {
     return { ok: false, error: 'Could not read garden.json from OneDrive (invalid JSON).' };
   }

@@ -1,45 +1,42 @@
 # Stage 2 — field checklist (phone)
 
-Live garden loop for accurate measurements. One mode at a time. OneDrive auto-saves when signed in.
+Live garden loop for accurate measurements. **Baseline first** (not a forced house rectangle). One mode at a time. OneDrive auto-saves when signed in.
 
 **App:** https://pjwinstone.github.io/gardenplanting/
 
 ---
 
 ## Before you start
-- [ ] Print tags (rod belts A1 A2 A0 / B1 B2 B0)
+- [ ] Print tags (rod belts + house discs)
 - [ ] Signed in with **personal** Microsoft account (OneDrive)
-- [ ] Tape / laser ready; both 4.000 m rods + toilet-roll belts
+- [ ] Tape / laser ready; toilet-roll / discs for marks; both 4.000 m rods for leapfrog
 
 ---
 
 ## Field loop
 
-1. **House tapes** → *Start house*  
-   Measure **back wall**, **one side**, **diagonal**. Enter metres. Do not move on until the house rectangle **closes**.
+1. **Establish baseline** (default = **one house edge**)  
+   Mark ends, tape/laser the length, enter **offset mm** if the mark is not the true brick corner.
 
-2. **Rod A** → *Rod A ready*  
-   Place rod A where the house can see it. Belts on **both** ends (A1 / A2).
+2. **Take baseline tie**  
+   One frame: **both baseline ends + target house mark**. Tap those points. Do not hide the baseline.
 
-3. **Tie photo** → *Take tie photo*  
-   One frame: **two house corners + both rod ends**. Tap those four marks.
+3. **Measure house edges**  
+   Grow the irregular polygon (~10 corners). Tape reachable edges and/or photo-tie more corners.
 
-4. **Occupy** → *Occupy*  
-   Spike the named point. Bubble the pole. Photograph live rod(s). Name the point.
+4. **Close house** (when enough corners)  
+   Warns if close gap &gt; **50 mm**.
 
-5. **Yaw (optional)** → *Another photo here (yaw)*  
-   **Do not step** — only turn the phone. Extra photos share this occupy.
+5. **Occupy**  
+   Spike, bubble, photograph live control, name the point.
 
-6. **Leapfrog** → *Start leapfrog*  
-   Plant rod B in the new view. Photograph **A and B together** before picking A up.
+6. **Yaw (optional)** — do not step; only turn the phone.
 
-7. **Rods moved** → *Rods moved*  
-   Only after the A+B photo. Old setup closes; rod A is no longer the old coordinates.
+7. **Leapfrog / second baseline**  
+   Far side of the house: plant rod B, photo A+B together, Rods moved, then another baseline if needed.
 
-8. **Adjust** → *Adjust*  
-   Layer A then Layer B. Read residuals in **mm**. Proceed if residuals look good enough; remeasure if the coach says so.
-
-Repeat occupy / leapfrog as needed. **Export** or trust OneDrive when done.
+8. **Adjust**  
+   Residuals in **mm**. Proceed if good enough; remeasure if the coach says so.
 
 ---
 
@@ -48,6 +45,8 @@ Repeat occupy / leapfrog as needed. **Export** or trust OneDrive when done.
 |----------|---------|
 | under ~15 mm | Good enough to proceed |
 | ~15–50 mm | Usable — watch the next occupy |
-| over ~50 mm | Remeasure before trusting the plan |
+| over ~50 mm | Remeasure (house close gap warns above 50 mm) |
 
 Illegal buttons stay visible and answer with a sentence — never a silent void.
+
+See also: [plan-baseline-then-house.md](plan-baseline-then-house.md).

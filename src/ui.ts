@@ -2,13 +2,14 @@
 
 import type { GardenDocument } from './model';
 import {
-  applyHouseBaseline,
-  applyCannedTiePhoto,
   confirmAbTogether,
-  houseRectangleClosed,
-  tiePhotoReady,
+  baselineReady,
+  baselineTieReady,
+  houseCornerCount,
+  housePolygon,
+  currentBaseline,
   currentSetup,
-  rodAPlaced,
+  applyCannedBaselineTie,
 } from './model';
 import { buildCoach, speakCoachLine } from './coach';
 import { renderPlanSvg } from './planSvg';
@@ -43,6 +44,9 @@ import {
   startStage2FieldWorkflow,
   loadSyntheticWorkflow,
   runMilestoneDemoWorkflow,
+  saveBaselineLengthWorkflow,
+  addHouseCornerWorkflow,
+  closeHouseWorkflow,
 } from './workflows';
 
 export type View = 'survey' | 'tags';
@@ -241,34 +245,65 @@ function onShellClick(e: Event): void {
     triggerPrint();
     return;
   }
-  if (cmd === 'save-house') {
+  if (cmd === 'save-baseline') {
     const panel = target.closest('.step-panel');
-    const back = Number((panel?.querySelector('[data-field=back]') as HTMLInputElement | null)?.value);
-    const side = Number((panel?.querySelector('[data-field=side]') as HTMLInputElement | null)?.value);
-    const diag = Number((panel?.querySelector('[data-field=diag]') as HTMLInputElement | null)?.value);
-    if (![back, side, diag].every((n) => Number.isFinite(n) && n > 0)) {
-      setState({ refuseMessage: 'House lengths must be positive numbers in metres.' });
+    const length = Number(
+      (panel?.querySelector('[data-field=length]') as HTMLInputElement | null)?.value,
+    );
+    const offsetA = Number(
+      (panel?.querySelector('[data-field=offset-a]') as HTMLInputElement | null)?.value || 0,
+    );
+    const offsetB = Number(
+      (panel?.querySelector('[data-field=offset-b]') as HTMLInputElement | null)?.value || 0,
+    );
+    const result = saveBaselineLengthWorkflow(state.doc, length, offsetA, offsetB, true);
+    if (!result.ok) {
+      setState({ refuseMessage: result.reason ?? 'Could not save baseline.' });
       return;
     }
-    const next = applyHouseBaseline(state.doc, back, side, diag);
-    setDoc(next, null);
+    setDoc(result.doc, null);
     speakCoachLine(
-      'House tapes saved. We will not move on until the house rectangle closes.',
-      next.session.speakSteps,
+      'Baseline saved. Take a photo with both ends and the next house mark in frame.',
+      result.doc.session.speakSteps,
     );
     return;
   }
+  if (cmd === 'add-house-corner') {
+    const panel = target.closest('.step-panel');
+    const edgeRaw = (panel?.querySelector('[data-field=edge]') as HTMLInputElement | null)?.value;
+    const edge = edgeRaw === '' || edgeRaw == null ? undefined : Number(edgeRaw);
+    const offset = Number(
+      (panel?.querySelector('[data-field=offset]') as HTMLInputElement | null)?.value || 0,
+    );
+    if (edge != null && !(edge > 0)) {
+      setState({ refuseMessage: 'Edge length must be empty or a positive number in metres.' });
+      return;
+    }
+    const next = addHouseCornerWorkflow(state.doc, edge, offset);
+    setDoc(next, null);
+    speakCoachLine(next.session.lastAction ?? 'Corner added.', next.session.speakSteps);
+    return;
+  }
+  if (cmd === 'close-house') {
+    const result = closeHouseWorkflow(state.doc);
+    setDoc(result.doc, result.warn ? result.note : null);
+    if (!result.warn) setState({ refuseMessage: null });
+    speakCoachLine(result.note, result.doc.session.speakSteps);
+    return;
+  }
   if (cmd === 'record-tie') {
-    if (!rodAPlaced(state.doc) || !houseRectangleClosed(state.doc)) {
+    if (!baselineReady(state.doc)) {
       setState({
-        refuseMessage:
-          'Cannot record a tie yet — house must close and rod A must be declared first.',
+        refuseMessage: 'Cannot record a baseline tie — establish the baseline length first.',
       });
       return;
     }
-    const next = applyCannedTiePhoto(state.doc);
+    const next = applyCannedBaselineTie(state.doc);
     setDoc(next, null);
-    speakCoachLine('I see rod A ends and house corners. Good tie.', next.session.speakSteps);
+    speakCoachLine(
+      'I see both baseline ends and a target mark. Good tie.',
+      next.session.speakSteps,
+    );
     return;
   }
   if (cmd === 'confirm-ab') {
@@ -478,7 +513,7 @@ function buildTaskStrip(
     actionsRow.appendChild(
       el('button', {
         className: 'btn btn--stage2 task-strip__primary',
-        text: 'Start Stage 2 field loop',
+        text: 'Establish baseline',
         attrs: { type: 'button', 'data-cmd': 'start-stage2' },
       }),
     );
@@ -800,10 +835,10 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
 
   if (mode === 'START') {
     const panel = el('section', { className: 'step-panel step-panel--stage2' });
-    panel.appendChild(el('h2', { text: 'Stage 2 — live garden' }));
+    panel.appendChild(el('h2', { text: 'Stage 2 — baseline then house' }));
     panel.appendChild(
       el('p', {
-        text: 'Walk the real plot: house tapes → rod A → tie photo → occupy → (yaw) → leapfrog → rods moved → adjust. OneDrive auto-saves when signed in.',
+        text: 'Live plot: house-edge baseline → photo tie → grow ~10 corners → occupy → leapfrog / second baseline → adjust. OneDrive auto-saves when signed in.',
       }),
     );
     panel.appendChild(
@@ -823,7 +858,7 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
     panel.appendChild(el('h2', { className: 'step-panel__sub', text: 'Milestone (dry run)' }));
     panel.appendChild(
       el('p', {
-        text: 'Synthetic house + rod A + occupies → Adjust draws the SVG plan. Use this indoors; Stage 2 is for the garden.',
+        text: 'Synthetic house-edge baseline + irregular shed + rod A → Adjust. Use indoors; Stage 2 is for the garden.',
       }),
     );
     panel.appendChild(
@@ -836,62 +871,86 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
     return panel;
   }
 
-  if (mode === 'HOUSE_BASELINE') {
+  if (mode === 'BASELINE' || mode === 'HOUSE_BASELINE') {
     const panel = el('section', { className: 'step-panel' });
-    panel.appendChild(el('h2', { text: 'Enter house tapes' }));
+    panel.appendChild(el('h2', { text: 'Establish baseline (house edge)' }));
     panel.appendChild(
       el('p', {
-        text: houseRectangleClosed(doc)
-          ? 'House rectangle closes. Rod A ready is now legal.'
-          : 'Enter back wall, one side, and the diagonal (metres). Straights are declared with the back and side.',
+        text: baselineReady(doc)
+          ? `Baseline set (${currentBaseline(doc)?.a}–${currentBaseline(doc)?.b}). Take baseline tie next.`
+          : 'Default: one house edge. Enter length in metres and optional mark offsets (mm) if the roll is not the true corner.',
       }),
     );
     const form = el('div', { className: 'step-form' });
-    form.appendChild(numField('Back wall (m)', 'back', '8'));
-    form.appendChild(numField('Side (m)', 'side', '6'));
-    form.appendChild(numField('Diagonal (m)', 'diag', '10'));
+    form.appendChild(numField('Length (m)', 'length', '7'));
+    form.appendChild(numField('Offset A (mm)', 'offset-a', '0'));
+    form.appendChild(numField('Offset B (mm)', 'offset-b', '0'));
     panel.appendChild(form);
     panel.appendChild(
       el('button', {
-        className: 'btn btn--util',
-        text: 'Save house lengths',
-        attrs: { type: 'button', 'data-cmd': 'save-house' },
+        className: 'btn btn--util btn--stage2',
+        text: 'Save baseline',
+        attrs: { type: 'button', 'data-cmd': 'save-baseline' },
       }),
     );
     return panel;
   }
 
-  if (mode === 'PLACE_ROD_A') {
+  if (mode === 'PHOTO_TIE_BASELINE' || mode === 'PHOTO_TIE_HOUSE_ROD') {
     const panel = el('section', { className: 'step-panel' });
-    panel.appendChild(el('h2', { text: 'Rod A' }));
+    panel.appendChild(el('h2', { text: 'Baseline photo tie' }));
     panel.appendChild(
       el('p', {
-        text: rodAPlaced(doc)
-          ? 'Rod A is declared at 4.000 m. Belts on both ends — take the tie photo.'
-          : 'Plant the physical rod where the house can see it, belts on both ends, then press Rod A ready (or it was declared when you pressed that button).',
+        text: baselineTieReady(doc)
+          ? 'Both baseline ends + target mark present. Occupy or measure more house edges.'
+          : 'v1: one frame with both baseline ends and the house mark. Indoors, use demo clicks.',
       }),
     );
-    return panel;
-  }
-
-  if (mode === 'PHOTO_TIE_HOUSE_ROD') {
-    const panel = el('section', { className: 'step-panel' });
-    panel.appendChild(el('h2', { text: 'Tie photo marks' }));
-    panel.appendChild(
-      el('p', {
-        text: tiePhotoReady(doc)
-          ? 'Four marks present. Occupy is legal — geometry is good enough to proceed.'
-          : 'In the garden: photograph two house corners and both rod ends, then record the four taps. Indoors, use demo clicks.',
-      }),
-    );
-    if (!tiePhotoReady(doc)) {
+    if (!baselineTieReady(doc)) {
       panel.appendChild(
         el('button', {
           className: 'btn btn--util',
-          text: 'Record four marks (demo clicks)',
+          text: 'Record baseline tie (demo clicks)',
           attrs: { type: 'button', 'data-cmd': 'record-tie' },
         }),
       );
+    }
+    return panel;
+  }
+
+  if (mode === 'HOUSE_EDGES' || mode === 'PLACE_ROD_A') {
+    const panel = el('section', { className: 'step-panel' });
+    const n = houseCornerCount(doc);
+    const closed = housePolygon(doc)?.closed;
+    panel.appendChild(el('h2', { text: 'Grow house corners' }));
+    panel.appendChild(
+      el('p', {
+        text: closed
+          ? `House closed with ${n} corners.`
+          : `${n} corner(s) so far (~10 typical). Add the next edge length if you taped it, plus offset mm.`,
+      }),
+    );
+    if (!closed) {
+      const form = el('div', { className: 'step-form' });
+      form.appendChild(numField('Next edge (m, optional)', 'edge', ''));
+      form.appendChild(numField('Offset (mm)', 'offset', '0'));
+      panel.appendChild(form);
+      panel.appendChild(
+        el('button', {
+          className: 'btn btn--util',
+          text: 'Add house corner',
+          attrs: { type: 'button', 'data-cmd': 'add-house-corner' },
+        }),
+      );
+      if (n >= 3) {
+        panel.appendChild(
+          el('button', {
+            className: 'btn btn--util btn--stage2',
+            text: 'Close house',
+            attrs: { type: 'button', 'data-cmd': 'close-house' },
+          }),
+        );
+      }
     }
     return panel;
   }
@@ -947,17 +1006,19 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
 function numField(label: string, field: string, value: string): HTMLElement {
   const wrap = el('label', { className: 'field' });
   wrap.appendChild(el('span', { text: label }));
-  wrap.appendChild(
-    el('input', {
-      attrs: {
-        type: 'number',
-        step: '0.001',
-        min: '0',
-        value,
-        'data-field': field,
-      },
-    }),
-  );
+  const attrs: Record<string, string | undefined> = {
+    type: 'number',
+    step: '0.001',
+    'data-field': field,
+  };
+  if (value !== '') {
+    attrs.min = '0';
+    attrs.value = value;
+  } else {
+    attrs.min = '0';
+    attrs.placeholder = 'optional';
+  }
+  wrap.appendChild(el('input', { attrs }));
   return wrap;
 }
 
@@ -986,7 +1047,20 @@ function buildTagsView(): HTMLElement {
 }
 
 function onModeAction(action: ModeAction): void {
-  let doc = state.doc;
+  const doc = state.doc;
+
+  if (action === 'close_house') {
+    const probe = canTransition(doc, action);
+    if (!probe.ok) {
+      setState({ refuseMessage: probe.reason ?? 'Illegal transition.' });
+      speakCoachLine(probe.reason ?? '', doc.session.speakSteps);
+      return;
+    }
+    const result = closeHouseWorkflow(doc);
+    setDoc(result.doc, result.warn ? result.note : null);
+    speakCoachLine(result.note, result.doc.session.speakSteps);
+    return;
+  }
 
   const probe = canTransition(doc, action);
   if (!probe.ok) {

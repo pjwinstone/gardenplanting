@@ -1,18 +1,21 @@
 import type { GardenDocument, SessionMode } from './model';
 import {
   hasLiveControl,
-  houseRectangleClosed,
-  rodAPlaced,
-  tiePhotoReady,
+  baselineReady,
+  baselineTieReady,
   currentSetup,
   declareRodA,
+  houseCornerCount,
+  housePolygon,
 } from './model';
 
 /** Mode-changing actions (buttons). */
 export type ModeAction =
-  | 'start_house'
-  | 'rod_a_ready'
-  | 'take_tie_photo'
+  | 'establish_baseline'
+  | 'take_baseline_tie'
+  | 'measure_house_edges'
+  | 'close_house'
+  | 'place_helper_rod'
   | 'occupy'
   | 'another_photo_yaw'
   | 'start_leapfrog'
@@ -28,9 +31,11 @@ export interface TransitionResult {
 }
 
 const ACTION_LABELS: Record<ModeAction, string> = {
-  start_house: 'Start house',
-  rod_a_ready: 'Rod A ready',
-  take_tie_photo: 'Take tie photo',
+  establish_baseline: 'Establish baseline',
+  take_baseline_tie: 'Take baseline tie',
+  measure_house_edges: 'Measure house edges',
+  close_house: 'Close house',
+  place_helper_rod: 'Place helper rod A',
   occupy: 'Occupy',
   another_photo_yaw: 'Another photo here (yaw)',
   start_leapfrog: 'Start leapfrog',
@@ -45,9 +50,11 @@ export function actionLabel(action: ModeAction): string {
 }
 
 export const ALL_ACTIONS: ModeAction[] = [
-  'start_house',
-  'rod_a_ready',
-  'take_tie_photo',
+  'establish_baseline',
+  'take_baseline_tie',
+  'measure_house_edges',
+  'close_house',
+  'place_helper_rod',
   'occupy',
   'another_photo_yaw',
   'start_leapfrog',
@@ -65,128 +72,168 @@ export function canTransition(
   doc: GardenDocument,
   action: ModeAction,
 ): TransitionResult {
-  const mode = doc.session.mode;
+  const mode = normalizeMode(doc.session.mode);
 
   switch (action) {
-    case 'start_house': {
-      if (mode === 'START' || mode === 'REVIEW') {
-        return { ok: true, nextMode: 'HOUSE_BASELINE' };
+    case 'establish_baseline': {
+      if (mode === 'START' || mode === 'REVIEW' || mode === 'HOUSE_EDGES' || mode === 'RODS_MOVED') {
+        return { ok: true, nextMode: 'BASELINE' };
+      }
+      if (mode === 'BASELINE') {
+        return {
+          ok: false,
+          reason:
+            'Already establishing a baseline. Enter length and offsets below, then Take baseline tie.',
+        };
       }
       return {
         ok: false,
-        reason: `Cannot start house from ${mode}. Finish this step, run Done with this setup, or start a New garden first.`,
+        reason: `Cannot establish baseline from ${mode}. Finish this step or return via Done with this setup / New garden.`,
       };
     }
 
-    case 'rod_a_ready': {
-      if (mode === 'HOUSE_BASELINE') {
-        if (!houseRectangleClosed(doc)) {
+    case 'take_baseline_tie': {
+      if (mode === 'BASELINE' || mode === 'HOUSE_EDGES') {
+        if (!baselineReady(doc)) {
           return {
             ok: false,
             reason:
-              'House rectangle does not close yet. Measure the back wall, one side, and the diagonal before placing rod A.',
+              'No baseline length yet. Mark both ends and enter the taped/laser length first.',
           };
         }
-        return { ok: true, nextMode: 'PLACE_ROD_A' };
+        return { ok: true, nextMode: 'PHOTO_TIE_BASELINE' };
       }
-      if (mode === 'RODS_MOVED') {
-        return { ok: true, nextMode: 'PLACE_ROD_A' };
-      }
-      if (mode === 'PLACE_ROD_A') {
+      if (mode === 'PHOTO_TIE_BASELINE') {
         return {
           ok: false,
-          reason: 'Already placing rod A. Put the belts on, then take the tie photo.',
-        };
-      }
-      if (mode === 'START') {
-        return {
-          ok: false,
-          reason: 'Rod A ready refused: start the house baseline first (Start Stage 2 field loop or Start house).',
+          reason:
+            'Already in baseline-tie mode. Stand where the frame holds both baseline ends AND the target mark, then tap them.',
         };
       }
       return {
         ok: false,
-        reason: `Rod A ready is not legal in ${mode}. Complete the house baseline first.`,
+        reason: `Take baseline tie is not legal in ${mode}. Establish a baseline first.`,
       };
     }
-    case 'take_tie_photo': {
-      if (mode === 'PLACE_ROD_A') {
-        if (!rodAPlaced(doc) && doc.points.every((p) => p.id !== 'A1')) {
+
+    case 'measure_house_edges': {
+      if (
+        mode === 'PHOTO_TIE_BASELINE' ||
+        mode === 'BASELINE' ||
+        mode === 'HOUSE_EDGES' ||
+        mode === 'OCCUPY' ||
+        mode === 'ADJUST' ||
+        mode === 'REVIEW'
+      ) {
+        if (!baselineReady(doc)) {
           return {
             ok: false,
-            reason: 'Rod A is not declared yet. Put rod A where the house can see it.',
+            reason: 'Measure house edges needs a baseline first (default: one house edge).',
           };
         }
-        return { ok: true, nextMode: 'PHOTO_TIE_HOUSE_ROD' };
-      }
-      if (mode === 'PHOTO_TIE_HOUSE_ROD') {
-        return {
-          ok: false,
-          reason: 'Already in tie-photo mode. Tap two house corners and both ends of rod A.',
-        };
+        return { ok: true, nextMode: 'HOUSE_EDGES' };
       }
       return {
         ok: false,
-        reason: `Take tie photo is not legal in ${mode}. Place rod A first (belts on both ends).`,
+        reason: `Measure house edges is not legal in ${mode}.`,
+      };
+    }
+
+    case 'close_house': {
+      if (
+        mode === 'HOUSE_EDGES' ||
+        mode === 'PHOTO_TIE_BASELINE' ||
+        mode === 'ADJUST' ||
+        mode === 'OCCUPY'
+      ) {
+        if (houseCornerCount(doc) < 3) {
+          return {
+            ok: false,
+            reason: 'Close house refused: need at least three corners on the house polygon.',
+          };
+        }
+        return { ok: true, nextMode: mode === 'ADJUST' ? 'ADJUST' : 'HOUSE_EDGES' };
+      }
+      return {
+        ok: false,
+        reason: `Close house is not legal in ${mode}. Grow corners first.`,
+      };
+    }
+
+    case 'place_helper_rod': {
+      if (
+        mode === 'BASELINE' ||
+        mode === 'PHOTO_TIE_BASELINE' ||
+        mode === 'HOUSE_EDGES' ||
+        mode === 'RODS_MOVED' ||
+        mode === 'OCCUPY'
+      ) {
+        if (!baselineReady(doc) && mode !== 'RODS_MOVED') {
+          return {
+            ok: false,
+            reason:
+              'Place helper rod after the baseline exists (or after Rods moved in a new setup).',
+          };
+        }
+        return { ok: true, nextMode: mode === 'RODS_MOVED' ? 'OCCUPY' : mode };
+      }
+      return {
+        ok: false,
+        reason: `Place helper rod is not legal in ${mode}.`,
       };
     }
 
     case 'occupy': {
-      if (mode === 'PHOTO_TIE_HOUSE_ROD') {
-        if (!tiePhotoReady(doc)) {
+      if (mode === 'PHOTO_TIE_BASELINE') {
+        if (!baselineTieReady(doc)) {
           return {
             ok: false,
             reason:
-              'Tie photo incomplete. Stand where the frame contains two house corners AND both ends of rod A, then tap those four marks.',
+              'Baseline tie incomplete. v1 needs both baseline ends AND the target mark in one frame.',
           };
         }
         if (!hasLiveControl(doc)) {
           return {
             ok: false,
-            reason: 'No live control exists. You cannot occupy until a live rod is in the setup.',
+            reason: 'No live control exists. Keep the baseline or place a helper rod.',
           };
         }
         return { ok: true, nextMode: 'OCCUPY' };
       }
       if (
+        mode === 'HOUSE_EDGES' ||
         mode === 'OCCUPY_EXTRA_YAW' ||
         mode === 'FENCE_TAG' ||
         mode === 'LEAPFROG' ||
         mode === 'ADJUST' ||
-        mode === 'REVIEW'
+        mode === 'REVIEW' ||
+        mode === 'OCCUPY' ||
+        mode === 'RODS_MOVED'
       ) {
-        if (!hasLiveControl(doc)) {
-          return {
-            ok: false,
-            reason: 'No live control exists. You cannot occupy without a live rod.',
-          };
-        }
-        return { ok: true, nextMode: 'OCCUPY' };
-      }
-      if (mode === 'OCCUPY' || mode === 'RODS_MOVED') {
         if (!hasLiveControl(doc)) {
           return {
             ok: false,
             reason:
               mode === 'RODS_MOVED'
-                ? 'New setup has no live rod yet. Place rod A (or B) before occupying.'
-                : 'No live control exists. You cannot occupy until a live rod is in the setup.',
+                ? 'New setup has no live control yet. Place helper rod A or establish a baseline before occupying.'
+                : 'No live control exists. You cannot occupy without a baseline or live rod.',
           };
         }
         return { ok: true, nextMode: 'OCCUPY' };
       }
-      if (mode === 'HOUSE_BASELINE' || mode === 'PLACE_ROD_A' || mode === 'START') {
+      if (mode === 'START' || mode === 'BASELINE') {
         return {
           ok: false,
           reason:
-            'Cannot occupy yet — finish the house–rod tie first (house tapes → rod A → tie photo), then Occupy.',
+            'Cannot occupy yet — establish the baseline and take a baseline tie (or place a helper rod) first.',
         };
       }
       return {
         ok: false,
-        reason: `Cannot occupy from ${mode}. Get a house–rod tie first, or restore a live control.`,
+        reason: `Cannot occupy from ${mode}. Get a baseline tie or live rod first.`,
       };
     }
+
     case 'another_photo_yaw': {
       if (mode === 'OCCUPY' || mode === 'OCCUPY_EXTRA_YAW') {
         if (!doc.session.currentOccupyId) {
@@ -206,18 +253,20 @@ export function canTransition(
     }
 
     case 'start_leapfrog': {
-      if (mode === 'OCCUPY' || mode === 'OCCUPY_EXTRA_YAW' || mode === 'REVIEW') {
+      if (
+        mode === 'OCCUPY' ||
+        mode === 'OCCUPY_EXTRA_YAW' ||
+        mode === 'HOUSE_EDGES' ||
+        mode === 'REVIEW'
+      ) {
         if (!hasLiveControl(doc)) {
-          return {
-            ok: false,
-            reason: 'No live rod to leapfrog from.',
-          };
+          return { ok: false, reason: 'No live rod/baseline to leapfrog from.' };
         }
         return { ok: true, nextMode: 'LEAPFROG' };
       }
       return {
         ok: false,
-        reason: `Start leapfrog is not legal in ${mode}. Occupy first, then plant rod B in the new view.`,
+        reason: `Start leapfrog is not legal in ${mode}. Occupy or finish a house edge, then plant rod B for the far side.`,
       };
     }
 
@@ -236,7 +285,8 @@ export function canTransition(
       if (mode === 'RODS_MOVED') {
         return {
           ok: false,
-          reason: 'Already confirmed rods moved. Place the new live rod or occupy.',
+          reason:
+            'Already confirmed rods moved. Place the new live rod, a second baseline, or occupy.',
         };
       }
       return {
@@ -251,14 +301,14 @@ export function canTransition(
         if (!hasLiveControl(doc)) {
           return {
             ok: false,
-            reason: 'Fence mark needs a live rod in the photo. No live control exists.',
+            reason: 'Fence mark needs live control in the photo. No baseline or rod is live.',
           };
         }
         return { ok: true, nextMode: 'FENCE_TAG' };
       }
       return {
         ok: false,
-        reason: `Fence mark is not legal in ${mode}. Occupy with a live rod, then stick a roll on the post.`,
+        reason: `Fence mark is not legal in ${mode}. Occupy with live control, then stick a roll on the post.`,
       };
     }
 
@@ -266,25 +316,28 @@ export function canTransition(
       if (
         mode === 'OCCUPY' ||
         mode === 'OCCUPY_EXTRA_YAW' ||
+        mode === 'HOUSE_EDGES' ||
+        mode === 'PHOTO_TIE_BASELINE' ||
         mode === 'REVIEW' ||
         mode === 'ADJUST' ||
         mode === 'FENCE_TAG'
       ) {
-        if (!houseRectangleClosed(doc)) {
+        if (!baselineReady(doc)) {
           return {
             ok: false,
-            reason: 'Cannot adjust yet — house baseline does not close.',
+            reason: 'Cannot adjust yet — establish a baseline first.',
           };
         }
         return { ok: true, nextMode: 'ADJUST' };
       }
       return {
         ok: false,
-        reason: `Adjust is not legal in ${mode}. Finish the house–rod tie and at least one occupy (or Load synthetic demo), then Adjust.`,
+        reason: `Adjust is not legal in ${mode}. Establish a baseline (and preferably a tie or occupy) first.`,
       };
     }
+
     case 'done_with_setup': {
-      if (mode === 'ADJUST' || mode === 'OCCUPY' || mode === 'REVIEW') {
+      if (mode === 'ADJUST' || mode === 'OCCUPY' || mode === 'REVIEW' || mode === 'HOUSE_EDGES') {
         return { ok: true, nextMode: 'REVIEW' };
       }
       return {
@@ -300,6 +353,13 @@ export function canTransition(
   }
 }
 
+function normalizeMode(mode: SessionMode): SessionMode {
+  if (mode === 'HOUSE_BASELINE') return 'BASELINE';
+  if (mode === 'PLACE_ROD_A') return 'HOUSE_EDGES';
+  if (mode === 'PHOTO_TIE_HOUSE_ROD') return 'PHOTO_TIE_BASELINE';
+  return mode;
+}
+
 export function applyTransition(
   doc: GardenDocument,
   action: ModeAction,
@@ -309,7 +369,21 @@ export function applyTransition(
     return { doc, result };
   }
 
-  const next: GardenDocument = {
+  if (action === 'close_house') {
+    return {
+      doc: {
+        ...doc,
+        session: {
+          ...doc.session,
+          mode: result.nextMode,
+          lastAction: ACTION_LABELS[action],
+        },
+      },
+      result,
+    };
+  }
+
+  let next: GardenDocument = {
     ...doc,
     session: {
       ...doc.session,
@@ -319,7 +393,7 @@ export function applyTransition(
     setups: doc.setups.map((s) => ({ ...s })),
   };
 
-  if (action === 'start_house' && next.setups.length === 0) {
+  if (action === 'establish_baseline' && next.setups.length === 0) {
     const id = `setup-${Date.now()}`;
     next.setups.push({
       id,
@@ -330,16 +404,16 @@ export function applyTransition(
     next.session.currentSetupId = id;
   }
 
-  if (action === 'rod_a_ready') {
-    const setup = next.setups.find((s) => s.id === next.session.currentSetupId) ?? next.setups[0];
-    if (setup && !setup.liveRodIds.includes('A')) {
-      setup.liveRodIds = [...setup.liveRodIds.filter((r) => r !== 'A'), 'A'];
-    }
-    // Declaring rod A (4.000 m) is part of “Rod A ready” — avoids PLACE_ROD_A with no A1/A2.
-    const withRod = declareRodA(next);
-    next.points = withRod.points;
-    next.lines = withRod.lines;
-    next.session.lastAction = withRod.session.lastAction;
+  if (action === 'place_helper_rod') {
+    next = declareRodA(next);
+    next = {
+      ...next,
+      session: {
+        ...next.session,
+        mode: result.nextMode,
+        lastAction: next.session.lastAction,
+      },
+    };
   }
 
   if (action === 'rods_moved') {
@@ -358,37 +432,38 @@ export function applyTransition(
     });
     next.session.currentSetupId = id;
     next.session.lastAction =
-      'Rods moved — old setup closed. Rod A is no longer the old coordinates.';
+      'Rods moved — old setup closed. Rod A is no longer the old coordinates. Add a second baseline if needed for the far side.';
   }
 
   return { doc: next, result };
 }
 
-/** Which actions are currently legal (for enabling buttons). */
 export function legalActions(doc: GardenDocument): ModeAction[] {
   return ALL_ACTIONS.filter((a) => canTransition(doc, a).ok);
 }
 
-/** Preferred next action to highlight in the coach. */
 export function suggestedAction(doc: GardenDocument): ModeAction | null {
-  const mode = doc.session.mode;
+  const mode = normalizeMode(doc.session.mode);
   const order: Partial<Record<SessionMode, ModeAction[]>> = {
-    START: ['start_house'],
-    HOUSE_BASELINE: ['rod_a_ready'],
-    PLACE_ROD_A: ['take_tie_photo'],
-    PHOTO_TIE_HOUSE_ROD: ['occupy'],
-    // Prefer Adjust when the milestone demo (or any occupy with geometry) can run the plan.
-    OCCUPY: ['adjust', 'another_photo_yaw', 'start_leapfrog', 'fence_mark'],
+    START: ['establish_baseline'],
+    BASELINE: ['take_baseline_tie', 'place_helper_rod'],
+    PHOTO_TIE_BASELINE: ['measure_house_edges', 'occupy', 'adjust'],
+    HOUSE_EDGES: ['close_house', 'take_baseline_tie', 'occupy', 'start_leapfrog', 'adjust'],
+    OCCUPY: ['adjust', 'another_photo_yaw', 'start_leapfrog', 'measure_house_edges', 'fence_mark'],
     OCCUPY_EXTRA_YAW: ['occupy', 'adjust'],
     LEAPFROG: ['rods_moved', 'occupy'],
-    RODS_MOVED: ['rod_a_ready', 'occupy'],
+    RODS_MOVED: ['establish_baseline', 'place_helper_rod', 'occupy'],
     FENCE_TAG: ['occupy', 'adjust'],
-    ADJUST: ['done_with_setup', 'occupy'],
-    REVIEW: ['adjust', 'occupy', 'start_house'],
+    ADJUST: ['done_with_setup', 'measure_house_edges', 'occupy'],
+    REVIEW: ['adjust', 'occupy', 'establish_baseline'],
   };
   const candidates = order[mode] ?? [];
   for (const a of candidates) {
-    if (canTransition(doc, a).ok) return a;
+    if (canTransition(doc, a).ok) {
+      if (a === 'close_house' && housePolygon(doc)?.closed) continue;
+      if (a === 'take_baseline_tie' && mode === 'BASELINE' && !baselineReady(doc)) continue;
+      return a;
+    }
   }
   const legal = legalActions(doc);
   return legal[0] ?? null;

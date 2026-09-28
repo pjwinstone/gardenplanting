@@ -1,19 +1,23 @@
-/** Garden Survey document model — points, lines, polygons, observations, photos, setups. */
+/** Garden Survey document model — points, baselines, polygons, observations, photos, setups. */
 
 export type SessionMode =
   | 'START'
-  | 'HOUSE_BASELINE'
-  | 'PLACE_ROD_A'
-  | 'PHOTO_TIE_HOUSE_ROD'
+  | 'BASELINE'
+  | 'PHOTO_TIE_BASELINE'
+  | 'HOUSE_EDGES'
   | 'OCCUPY'
   | 'OCCUPY_EXTRA_YAW'
   | 'LEAPFROG'
   | 'RODS_MOVED'
   | 'FENCE_TAG'
   | 'ADJUST'
-  | 'REVIEW';
+  | 'REVIEW'
+  /** @deprecated legacy — normalised to BASELINE on load helpers */
+  | 'HOUSE_BASELINE'
+  | 'PLACE_ROD_A'
+  | 'PHOTO_TIE_HOUSE_ROD';
 
-export type PointKind = 'HSE' | 'FNC' | 'POL' | 'ROD' | 'OCC' | 'TRK' | 'BED';
+export type PointKind = 'HSE' | 'FNC' | 'POL' | 'ROD' | 'OCC' | 'TRK' | 'BED' | 'BL';
 
 export interface Point {
   id: string;
@@ -22,9 +26,14 @@ export interface Point {
   y?: number;
   label?: string;
   fixed?: boolean;
+  /**
+   * Mark offset toward the true feature (mm). E.g. post/roll radius so the solved
+   * point is the brick arris, not the roll centre.
+   */
+  offsetMm?: number;
 }
 
-export type LineKind = 'tape' | 'laser' | 'rod' | 'straight';
+export type LineKind = 'tape' | 'laser' | 'rod' | 'straight' | 'baseline';
 
 export interface Line {
   id: string;
@@ -35,10 +44,26 @@ export interface Line {
   kind: LineKind;
 }
 
+/** Known-length control between two marks. Default field use: one house edge. */
+export interface Baseline {
+  id: string;
+  a: string;
+  b: string;
+  lengthM: number;
+  sigmaM?: number;
+  kind: 'tape' | 'laser';
+  /** True when B1–B2 is also a house polygon edge. */
+  isHouseEdge?: boolean;
+  label?: string;
+}
+
 export interface Polygon {
   id: string;
   pointIds: string[];
   label?: string;
+  layerId?: string;
+  /** User closed the ring (Close house). */
+  closed?: boolean;
 }
 
 export type ObservationKind = 'distance' | 'angle' | 'residual';
@@ -93,6 +118,7 @@ export interface SessionState {
   geometryOk?: boolean;
   currentOccupyId?: string;
   currentSetupId?: string;
+  currentBaselineId?: string;
 }
 
 export interface GardenDocument {
@@ -102,6 +128,7 @@ export interface GardenDocument {
   points: Point[];
   lines: Line[];
   polygons: Polygon[];
+  baselines: Baseline[];
   observations: Observation[];
   photos: Photo[];
   setups: Setup[];
@@ -119,6 +146,9 @@ export const SIGMA = {
 export const ROD_LENGTH_M = 4.0;
 export const ROD_MID_M = 2.0;
 
+/** Warn when closing the house if first–last vertex gap exceeds this (mm). */
+export const HOUSE_CLOSE_WARN_MM = 50;
+
 export function emptyDocument(name = 'Untitled garden'): GardenDocument {
   const now = new Date().toISOString();
   return {
@@ -128,6 +158,7 @@ export function emptyDocument(name = 'Untitled garden'): GardenDocument {
     points: [],
     lines: [],
     polygons: [],
+    baselines: [],
     observations: [],
     photos: [],
     setups: [],
@@ -139,58 +170,93 @@ export function emptyDocument(name = 'Untitled garden'): GardenDocument {
   };
 }
 
-/** Tiny placeholder PNG (1×1) as data URL for synthetic thumbnails. */
+/** Ensure older garden.json without baselines/new modes still loads. */
+export function normalizeDocument(raw: GardenDocument): GardenDocument {
+  const doc: GardenDocument = {
+    ...emptyDocument(raw.name),
+    ...raw,
+    baselines: raw.baselines ?? [],
+    polygons: raw.polygons ?? [],
+    points: raw.points ?? [],
+    lines: raw.lines ?? [],
+    observations: raw.observations ?? [],
+    photos: raw.photos ?? [],
+    setups: raw.setups ?? [],
+    session: { ...emptyDocument().session, ...raw.session },
+  };
+  const legacy = doc.session.mode as string;
+  if (legacy === 'HOUSE_BASELINE') doc.session.mode = 'BASELINE';
+  if (legacy === 'PLACE_ROD_A') doc.session.mode = 'HOUSE_EDGES';
+  if (legacy === 'PHOTO_TIE_HOUSE_ROD') doc.session.mode = 'PHOTO_TIE_BASELINE';
+  return doc;
+}
+
 export function placeholderThumb(colour = '#6b8f71'): string {
-  // Minimal SVG data URL used as a stand-in thumbnail.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="48"><rect width="64" height="48" fill="${colour}"/></svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
 /**
- * Synthetic house + rod A + two occupy photos with canned clicks.
- * House: 8×6 m rectangle. Rod A: 4.000 m, 6 m out from back wall.
- * Truth coordinates are planted so Layer A/B can recover a plan.
+ * Synthetic demo: house-edge baseline + irregular 6-corner shed + rod A + occupies.
+ * Not a forced rectangle — polygon vertices planted with truth coords.
  */
 export function syntheticDocument(): GardenDocument {
   const now = new Date().toISOString();
   const setupId = 'setup-1';
-  const doc = emptyDocument('Synthetic demo garden');
+  const doc = emptyDocument('Synthetic shed demo');
   doc.createdAt = now;
 
-  // House corners: HSE01 SW, HSE02 SE, HSE03 NE, HSE04 NW (metres).
+  // Irregular shed (metres). Baseline = HSE01–HSE02 (south edge, 7 m).
   doc.points = [
-    { id: 'HSE01', kind: 'HSE', x: 0, y: 0, label: 'House SW', fixed: true },
-    { id: 'HSE02', kind: 'HSE', x: 8, y: 0, label: 'House SE', fixed: true },
-    { id: 'HSE03', kind: 'HSE', x: 8, y: 6, label: 'House NE', fixed: true },
-    { id: 'HSE04', kind: 'HSE', x: 0, y: 6, label: 'House NW', fixed: true },
-    // Rod A ends — truth positions; Layer A will constrain length; Layer B ties pose.
-    { id: 'A1', kind: 'ROD', x: 3, y: 12, label: 'Rod A near' },
-    { id: 'A2', kind: 'ROD', x: 7, y: 12, label: 'Rod A far' },
-    { id: 'A0', kind: 'ROD', x: 5, y: 12, label: 'Rod A mid' },
-    // Occupied points (camera stations).
-    { id: 'BED01P1', kind: 'OCC', x: 4, y: 9, label: 'Bed occupy 1' },
-    { id: 'BED02P1', kind: 'OCC', x: 5.5, y: 10.5, label: 'Bed occupy 2' },
-    // Fence tags for print demo (no coords yet).
+    { id: 'HSE01', kind: 'HSE', x: 0, y: 0, label: 'Shed SW', fixed: true, offsetMm: 0 },
+    { id: 'HSE02', kind: 'HSE', x: 7, y: 0, label: 'Shed SE', fixed: true, offsetMm: 0 },
+    { id: 'HSE03', kind: 'HSE', x: 7.4, y: 2.2, label: 'Shed E jog', offsetMm: 40 },
+    { id: 'HSE04', kind: 'HSE', x: 6.2, y: 5.5, label: 'Shed NE', offsetMm: 0 },
+    { id: 'HSE05', kind: 'HSE', x: 1.5, y: 5.8, label: 'Shed NW', offsetMm: 0 },
+    { id: 'HSE06', kind: 'HSE', x: -0.3, y: 3.0, label: 'Shed W jog', offsetMm: 35 },
+    { id: 'A1', kind: 'ROD', x: 2.5, y: 9, label: 'Rod A near' },
+    { id: 'A2', kind: 'ROD', x: 6.5, y: 9, label: 'Rod A far' },
+    { id: 'A0', kind: 'ROD', x: 4.5, y: 9, label: 'Rod A mid' },
+    { id: 'BED01P1', kind: 'OCC', x: 3.5, y: 7, label: 'Bed occupy 1' },
+    { id: 'BED02P1', kind: 'OCC', x: 5.2, y: 7.8, label: 'Bed occupy 2' },
     { id: 'FNC01', kind: 'FNC', label: 'Fence post 1' },
     { id: 'FNC02', kind: 'FNC', label: 'Fence post 2' },
     { id: 'FNC03', kind: 'FNC', label: 'Fence post 3' },
     { id: 'FNC04', kind: 'FNC', label: 'Fence post 4' },
   ];
 
+  doc.baselines = [
+    {
+      id: 'BL-1',
+      a: 'HSE01',
+      b: 'HSE02',
+      lengthM: 7.0,
+      sigmaM: SIGMA.tapeM,
+      kind: 'tape',
+      isHouseEdge: true,
+      label: 'House-edge baseline (south)',
+    },
+  ];
+
   doc.lines = [
-    { id: 'L-HSE-back', a: 'HSE01', b: 'HSE02', lengthM: 8.0, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-side', a: 'HSE01', b: 'HSE04', lengthM: 6.0, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-diag', a: 'HSE01', b: 'HSE03', lengthM: 10.0, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-front', a: 'HSE04', b: 'HSE03', lengthM: 8.0, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-side2', a: 'HSE02', b: 'HSE03', lengthM: 6.0, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-straight-back', a: 'HSE01', b: 'HSE02', kind: 'straight' },
-    { id: 'L-HSE-straight-side', a: 'HSE01', b: 'HSE04', kind: 'straight' },
+    { id: 'L-BL-1', a: 'HSE01', b: 'HSE02', lengthM: 7.0, sigmaM: SIGMA.tapeM, kind: 'baseline' },
+    { id: 'L-HSE-2-3', a: 'HSE02', b: 'HSE03', lengthM: 2.236, sigmaM: SIGMA.tapeM, kind: 'tape' },
+    { id: 'L-HSE-3-4', a: 'HSE03', b: 'HSE04', lengthM: 3.509, sigmaM: SIGMA.tapeM, kind: 'tape' },
+    { id: 'L-HSE-4-5', a: 'HSE04', b: 'HSE05', lengthM: 4.71, sigmaM: SIGMA.tapeM, kind: 'tape' },
+    { id: 'L-HSE-5-6', a: 'HSE05', b: 'HSE06', lengthM: 3.328, sigmaM: SIGMA.tapeM, kind: 'tape' },
+    { id: 'L-HSE-6-1', a: 'HSE06', b: 'HSE01', lengthM: 3.015, sigmaM: SIGMA.tapeM, kind: 'tape' },
     { id: 'L-ROD-A', a: 'A1', b: 'A2', lengthM: ROD_LENGTH_M, sigmaM: SIGMA.rodLengthM, kind: 'rod' },
     { id: 'L-ROD-A-mid', a: 'A1', b: 'A0', lengthM: ROD_MID_M, sigmaM: SIGMA.rodLengthM, kind: 'rod' },
   ];
 
   doc.polygons = [
-    { id: 'house', pointIds: ['HSE01', 'HSE02', 'HSE03', 'HSE04'], label: 'House' },
+    {
+      id: 'house',
+      pointIds: ['HSE01', 'HSE02', 'HSE03', 'HSE04', 'HSE05', 'HSE06'],
+      label: 'Shed',
+      layerId: 'structure',
+      closed: true,
+    },
   ];
 
   doc.setups = [
@@ -203,8 +269,6 @@ export function syntheticDocument(): GardenDocument {
     },
   ];
 
-  // Photo geometry: 1200×900 frame. Canned clicks match a plausible perspective.
-  // Tie photo: HSE01, HSE02, A1, A2 in frame.
   doc.photos = [
     {
       id: 'photo-tie-1',
@@ -213,12 +277,11 @@ export function syntheticDocument(): GardenDocument {
       height: 900,
       thumbnailDataUrl: placeholderThumb('#4a6b52'),
       exifDateTimeOriginal: now,
-      note: 'House corners + both ends of rod A',
+      note: 'Both baseline ends + next house mark HSE03',
       clicks: [
-        { pointId: 'HSE01', px: 180, py: 720 },
-        { pointId: 'HSE02', px: 980, py: 710 },
-        { pointId: 'A1', px: 420, py: 280 },
-        { pointId: 'A2', px: 780, py: 270 },
+        { pointId: 'HSE01', px: 200, py: 700 },
+        { pointId: 'HSE02', px: 950, py: 690 },
+        { pointId: 'HSE03', px: 1000, py: 420 },
       ],
     },
     {
@@ -229,7 +292,7 @@ export function syntheticDocument(): GardenDocument {
       height: 900,
       thumbnailDataUrl: placeholderThumb('#7a9e7e'),
       exifDateTimeOriginal: now,
-      note: 'Occupy BED01P1 — rod A live',
+      note: 'Occupy BED01P1 — rod A + baseline',
       clicks: [
         { pointId: 'A1', px: 350, py: 400 },
         { pointId: 'A2', px: 850, py: 390 },
@@ -248,7 +311,7 @@ export function syntheticDocument(): GardenDocument {
       clicks: [
         { pointId: 'A1', px: 300, py: 450 },
         { pointId: 'A2', px: 700, py: 420 },
-        { pointId: 'HSE03', px: 950, py: 600 },
+        { pointId: 'HSE04', px: 950, py: 600 },
       ],
     },
   ];
@@ -257,18 +320,13 @@ export function syntheticDocument(): GardenDocument {
     mode: 'OCCUPY',
     speakSteps: false,
     geometryOk: true,
-    lastAction: 'Loaded synthetic house + rod A + two occupy photos',
+    lastAction: 'Loaded synthetic house-edge baseline + irregular shed + rod A',
     currentSetupId: setupId,
+    currentBaselineId: 'BL-1',
     currentOccupyId: 'BED02P1',
   };
 
   return doc;
-}
-
-export function hasLiveControl(doc: GardenDocument): boolean {
-  const setup = currentSetup(doc);
-  if (!setup || setup.closed) return false;
-  return setup.liveRodIds.length > 0;
 }
 
 export function currentSetup(doc: GardenDocument): Setup | undefined {
@@ -277,69 +335,223 @@ export function currentSetup(doc: GardenDocument): Setup | undefined {
   return doc.setups.find((s) => !s.closed);
 }
 
+export function currentBaseline(doc: GardenDocument): Baseline | undefined {
+  const id = doc.session.currentBaselineId;
+  if (id) return doc.baselines.find((b) => b.id === id);
+  return doc.baselines[doc.baselines.length - 1];
+}
+
+export function baselineReady(doc: GardenDocument): boolean {
+  return doc.baselines.some((b) => b.lengthM > 0);
+}
+
+/** Live control = active baseline and/or live rod in the current setup. */
+export function hasLiveControl(doc: GardenDocument): boolean {
+  if (baselineReady(doc)) return true;
+  const setup = currentSetup(doc);
+  if (!setup || setup.closed) return false;
+  return setup.liveRodIds.length > 0;
+}
+
+export function housePolygon(doc: GardenDocument): Polygon | undefined {
+  return doc.polygons.find((p) => p.id === 'house');
+}
+
+export function houseCornerCount(doc: GardenDocument): number {
+  return housePolygon(doc)?.pointIds.length ?? 0;
+}
+
+/** @deprecated Prefer baselineReady — kept for older call sites during transition. */
 export function houseRectangleClosed(doc: GardenDocument): boolean {
-  const ids = ['HSE01', 'HSE02', 'HSE03', 'HSE04'];
-  const pts = ids.map((id) => doc.points.find((p) => p.id === id));
-  if (pts.some((p) => !p || p.x === undefined || p.y === undefined)) {
-    // Also accept if we have enough tape lengths to close (synthetic / entered).
-    const tapes = doc.lines.filter(
-      (l) =>
-        l.kind === 'tape' ||
-        l.kind === 'laser',
-    );
-    const houseTapes = tapes.filter(
-      (l) => l.a.startsWith('HSE') && l.b.startsWith('HSE') && l.lengthM != null,
-    );
-    return houseTapes.length >= 3;
-  }
-  return true;
+  return baselineReady(doc);
 }
 
 export function rodAPlaced(doc: GardenDocument): boolean {
   const a1 = doc.points.find((p) => p.id === 'A1');
   const a2 = doc.points.find((p) => p.id === 'A2');
-  const rodLine = doc.lines.find((l) => l.id === 'L-ROD-A' || (l.kind === 'rod' && l.a === 'A1' && l.b === 'A2'));
+  const rodLine = doc.lines.find(
+    (l) => l.id === 'L-ROD-A' || (l.kind === 'rod' && l.a === 'A1' && l.b === 'A2'),
+  );
   return Boolean(a1 && a2 && rodLine?.lengthM === ROD_LENGTH_M);
 }
 
-export function tiePhotoReady(doc: GardenDocument): boolean {
+/** v1: photo must include both baseline ends + at least one other target mark. */
+export function baselineTieReady(doc: GardenDocument): boolean {
+  const bl = currentBaseline(doc);
+  if (!bl) return false;
   return doc.photos.some((ph) => {
     const ids = new Set(ph.clicks.map((c) => c.pointId));
-    const houseCorners = [...ids].filter((id) => id.startsWith('HSE')).length;
-    return houseCorners >= 2 && ids.has('A1') && ids.has('A2');
+    if (!ids.has(bl.a) || !ids.has(bl.b)) return false;
+    for (const id of ids) {
+      if (id !== bl.a && id !== bl.b) return true;
+    }
+    return false;
   });
 }
 
-/** Enter house corner lengths + straights so the rectangle can close (Layer A). */
-export function applyHouseBaseline(
+/** @deprecated alias */
+export function tiePhotoReady(doc: GardenDocument): boolean {
+  return baselineTieReady(doc);
+}
+
+/**
+ * Establish baseline (default: house-edge). Creates/updates B ends as HSE01/HSE02
+ * when isHouseEdge, else BL01/BL02.
+ */
+export function setBaseline(
   doc: GardenDocument,
-  backM: number,
-  sideM: number,
-  diagM: number,
+  lengthM: number,
+  opts: {
+    offsetAMm?: number;
+    offsetBMm?: number;
+    isHouseEdge?: boolean;
+    kind?: 'tape' | 'laser';
+    label?: string;
+  } = {},
 ): GardenDocument {
-  const L = backM;
-  const W = sideM;
-  const points = doc.points.filter((p) => !p.id.startsWith('HSE'));
+  const isHouseEdge = opts.isHouseEdge !== false;
+  const aId = isHouseEdge ? 'HSE01' : 'BL01';
+  const bId = isHouseEdge ? 'HSE02' : 'BL02';
+  const kind = opts.kind ?? 'tape';
+  const sigmaM = kind === 'laser' ? SIGMA.laserM : SIGMA.tapeM;
+  const id = `BL-${doc.baselines.length + 1}`;
+
+  const points = doc.points.filter((p) => p.id !== aId && p.id !== bId);
   points.push(
-    { id: 'HSE01', kind: 'HSE', x: 0, y: 0, label: 'House SW', fixed: true },
-    { id: 'HSE02', kind: 'HSE', x: L, y: 0, label: 'House SE', fixed: true },
-    { id: 'HSE03', kind: 'HSE', x: L, y: W, label: 'House NE', fixed: true },
-    { id: 'HSE04', kind: 'HSE', x: 0, y: W, label: 'House NW', fixed: true },
+    {
+      id: aId,
+      kind: isHouseEdge ? 'HSE' : 'BL',
+      x: 0,
+      y: 0,
+      label: isHouseEdge ? 'House baseline A' : 'Baseline A',
+      fixed: true,
+      offsetMm: opts.offsetAMm ?? 0,
+    },
+    {
+      id: bId,
+      kind: isHouseEdge ? 'HSE' : 'BL',
+      x: lengthM,
+      y: 0,
+      label: isHouseEdge ? 'House baseline B' : 'Baseline B',
+      fixed: true,
+      offsetMm: opts.offsetBMm ?? 0,
+    },
   );
 
-  const lines = doc.lines.filter((l) => !(l.a.startsWith('HSE') && l.b.startsWith('HSE')));
-  lines.push(
-    { id: 'L-HSE-back', a: 'HSE01', b: 'HSE02', lengthM: L, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-side', a: 'HSE01', b: 'HSE04', lengthM: W, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-diag', a: 'HSE01', b: 'HSE03', lengthM: diagM, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-front', a: 'HSE04', b: 'HSE03', lengthM: L, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-side2', a: 'HSE02', b: 'HSE03', lengthM: W, sigmaM: SIGMA.tapeM, kind: 'tape' },
-    { id: 'L-HSE-straight-back', a: 'HSE01', b: 'HSE02', kind: 'straight' },
-    { id: 'L-HSE-straight-side', a: 'HSE01', b: 'HSE04', kind: 'straight' },
-  );
+  const baseline: Baseline = {
+    id,
+    a: aId,
+    b: bId,
+    lengthM,
+    sigmaM,
+    kind,
+    isHouseEdge,
+    label: opts.label ?? (isHouseEdge ? 'House-edge baseline' : 'Baseline'),
+  };
+
+  const lines = doc.lines.filter((l) => l.id !== `L-${id}` && !(l.a === aId && l.b === bId));
+  lines.push({
+    id: `L-${id}`,
+    a: aId,
+    b: bId,
+    lengthM,
+    sigmaM,
+    kind: 'baseline',
+  });
+
+  let polygons = [...doc.polygons];
+  if (isHouseEdge) {
+    const house = polygons.find((p) => p.id === 'house');
+    if (house) {
+      const ids = [...new Set([aId, bId, ...house.pointIds.filter((x) => x !== aId && x !== bId)])];
+      // Keep A,B as first two vertices when starting.
+      polygons = polygons.map((p) =>
+        p.id === 'house'
+          ? { ...p, pointIds: [aId, bId, ...ids.filter((x) => x !== aId && x !== bId)], layerId: 'structure' }
+          : p,
+      );
+    } else {
+      polygons.push({
+        id: 'house',
+        pointIds: [aId, bId],
+        label: 'House',
+        layerId: 'structure',
+        closed: false,
+      });
+    }
+  }
+
+  const setups =
+    doc.setups.length > 0
+      ? doc.setups
+      : [
+          {
+            id: `setup-${Date.now()}`,
+            startedAt: new Date().toISOString(),
+            liveRodIds: [],
+            closed: false,
+          },
+        ];
+
+  return {
+    ...doc,
+    points,
+    lines,
+    polygons,
+    baselines: [...doc.baselines.filter((b) => b.id !== id), baseline],
+    setups,
+    session: {
+      ...doc.session,
+      currentBaselineId: id,
+      currentSetupId: doc.session.currentSetupId ?? setups[0]?.id,
+      lastAction: `Baseline ${aId}–${bId} set at ${lengthM.toFixed(3)} m` +
+        (opts.offsetAMm || opts.offsetBMm
+          ? ` (offsets ${opts.offsetAMm ?? 0}/${opts.offsetBMm ?? 0} mm)`
+          : ''),
+      geometryOk: true,
+    },
+  };
+}
+
+/** Append a house corner and optional tape from the previous vertex. */
+export function addHouseCorner(
+  doc: GardenDocument,
+  edgeLengthM?: number,
+  offsetMm = 0,
+): GardenDocument {
+  const house = housePolygon(doc);
+  const n = (house?.pointIds.length ?? 0) + 1;
+  const id = `HSE${String(n).padStart(2, '0')}`;
+  const prev = house?.pointIds[house.pointIds.length - 1];
+
+  const points = [...doc.points.filter((p) => p.id !== id), {
+    id,
+    kind: 'HSE' as const,
+    label: `House corner ${n}`,
+    offsetMm,
+  }];
+
+  const lines = [...doc.lines];
+  if (prev && edgeLengthM != null && edgeLengthM > 0) {
+    lines.push({
+      id: `L-HSE-${prev}-${id}`,
+      a: prev,
+      b: id,
+      lengthM: edgeLengthM,
+      sigmaM: SIGMA.tapeM,
+      kind: 'tape',
+    });
+  }
 
   const polygons = doc.polygons.filter((p) => p.id !== 'house');
-  polygons.push({ id: 'house', pointIds: ['HSE01', 'HSE02', 'HSE03', 'HSE04'], label: 'House' });
+  const pointIds = [...(house?.pointIds ?? []), id];
+  polygons.push({
+    id: 'house',
+    pointIds,
+    label: house?.label ?? 'House',
+    layerId: 'structure',
+    closed: false,
+  });
 
   return {
     ...doc,
@@ -348,20 +560,77 @@ export function applyHouseBaseline(
     polygons,
     session: {
       ...doc.session,
-      lastAction: `House tapes entered (back ${L} m, side ${W} m, diagonal ${diagM} m)`,
-      geometryOk: houseRectangleClosed({ ...doc, points, lines, polygons }),
+      lastAction:
+        edgeLengthM != null
+          ? `Added ${id} with edge ${edgeLengthM.toFixed(3)} m from ${prev}`
+          : `Added ${id} (photo-tie / no tape yet)`,
     },
   };
 }
 
-/** Declare rod A (4.000 m) in view of the house — used when leaving PLACE_ROD_A / Rod A ready. */
+export interface CloseHouseResult {
+  doc: GardenDocument;
+  gapMm: number;
+  warn: boolean;
+  note: string;
+}
+
+/** Close house polygon; warn if first–last gap > HOUSE_CLOSE_WARN_MM. */
+export function closeHouse(doc: GardenDocument): CloseHouseResult {
+  const house = housePolygon(doc);
+  if (!house || house.pointIds.length < 3) {
+    return {
+      doc,
+      gapMm: NaN,
+      warn: true,
+      note: 'Need at least three house corners before Close house.',
+    };
+  }
+  const first = doc.points.find((p) => p.id === house.pointIds[0]);
+  const last = doc.points.find((p) => p.id === house.pointIds[house.pointIds.length - 1]);
+  let gapMm = 0;
+  if (
+    first?.x != null &&
+    first.y != null &&
+    last?.x != null &&
+    last.y != null
+  ) {
+    gapMm = Math.hypot(first.x - last.x, first.y - last.y) * 1000;
+  }
+  const warn = gapMm > HOUSE_CLOSE_WARN_MM;
+  const polygons = doc.polygons.map((p) =>
+    p.id === 'house' ? { ...p, closed: true } : p,
+  );
+  const note = warn
+    ? `House closed with gap ${gapMm.toFixed(0)} mm — remeasure before you trust the polygon (>${HOUSE_CLOSE_WARN_MM} mm).`
+    : gapMm > 0
+      ? `House closed. Close gap ${gapMm.toFixed(0)} mm — good enough to proceed.`
+      : 'House closed. Coordinates not fixed yet — run Adjust to see the close residual.';
+
+  return {
+    doc: {
+      ...doc,
+      polygons,
+      session: {
+        ...doc.session,
+        lastAction: note,
+        lastResidualMm: Number.isFinite(gapMm) ? gapMm : doc.session.lastResidualMm,
+        geometryOk: !warn,
+      },
+    },
+    gapMm,
+    warn,
+    note,
+  };
+}
+
 export function declareRodA(doc: GardenDocument): GardenDocument {
-  const h2 = doc.points.find((p) => p.id === 'HSE02');
-  const h3 = doc.points.find((p) => p.id === 'HSE03');
-  const houseDepth = h3?.y ?? 6;
-  const houseWidth = h2?.x ?? 8;
-  const y = houseDepth + 6;
-  const x1 = Math.max(0, houseWidth / 2 - 2);
+  const bl = currentBaseline(doc);
+  const a = bl ? doc.points.find((p) => p.id === bl.a) : undefined;
+  const b = bl ? doc.points.find((p) => p.id === bl.b) : undefined;
+  const midX = ((a?.x ?? 0) + (b?.x ?? ROD_LENGTH_M)) / 2;
+  const y = Math.max(a?.y ?? 0, b?.y ?? 0) + 6;
+  const x1 = midX - ROD_LENGTH_M / 2;
   const x2 = x1 + ROD_LENGTH_M;
 
   const points = doc.points.filter((p) => p.id !== 'A1' && p.id !== 'A2' && p.id !== 'A0');
@@ -377,10 +646,18 @@ export function declareRodA(doc: GardenDocument): GardenDocument {
     { id: 'L-ROD-A-mid', a: 'A1', b: 'A0', lengthM: ROD_MID_M, sigmaM: SIGMA.rodLengthM, kind: 'rod' },
   );
 
+  const setups = doc.setups.map((s) => {
+    if (s.id === doc.session.currentSetupId || (!doc.session.currentSetupId && !s.closed)) {
+      return { ...s, liveRodIds: uniqueRods(s.liveRodIds, ['A']) };
+    }
+    return s;
+  });
+
   return {
     ...doc,
     points,
     lines,
+    setups: setups.length ? setups : doc.setups,
     session: {
       ...doc.session,
       lastAction: 'Rod A declared at 4.000 m with toilet-roll belts on both ends',
@@ -388,11 +665,26 @@ export function declareRodA(doc: GardenDocument): GardenDocument {
   };
 }
 
-/** Canned four-mark tie photo (milestone / field when clicks are recorded). */
-export function applyCannedTiePhoto(doc: GardenDocument): GardenDocument {
-  if (tiePhotoReady(doc)) return doc;
-  const setup = currentSetup(doc);
-  const setupId = setup?.id ?? doc.session.currentSetupId ?? 'setup-1';
+/** Canned baseline tie: both ends + next house mark. */
+export function applyCannedBaselineTie(doc: GardenDocument): GardenDocument {
+  if (baselineTieReady(doc)) return doc;
+  const bl = currentBaseline(doc);
+  if (!bl) return doc;
+  const house = housePolygon(doc);
+  const target =
+    house?.pointIds.find((id) => id !== bl.a && id !== bl.b) ??
+    doc.points.find((p) => p.kind === 'HSE' && p.id !== bl.a && p.id !== bl.b)?.id;
+
+  let next = doc;
+  let targetId = target;
+  if (!targetId) {
+    next = addHouseCorner(doc);
+    targetId = housePolygon(next)?.pointIds.slice(-1)[0];
+  }
+  if (!targetId) return doc;
+
+  const setup = currentSetup(next);
+  const setupId = setup?.id ?? next.session.currentSetupId ?? 'setup-1';
   const now = new Date().toISOString();
   const photo: Photo = {
     id: `photo-tie-${Date.now()}`,
@@ -401,25 +693,38 @@ export function applyCannedTiePhoto(doc: GardenDocument): GardenDocument {
     height: 900,
     thumbnailDataUrl: placeholderThumb('#4a6b52'),
     exifDateTimeOriginal: now,
-    note: 'House corners + both ends of rod A',
+    note: `Baseline ${bl.a}+${bl.b} + target ${targetId}`,
     clicks: [
-      { pointId: 'HSE01', px: 180, py: 720 },
-      { pointId: 'HSE02', px: 980, py: 710 },
-      { pointId: 'A1', px: 420, py: 280 },
-      { pointId: 'A2', px: 780, py: 270 },
+      { pointId: bl.a, px: 200, py: 700 },
+      { pointId: bl.b, px: 950, py: 690 },
+      { pointId: targetId, px: 1000, py: 420 },
     ],
   };
   return {
-    ...doc,
-    photos: [...doc.photos, photo],
+    ...next,
+    photos: [...next.photos, photo],
     session: {
-      ...doc.session,
-      lastAction: 'Tie photo recorded — two house corners and both ends of rod A',
+      ...next.session,
+      lastAction: `Baseline tie recorded — ${bl.a}, ${bl.b}, and ${targetId}`,
     },
   };
 }
 
-/** Confirm A and B were photographed together (leapfrog gate before Rods moved). */
+/** @deprecated */
+export function applyCannedTiePhoto(doc: GardenDocument): GardenDocument {
+  return applyCannedBaselineTie(doc);
+}
+
+/** @deprecated — rectangle house entry removed; use setBaseline. */
+export function applyHouseBaseline(
+  doc: GardenDocument,
+  backM: number,
+  _sideM: number,
+  _diagM: number,
+): GardenDocument {
+  return setBaseline(doc, backM, { isHouseEdge: true, offsetAMm: 0, offsetBMm: 0 });
+}
+
 export function confirmAbTogether(doc: GardenDocument): GardenDocument {
   const setups = doc.setups.map((s) => {
     if (s.id === doc.session.currentSetupId || (!doc.session.currentSetupId && !s.closed)) {

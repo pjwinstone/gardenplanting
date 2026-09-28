@@ -1,7 +1,7 @@
 /** localStorage + export/import garden.json */
 
 import type { GardenDocument } from './model';
-import { emptyDocument } from './model';
+import { emptyDocument, normalizeDocument } from './model';
 
 const STORAGE_KEY = 'garden-survey:document';
 
@@ -11,7 +11,7 @@ export function loadDocument(): GardenDocument | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as GardenDocument;
     if (parsed?.version !== 1) return null;
-    return parsed;
+    return normalizeDocument(parsed);
   } catch {
     return null;
   }
@@ -53,7 +53,7 @@ export async function importGardenJson(file: File): Promise<GardenDocument> {
   if (parsed?.version !== 1 || !Array.isArray(parsed.points)) {
     throw new Error('Not a garden.json v1 document.');
   }
-  return parsed;
+  return normalizeDocument(parsed);
 }
 
 function slug(name: string): string {

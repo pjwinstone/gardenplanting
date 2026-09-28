@@ -6,3 +6,13 @@ export {
   runMilestoneDemoWorkflow,
   type MilestoneResult,
 } from './milestone';
+export {
+  beginEstablishBaselineWorkflow,
+  saveBaselineLengthWorkflow,
+  type EstablishBaselineResult,
+} from './establishBaseline';
+export {
+  beginMeasureHouseWorkflow,
+  addHouseCornerWorkflow,
+  closeHouseWorkflow,
+} from './measureHouse';
