@@ -63,6 +63,7 @@ import {
   baselinesByTrust,
   createObject,
   objectsOnLayer,
+  preferredBaseline,
   setBaselineTrust,
   setStickyPanel,
   stickyGeometry,
@@ -593,7 +594,7 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'save-baseline') {
-    const panel = target.closest('.step-panel');
+    const panel = target.closest('.step-panel') ?? target.closest('[data-testid="baseline-form"]');
     const length = Number(
       (panel?.querySelector('[data-field=length]') as HTMLInputElement | null)?.value,
     );
@@ -603,16 +604,28 @@ function onShellClick(e: Event): void {
     const offsetB = Number(
       (panel?.querySelector('[data-field=offset-b]') as HTMLInputElement | null)?.value || 0,
     );
-    const result = saveBaselineLengthWorkflow(state.doc, length, offsetA, offsetB, true);
+    const baselineId =
+      (panel?.querySelector('[data-field=baseline-id]') as HTMLInputElement | HTMLSelectElement | null)
+        ?.value || undefined;
+    const kind = ((panel?.querySelector('[data-field=kind]') as HTMLSelectElement | null)?.value ||
+      'tape') as 'tape' | 'laser';
+    const trustRaw = (panel?.querySelector('[data-field=trust]') as HTMLInputElement | null)?.value;
+    const trust = trustRaw != null && trustRaw !== '' ? Number(trustRaw) : undefined;
+    const result = saveBaselineLengthWorkflow(state.doc, length, offsetA, offsetB, true, {
+      baselineId,
+      kind,
+      trust,
+    });
     if (!result.ok) {
       surfaceFail(result.reason ?? 'Could not save baseline.', 'baseline');
       openMenuSection('baseline');
       return;
     }
     setDoc(result.doc, null);
-    setState({ menuOpen: true, menuFocus: 'tie', openErrorLog: false });
+    setState({ menuOpen: true, menuFocus: 'baseline', openErrorLog: false });
     speakCoachLine(
-      'Baseline saved. Take a photo with both ends and the next house mark in frame.',
+      result.doc.session.lastAction ??
+        'Baseline saved. Take a photo with both ends and the next house mark in frame.',
       result.doc.session.speakSteps,
     );
     return;
@@ -944,27 +957,141 @@ function buildRecommendBody(
 }
 
 function buildBaselineForm(doc: GardenDocument): HTMLElement {
-  const panel = el('div', { className: 'menu-acc__body step-panel', attrs: { 'data-testid': 'baseline-form' } });
+  const panel = el('div', {
+    className: 'menu-acc__body step-panel',
+    attrs: { 'data-testid': 'baseline-form' },
+  });
+  const ranked = baselinesByTrust(doc);
+  const active = preferredBaseline(doc) ?? currentBaseline(doc);
+  const ptA = active ? doc.points.find((p) => p.id === active.a) : undefined;
+  const ptB = active ? doc.points.find((p) => p.id === active.b) : undefined;
+
   panel.appendChild(
     el('p', {
-      text: baselineReady(doc)
-        ? `Baseline set (${currentBaseline(doc)?.a}–${currentBaseline(doc)?.b}). Take baseline tie next.`
+      text: active
+        ? `Editing ${active.a}–${active.b}${active.label ? ` (${active.label})` : ''}. Save updates this baseline only.`
         : 'Default: one house edge. Enter length (m) and optional mark offsets (mm).',
     }),
   );
+
   const form = el('div', { className: 'step-form' });
-  form.appendChild(numField('Length (m)', 'length', '7'));
-  form.appendChild(numField('Offset A (mm)', 'offset-a', '0'));
-  form.appendChild(numField('Offset B (mm)', 'offset-b', '0'));
+
+  if (ranked.length > 1) {
+    const pickWrap = el('label', { className: 'field' });
+    pickWrap.appendChild(el('span', { text: 'Baseline' }));
+    const pick = el('select', {
+      attrs: {
+        'data-field': 'baseline-id',
+        'data-cmd': 'sticky-baseline',
+        'aria-label': 'Select baseline',
+        'data-testid': 'baseline-picker',
+      },
+    }) as HTMLSelectElement;
+    for (const b of ranked) {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      const used = b.usedForMeasurementCount ?? 0;
+      opt.textContent = `${b.a}–${b.b} · ${b.lengthM.toFixed(3)} m · T${b.trust ?? 50}${used ? ` · used ×${used}` : ''}`;
+      if (b.id === active?.id) opt.selected = true;
+      pick.appendChild(opt);
+    }
+    pickWrap.appendChild(pick);
+    form.appendChild(pickWrap);
+  } else if (active) {
+    form.appendChild(
+      el('input', {
+        attrs: { type: 'hidden', 'data-field': 'baseline-id', value: active.id },
+      }),
+    );
+  }
+
+  form.appendChild(
+    textField('End A', 'end-a', active?.a ?? 'HSE01', {
+      readonly: Boolean(active),
+      hint: ptA?.label,
+    }),
+  );
+  form.appendChild(
+    textField('End B', 'end-b', active?.b ?? 'HSE02', {
+      readonly: Boolean(active),
+      hint: ptB?.label,
+    }),
+  );
+  form.appendChild(
+    numField('Length (m)', 'length', active ? String(active.lengthM) : '7'),
+  );
+  form.appendChild(
+    numField('Offset A (mm)', 'offset-a', String(ptA?.offsetMm ?? 0)),
+  );
+  form.appendChild(
+    numField('Offset B (mm)', 'offset-b', String(ptB?.offsetMm ?? 0)),
+  );
+
+  const kindWrap = el('label', { className: 'field' });
+  kindWrap.appendChild(el('span', { text: 'Measure with' }));
+  const kindSel = el('select', {
+    attrs: { 'data-field': 'kind', 'aria-label': 'Tape or laser' },
+  }) as HTMLSelectElement;
+  for (const k of [
+    { id: 'tape', label: 'Tape' },
+    { id: 'laser', label: 'Laser' },
+  ] as const) {
+    const opt = document.createElement('option');
+    opt.value = k.id;
+    opt.textContent = k.label;
+    if ((active?.kind ?? 'tape') === k.id) opt.selected = true;
+    kindSel.appendChild(opt);
+  }
+  kindWrap.appendChild(kindSel);
+  form.appendChild(kindWrap);
+
+  const trustVal = String(active?.trust ?? 60);
+  const trustWrap = el('label', { className: 'field field--trust' });
+  trustWrap.appendChild(el('span', { text: `Trust ${trustVal}` }));
+  trustWrap.appendChild(
+    el('input', {
+      attrs: {
+        type: 'range',
+        min: '0',
+        max: '100',
+        value: trustVal,
+        'data-field': 'trust',
+        'aria-label': 'Baseline trust',
+      },
+    }),
+  );
+  form.appendChild(trustWrap);
+
   panel.appendChild(form);
   panel.appendChild(
     el('button', {
       className: 'btn btn--util btn--stage2',
-      text: 'Save baseline',
+      text: active ? 'Save baseline' : 'Save baseline',
       attrs: { type: 'button', 'data-cmd': 'save-baseline' },
     }),
   );
   return panel;
+}
+
+function textField(
+  label: string,
+  field: string,
+  value: string,
+  opts: { readonly?: boolean; hint?: string } = {},
+): HTMLElement {
+  const wrap = el('label', { className: 'field' });
+  wrap.appendChild(el('span', { text: opts.hint ? `${label} · ${opts.hint}` : label }));
+  wrap.appendChild(
+    el('input', {
+      attrs: {
+        type: 'text',
+        'data-field': field,
+        value,
+        readonly: opts.readonly ? 'true' : undefined,
+      },
+    }),
+  );
+  return wrap;
 }
 
 function buildTieForm(doc: GardenDocument): HTMLElement {

@@ -225,12 +225,27 @@ body {
   font-size: 0.8rem;
 }
 
-.menu-acc .step-form .field input {
+.menu-acc .step-form .field input,
+.menu-acc .step-form .field select {
   font: inherit;
   padding: 0.35rem 0.4rem;
   border: 1px solid var(--line);
   border-radius: 2px;
   background: #fffdf8;
+}
+
+.menu-acc .step-form .field input[readonly] {
+  background: rgba(42, 36, 28, 0.06);
+  color: var(--muted);
+}
+
+.menu-acc .step-form .field--trust {
+  grid-column: 1 / -1;
+}
+
+.menu-acc .step-form .field--trust input[type='range'] {
+  width: 100%;
+  padding: 0.25rem 0;
 }
 
 /* Mid-workflow chrome removed from plan (was .minimal-chrome) */

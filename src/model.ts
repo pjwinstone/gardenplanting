@@ -535,6 +535,9 @@ export function tiePhotoReady(doc: GardenDocument): boolean {
 /**
  * Establish baseline (default: house-edge). Creates/updates B ends as HSE01/HSE02
  * when isHouseEdge, else BL01/BL02.
+ *
+ * Pass `baselineId` to update an existing baseline in place (preserves other
+ * baselines and end point ids).
  */
 export function setBaseline(
   doc: GardenDocument,
@@ -545,8 +548,18 @@ export function setBaseline(
     isHouseEdge?: boolean;
     kind?: 'tape' | 'laser';
     label?: string;
+    trust?: number;
+    /** When set and found, update that baseline instead of appending a new one. */
+    baselineId?: string;
   } = {},
 ): GardenDocument {
+  if (opts.baselineId) {
+    const existing = doc.baselines.find((b) => b.id === opts.baselineId);
+    if (existing) {
+      return updateBaselineInPlace(doc, existing, lengthM, opts);
+    }
+  }
+
   const isHouseEdge = opts.isHouseEdge !== false;
   const aId = isHouseEdge ? 'HSE01' : 'BL01';
   const bId = isHouseEdge ? 'HSE02' : 'BL02';
@@ -585,7 +598,7 @@ export function setBaseline(
     kind,
     isHouseEdge,
     label: opts.label ?? (isHouseEdge ? 'House-edge baseline' : 'Baseline'),
-    trust: 60,
+    trust: opts.trust ?? 60,
     usedForMeasurementCount: 0,
   };
 
@@ -644,10 +657,93 @@ export function setBaseline(
       ...doc.session,
       currentBaselineId: id,
       currentSetupId: doc.session.currentSetupId ?? setups[0]?.id,
+      activeBaselineEnds: { a: aId, b: bId },
       lastAction: `Baseline ${aId}–${bId} set at ${lengthM.toFixed(3)} m` +
         (opts.offsetAMm || opts.offsetBMm
           ? ` (offsets ${opts.offsetAMm ?? 0}/${opts.offsetBMm ?? 0} mm)`
           : ''),
+      geometryOk: true,
+    },
+  };
+}
+
+/** Update length / offsets / kind / trust on an existing baseline without appending. */
+function updateBaselineInPlace(
+  doc: GardenDocument,
+  existing: Baseline,
+  lengthM: number,
+  opts: {
+    offsetAMm?: number;
+    offsetBMm?: number;
+    kind?: 'tape' | 'laser';
+    trust?: number;
+    label?: string;
+  },
+): GardenDocument {
+  const kind = opts.kind ?? existing.kind;
+  const sigmaM = kind === 'laser' ? SIGMA.laserM : SIGMA.tapeM;
+  const trust = opts.trust ?? existing.trust ?? 50;
+  const offsetA = opts.offsetAMm ?? 0;
+  const offsetB = opts.offsetBMm ?? 0;
+
+  const aPt = doc.points.find((p) => p.id === existing.a);
+  const points = doc.points.map((p) => {
+    if (p.id === existing.a) {
+      return { ...p, offsetMm: offsetA };
+    }
+    if (p.id === existing.b) {
+      let next = { ...p, offsetMm: offsetB };
+      // Keep simple axis layout when still the original fixed house-edge placement.
+      if (
+        aPt?.fixed &&
+        p.fixed &&
+        (aPt.x ?? 0) === 0 &&
+        (aPt.y ?? 0) === 0 &&
+        (p.y ?? 0) === 0 &&
+        typeof p.x === 'number'
+      ) {
+        next = { ...next, x: lengthM };
+      }
+      return next;
+    }
+    return p;
+  });
+
+  const baselines = doc.baselines.map((b) =>
+    b.id === existing.id
+      ? {
+          ...b,
+          lengthM,
+          kind,
+          sigmaM,
+          trust,
+          label: opts.label ?? b.label,
+        }
+      : b,
+  );
+
+  const lines = doc.lines.map((l) => {
+    if (
+      l.id === `L-${existing.id}` ||
+      (l.kind === 'baseline' && l.a === existing.a && l.b === existing.b)
+    ) {
+      return { ...l, lengthM, sigmaM, kind: 'baseline' as const };
+    }
+    return l;
+  });
+
+  return {
+    ...doc,
+    points,
+    lines,
+    baselines,
+    session: {
+      ...doc.session,
+      currentBaselineId: existing.id,
+      activeBaselineEnds: { a: existing.a, b: existing.b },
+      lastAction:
+        `Baseline ${existing.a}–${existing.b} updated to ${lengthM.toFixed(3)} m` +
+        (offsetA || offsetB ? ` (offsets ${offsetA}/${offsetB} mm)` : ''),
       geometryOk: true,
     },
   };
