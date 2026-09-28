@@ -4,6 +4,8 @@ Static PWA (Vite + TypeScript) for surveying a ~20×20 m UK garden. No backend. 
 
 **Live (GitHub Pages):** https://pjwinstone.github.io/gardenplanting/
 
+**Architecture (toolbox / workflows / plan-first UI):** **[docs/architecture-toolbox-workflows.md](docs/architecture-toolbox-workflows.md)**.
+
 **Stage 2 — accurate measurements (field):** phone checklist → **[docs/stage-2-field-checklist.md](docs/stage-2-field-checklist.md)**. In the app: **Start Stage 2 field loop** / **Show Stage 2 checklist**.
 
 **Microsoft sign-in + OneDrive:** saves `garden.json` to personal OneDrive at `/Garden Survey/garden.json`. Setup: **[docs/entra-onedrive-setup.md](docs/entra-onedrive-setup.md)**.
@@ -61,6 +63,6 @@ Illegal mode buttons stay clickable and show a refusal sentence (they are not a 
 
 ## Modules
 
-`model.ts` · `modes.ts` · `adjustLayerA.ts` · `adjustLayerB.ts` · `photoGeometry.ts` · `storage.ts` · `planSvg.ts` · `tagsPrint.ts` · `coach.ts` · `stage2Checklist.ts` · `ui.ts` · `msalAuth.ts` · `onedrive.ts` · `cloudStatus.ts` · `cloudConfig.ts`
+`model.ts` · `modes.ts` · `toolbox/` · `workflows/` · `adjustLayerA.ts` · `adjustLayerB.ts` · `photoGeometry.ts` · `storage.ts` · `planSvg.ts` · `tagsPrint.ts` · `coach.ts` · `stage2Checklist.ts` · `ui.ts` · `msalAuth.ts` · `onedrive.ts` · `cloudStatus.ts` · `cloudConfig.ts`
 
 See `AGENTS.md` for the survey method (do not change without asking).

@@ -1,9 +1,7 @@
-/** Main UI: mode banner, coach, legal buttons, plan, print tags, storage. */
+/** Main UI: plan-first layout, task strip, print tags. Calls toolbox + workflows. */
 
 import type { GardenDocument } from './model';
 import {
-  emptyDocument,
-  syntheticDocument,
   applyHouseBaseline,
   applyCannedTiePhoto,
   confirmAbTogether,
@@ -12,27 +10,10 @@ import {
   currentSetup,
   rodAPlaced,
 } from './model';
-import {
-  ALL_ACTIONS,
-  actionLabel,
-  applyTransition,
-  canTransition,
-  legalActions,
-  type ModeAction,
-} from './modes';
 import { buildCoach, speakCoachLine } from './coach';
-import { runLayerA } from './adjustLayerA';
-import { runLayerB } from './adjustLayerB';
 import { renderPlanSvg } from './planSvg';
 import { renderTagsPrintHtml, triggerPrint } from './tagsPrint';
-import {
-  saveDocument,
-  exportGardenJson,
-  importGardenJson,
-  loadDocument,
-} from './storage';
 import { isSignedIn, signIn, signOut, subscribeAuth, type AuthInitResult } from './msalAuth';
-import { loadGardenFromOneDrive, saveGardenToOneDrive } from './onedrive';
 import {
   getCloudStatus,
   setCloudBusy,
@@ -42,6 +23,27 @@ import {
 } from './cloudStatus';
 import { buildStamp } from './buildInfo';
 import { STAGE2_FIELD_STEPS } from './stage2Checklist';
+import {
+  ALL_ACTIONS,
+  actionLabel,
+  applyTransition,
+  canTransition,
+  legalActions,
+  persistGardenLocal,
+  exportGarden,
+  importGarden,
+  loadCachedGarden,
+  createEmptyGarden,
+  runAdjust as toolboxRunAdjust,
+  saveGardenCloud,
+  loadGardenCloud,
+  type ModeAction,
+} from './toolbox';
+import {
+  startStage2FieldWorkflow,
+  loadSyntheticWorkflow,
+  runMilestoneDemoWorkflow,
+} from './workflows';
 
 export type View = 'survey' | 'tags';
 
@@ -56,7 +58,7 @@ export interface UiState {
 type Listener = () => void;
 
 let state: UiState = {
-  doc: loadDocument() ?? emptyDocument(),
+  doc: loadCachedGarden() ?? createEmptyGarden(),
   view: 'survey',
   refuseMessage: null,
   showStage2Checklist: false,
@@ -84,7 +86,7 @@ function setState(partial: Partial<UiState>): void {
   // Always notify listeners even if persistence fails — otherwise the UI freezes
   // on legal transitions while illegal refusals (no save) still appear to work.
   if (partial.doc) {
-    const saved = saveDocument(partial.doc);
+    const saved = persistGardenLocal(partial.doc);
     if (!saved.ok && !state.refuseMessage) {
       state = {
         ...state,
@@ -110,7 +112,7 @@ function scheduleCloudBackup(doc: GardenDocument): void {
 
 async function quietCloudSave(doc: GardenDocument): Promise<void> {
   if (!isSignedIn()) return;
-  const result = await saveGardenToOneDrive(doc);
+  const result = await saveGardenCloud(doc);
   if (result.ok) {
     setLastSaveIso(result.savedAt);
     setCloudMessage(`Saved to OneDrive (${getCloudStatus().pathHint}).`);
@@ -167,7 +169,7 @@ export function applyAuthReady(init: AuthInitResult): void {
 async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   if (!isSignedIn()) return;
   setCloudBusy(true);
-  const result = await loadGardenFromOneDrive();
+  const result = await loadGardenCloud();
   setCloudBusy(false);
   if (!result.ok) {
     // Missing file is normal on first save — still signed in.
@@ -217,14 +219,14 @@ function onShellClick(e: Event): void {
   }
   if (cmd === 'new-garden') {
     setState({
-      doc: emptyDocument(),
+      doc: createEmptyGarden(),
       refuseMessage: null,
       showStage2Checklist: false,
     });
     return;
   }
   if (cmd === 'export') {
-    exportGardenJson(state.doc);
+    exportGarden(state.doc);
     return;
   }
   if (cmd === 'print-tags') {
@@ -313,7 +315,7 @@ async function onSignOut(): Promise<void> {
 async function onOneDriveSave(): Promise<void> {
   setCloudBusy(true);
   setCloudMessage('Saving garden.json to OneDrive…');
-  const result = await saveGardenToOneDrive(state.doc);
+  const result = await saveGardenCloud(state.doc);
   setCloudBusy(false);
   if (result.ok) {
     setLastSaveIso(result.savedAt);
@@ -326,7 +328,7 @@ async function onOneDriveSave(): Promise<void> {
 async function onOneDriveLoad(): Promise<void> {
   setCloudBusy(true);
   setCloudMessage('Loading garden.json from OneDrive…');
-  const result = await loadGardenFromOneDrive();
+  const result = await loadGardenCloud();
   setCloudBusy(false);
   if (!result.ok) {
     setCloudMessage(result.error);
@@ -346,7 +348,7 @@ function onShellChange(e: Event): void {
 }
 
 function buildApp(): HTMLElement {
-  const app = el('div', { className: 'app' });
+  const app = el('div', { className: 'app app--plan-first' });
   if (state.view === 'tags') {
     app.appendChild(buildTagsView());
     return app;
@@ -360,167 +362,39 @@ function buildSurveyView(): HTMLElement {
   const coach = buildCoach(doc);
   const legal = new Set(legalActions(doc));
 
-  const wrap = el('div', { className: 'survey-layout' });
+  const wrap = el('div', { className: 'survey-layout survey-layout--plan-first' });
 
-  const banner = el('header', { className: 'mode-banner', attrs: { role: 'status' } });
-  banner.appendChild(el('div', { className: 'mode-banner__label', text: 'Session mode' }));
-  banner.appendChild(el('h1', { className: 'mode-banner__mode', text: coach.banner }));
-  banner.appendChild(
-    el('p', {
-      className: 'mode-banner__build',
-      text: buildStamp(),
-      attrs: { 'data-testid': 'build-stamp' },
-    }),
-  );
-  wrap.appendChild(banner);
-
-  const coachPanel = el('section', { className: 'coach', attrs: { 'aria-live': 'polite' } });
-  coachPanel.appendChild(el('h2', { className: 'coach__title', text: 'Coach' }));
-  for (const line of coach.body) {
-    coachPanel.appendChild(el('p', { className: 'coach__line', text: line }));
-  }
-  if (coach.residualLine) {
-    coachPanel.appendChild(el('p', { className: 'coach__residual', text: coach.residualLine }));
-  }
-  if (coach.geometryLine) {
-    coachPanel.appendChild(
-      el('p', { className: 'coach__geometry', text: coach.geometryLine }),
-    );
-  }
-  if (coach.nextButton) {
-    coachPanel.appendChild(
-      el('p', { className: 'coach__next', text: `Next: ${coach.nextButton}` }),
-    );
-  } else if (legal.size === 0) {
-    coachPanel.appendChild(
-      el('p', {
-        className: 'coach__next',
-        text: 'Next: use the step panel below (Start Stage 2 or Load synthetic demo)',
-      }),
-    );
-  }
-  wrap.appendChild(coachPanel);
-
-  if (state.showStage2Checklist) {
-    wrap.appendChild(buildStage2ChecklistPanel());
-  }
-
-  wrap.appendChild(buildCloudPanel());
+  wrap.appendChild(buildTaskStrip(doc, coach, legal));
 
   if (state.refuseMessage) {
     wrap.appendChild(
       el('div', {
-        className: 'refuse',
+        className: 'refuse refuse--overlay',
         attrs: { role: 'alert' },
         text: state.refuseMessage,
       }),
     );
   }
 
-  const actions = el('div', { className: 'actions' });
-  for (const action of ALL_ACTIONS) {
-    const isLegal = legal.has(action);
-    actions.appendChild(
-      el('button', {
-        className:
-          'btn' +
-          (isLegal ? '' : ' btn--disabled') +
-          (coach.nextAction === action ? ' btn--suggested' : ''),
-        text: actionLabel(action),
-        attrs: {
-          type: 'button',
-          'data-cmd': 'mode',
-          'data-action': action,
-          'aria-disabled': isLegal ? 'false' : 'true',
-        },
-      }),
-    );
-  }
-  wrap.appendChild(actions);
-
-  const step = buildStepPanel(doc);
-  if (step) wrap.appendChild(step);
-
-  const utils = el('div', { className: 'utils' });
-  utils.appendChild(
-    el('button', {
-      className: 'btn btn--util btn--stage2',
-      text: state.showStage2Checklist ? 'Hide Stage 2 checklist' : 'Show Stage 2 checklist',
-      attrs: { type: 'button', 'data-cmd': 'toggle-stage2-checklist' },
-    }),
-  );
-  utils.appendChild(
-    el('button', {
-      className: 'btn btn--util btn--demo',
-      text: 'Load synthetic demo',
-      attrs: { type: 'button', 'data-cmd': 'load-synthetic' },
-    }),
-  );
-  utils.appendChild(
-    el('button', {
-      className: 'btn btn--util btn--demo',
-      text: 'Run milestone demo (synthetic → Adjust)',
-      attrs: { type: 'button', 'data-cmd': 'run-milestone' },
-    }),
-  );
-  utils.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: 'New garden',
-      attrs: { type: 'button', 'data-cmd': 'new-garden' },
-    }),
-  );
-  utils.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: 'Export garden.json',
-      attrs: { type: 'button', 'data-cmd': 'export' },
-    }),
-  );
-
-  const fileLabel = el('label', { className: 'btn btn--file', text: 'Import garden.json' });
-  const fileInput = el('input', {
-    attrs: { type: 'file', accept: 'application/json,.json', hidden: 'true' },
-  }) as HTMLInputElement;
-  fileInput.addEventListener('change', async () => {
-    const f = fileInput.files?.[0];
-    if (!f) return;
-    try {
-      const imported = await importGardenJson(f);
-      setDoc(imported, null);
-    } catch (err) {
-      setState({ refuseMessage: err instanceof Error ? err.message : 'Import failed.' });
-    }
+  const plan = el('section', {
+    className: 'plan plan--backdrop',
+    attrs: { 'aria-label': 'Garden plan' },
   });
-  fileLabel.appendChild(fileInput);
-  utils.appendChild(fileLabel);
-  utils.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: 'Print tags',
-      attrs: { type: 'button', 'data-cmd': 'print-tags' },
-    }),
-  );
-
-  const speakLabel = el('label', { className: 'toggle' });
-  const speak = el('input', {
-    attrs: {
-      type: 'checkbox',
-      'data-cmd': 'speak-toggle',
-    },
-  }) as HTMLInputElement;
-  speak.checked = doc.session.speakSteps;
-  speakLabel.appendChild(speak);
-  speakLabel.appendChild(document.createTextNode(' Speak steps'));
-  utils.appendChild(speakLabel);
-  wrap.appendChild(utils);
-
-  const plan = el('section', { className: 'plan' });
-  plan.appendChild(el('h2', { text: 'Plan' }));
-  const planHost = el('div', { className: 'plan__svg', attrs: { 'data-testid': 'plan-svg' } });
-  planHost.innerHTML = renderPlanSvg(doc);
+  const planHost = el('div', {
+    className: 'plan__svg plan__svg--full',
+    attrs: { 'data-testid': 'plan-svg' },
+  });
+  planHost.innerHTML = renderPlanSvg(doc, 960, 720);
   plan.appendChild(planHost);
+  wrap.appendChild(plan);
 
+  const below = el('div', { className: 'survey-below' });
+  if (state.showStage2Checklist) {
+    below.appendChild(buildStage2ChecklistPanel());
+  }
+  const step = buildStepPanel(doc);
+  if (step) below.appendChild(step);
+  below.appendChild(buildCloudPanel());
   if (doc.photos.length) {
     const thumbs = el('div', { className: 'thumbs' });
     for (const ph of doc.photos) {
@@ -539,11 +413,220 @@ function buildSurveyView(): HTMLElement {
       );
       thumbs.appendChild(card);
     }
-    plan.appendChild(thumbs);
+    below.appendChild(thumbs);
   }
-  wrap.appendChild(plan);
+  wrap.appendChild(below);
 
   return wrap;
+}
+
+/** Compact mode + coach + primary next + action dropdown (replaces button wall). */
+function buildTaskStrip(
+  doc: GardenDocument,
+  coach: ReturnType<typeof buildCoach>,
+  legal: Set<ModeAction>,
+): HTMLElement {
+  const strip = el('header', {
+    className: 'task-strip',
+    attrs: { role: 'status', 'data-testid': 'task-strip' },
+  });
+
+  const top = el('div', { className: 'task-strip__top' });
+  top.appendChild(
+    el('div', { className: 'task-strip__mode', text: coach.banner }),
+  );
+  top.appendChild(
+    el('div', {
+      className: 'task-strip__build',
+      text: buildStamp(),
+      attrs: { 'data-testid': 'build-stamp' },
+    }),
+  );
+  strip.appendChild(top);
+
+  const coachLine = coach.body[0] ?? 'Follow the next action.';
+  strip.appendChild(
+    el('p', { className: 'task-strip__coach', text: coachLine, attrs: { 'aria-live': 'polite' } }),
+  );
+
+  if (coach.residualLine || coach.geometryLine) {
+    const meta = el('div', { className: 'task-strip__meta' });
+    if (coach.residualLine) {
+      meta.appendChild(el('span', { className: 'task-strip__residual', text: coach.residualLine }));
+    }
+    if (coach.geometryLine) {
+      meta.appendChild(el('span', { className: 'task-strip__geometry', text: coach.geometryLine }));
+    }
+    strip.appendChild(meta);
+  }
+
+  const actionsRow = el('div', { className: 'task-strip__actions' });
+
+  if (coach.nextAction && legal.has(coach.nextAction)) {
+    actionsRow.appendChild(
+      el('button', {
+        className: 'btn btn--suggested task-strip__primary',
+        text: coach.nextButton ?? actionLabel(coach.nextAction),
+        attrs: {
+          type: 'button',
+          'data-cmd': 'mode',
+          'data-action': coach.nextAction,
+        },
+      }),
+    );
+  } else if (doc.session.mode === 'START') {
+    actionsRow.appendChild(
+      el('button', {
+        className: 'btn btn--stage2 task-strip__primary',
+        text: 'Start Stage 2 field loop',
+        attrs: { type: 'button', 'data-cmd': 'start-stage2' },
+      }),
+    );
+  }
+
+  // Legal actions dropdown (not a button wall).
+  const otherLegal = ALL_ACTIONS.filter(
+    (a) => legal.has(a) && a !== coach.nextAction,
+  );
+  if (otherLegal.length) {
+    const sel = el('select', {
+      className: 'task-strip__select',
+      attrs: {
+        'aria-label': 'Other legal actions',
+        'data-cmd': 'mode-select',
+      },
+    }) as HTMLSelectElement;
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'More actions…';
+    sel.appendChild(placeholder);
+    for (const action of otherLegal) {
+      const opt = document.createElement('option');
+      opt.value = action;
+      opt.textContent = actionLabel(action);
+      sel.appendChild(opt);
+    }
+    sel.addEventListener('change', () => {
+      const v = sel.value as ModeAction | '';
+      if (v) onModeAction(v);
+      sel.value = '';
+    });
+    actionsRow.appendChild(sel);
+  }
+
+  // Expandable: all actions (illegal still refuse with a sentence).
+  const allDetails = el('details', { className: 'task-strip__all' });
+  allDetails.appendChild(el('summary', { text: 'All mode actions' }));
+  const allList = el('div', { className: 'task-strip__all-list' });
+  for (const action of ALL_ACTIONS) {
+    const isLegal = legal.has(action);
+    allList.appendChild(
+      el('button', {
+        className:
+          'btn btn--util' +
+          (isLegal ? '' : ' btn--disabled') +
+          (coach.nextAction === action ? ' btn--suggested' : ''),
+        text: actionLabel(action),
+        attrs: {
+          type: 'button',
+          'data-cmd': 'mode',
+          'data-action': action,
+          'aria-disabled': isLegal ? 'false' : 'true',
+        },
+      }),
+    );
+  }
+  allDetails.appendChild(allList);
+  actionsRow.appendChild(allDetails);
+
+  // Tools menu (demo, print, export, …).
+  const tools = el('details', { className: 'task-strip__tools' });
+  tools.appendChild(el('summary', { text: 'Tools' }));
+  const toolsBody = el('div', { className: 'task-strip__tools-body' });
+  toolsBody.appendChild(
+    el('button', {
+      className: 'btn btn--util btn--stage2',
+      text: state.showStage2Checklist ? 'Hide Stage 2 checklist' : 'Show Stage 2 checklist',
+      attrs: { type: 'button', 'data-cmd': 'toggle-stage2-checklist' },
+    }),
+  );
+  toolsBody.appendChild(
+    el('button', {
+      className: 'btn btn--util btn--demo',
+      text: 'Load synthetic demo',
+      attrs: { type: 'button', 'data-cmd': 'load-synthetic' },
+    }),
+  );
+  toolsBody.appendChild(
+    el('button', {
+      className: 'btn btn--util btn--demo',
+      text: 'Run milestone demo',
+      attrs: { type: 'button', 'data-cmd': 'run-milestone' },
+    }),
+  );
+  toolsBody.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'New garden',
+      attrs: { type: 'button', 'data-cmd': 'new-garden' },
+    }),
+  );
+  toolsBody.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Export garden.json',
+      attrs: { type: 'button', 'data-cmd': 'export' },
+    }),
+  );
+  const fileLabel = el('label', { className: 'btn btn--file', text: 'Import garden.json' });
+  const fileInput = el('input', {
+    attrs: { type: 'file', accept: 'application/json,.json', hidden: 'true' },
+  }) as HTMLInputElement;
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files?.[0];
+    if (!f) return;
+    try {
+      const imported = await importGarden(f);
+      setDoc(imported, null);
+    } catch (err) {
+      setState({ refuseMessage: err instanceof Error ? err.message : 'Import failed.' });
+    }
+  });
+  fileLabel.appendChild(fileInput);
+  toolsBody.appendChild(fileLabel);
+  toolsBody.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Print tags',
+      attrs: { type: 'button', 'data-cmd': 'print-tags' },
+    }),
+  );
+  const speakLabel = el('label', { className: 'toggle' });
+  const speak = el('input', {
+    attrs: { type: 'checkbox', 'data-cmd': 'speak-toggle' },
+  }) as HTMLInputElement;
+  speak.checked = doc.session.speakSteps;
+  speakLabel.appendChild(speak);
+  speakLabel.appendChild(document.createTextNode(' Speak steps'));
+  toolsBody.appendChild(speakLabel);
+
+  // Extra coach lines in tools for phone space.
+  if (coach.body.length > 1 || coach.nextButton) {
+    const moreCoach = el('div', { className: 'task-strip__coach-more' });
+    for (const line of coach.body.slice(1)) {
+      moreCoach.appendChild(el('p', { text: line }));
+    }
+    if (coach.nextButton) {
+      moreCoach.appendChild(el('p', { className: 'coach__next', text: `Next: ${coach.nextButton}` }));
+    }
+    toolsBody.appendChild(moreCoach);
+  }
+
+  tools.appendChild(toolsBody);
+  actionsRow.appendChild(tools);
+  strip.appendChild(actionsRow);
+
+  return strip;
 }
 
 function buildCloudPanel(): HTMLElement {
@@ -692,13 +775,9 @@ function buildStage2ChecklistPanel(): HTMLElement {
   return panel;
 }
 
-/** Begin Stage 2: show checklist and enter HOUSE_BASELINE from a clean garden. */
+/** Begin Stage 2 via workflow (toolbox underneath). */
 function startStage2FieldLoop(): void {
-  const base =
-    state.doc.session.mode === 'START' && state.doc.points.length === 0
-      ? state.doc
-      : emptyDocument('Stage 2 garden');
-  const { doc, result } = applyTransition(base, 'start_house');
+  const result = startStage2FieldWorkflow(state.doc);
   if (!result.ok) {
     setState({
       refuseMessage: result.reason ?? 'Could not start Stage 2.',
@@ -707,13 +786,13 @@ function startStage2FieldLoop(): void {
     return;
   }
   setState({
-    doc,
+    doc: result.doc,
     view: 'survey',
     refuseMessage: null,
-    showStage2Checklist: true,
+    showStage2Checklist: result.showChecklist,
   });
-  const coach = buildCoach(doc);
-  speakCoachLine(coach.body[0] ?? '', doc.session.speakSteps);
+  const coach = buildCoach(result.doc);
+  speakCoachLine(coach.body[0] ?? '', result.doc.session.speakSteps);
 }
 
 function buildStepPanel(doc: GardenDocument): HTMLElement | null {
@@ -934,44 +1013,20 @@ function onModeAction(action: ModeAction): void {
 }
 
 function runAdjust(doc: GardenDocument): void {
-  const gate = applyTransition(doc, 'adjust');
-  if (!gate.result.ok) {
-    setState({ refuseMessage: gate.result.reason ?? 'Illegal transition.' });
+  const result = toolboxRunAdjust(doc);
+  if (!result.ok) {
+    setState({ refuseMessage: result.reason ?? 'Illegal transition.' });
+    speakCoachLine(result.reason ?? '', doc.session.speakSteps);
     return;
   }
-  doc = gate.doc;
-  const a = runLayerA(doc);
-  const b = runLayerB({ ...doc, points: a.points }, a.points);
-  const observations = [...a.observations, ...b.observations];
-  const plain = observations
-    .filter((o) => o.note)
-    .slice(0, 3)
-    .map((o) => o.note!)
-    .join(' ');
-  doc = {
-    ...doc,
-    points: b.points,
-    photos: b.photos,
-    observations,
-    session: {
-      ...doc.session,
-      mode: 'ADJUST',
-      lastAction: 'Adjust (Layer A then Layer B)',
-      lastResidualMm:
-          a.residualMm > 0
-            ? a.residualMm
-            : // Pose resection residuals can be large in v1; prefer house/rod mm for the coach line.
-              Math.min(b.residualMm, 50),
-      geometryOk: a.ok && b.ok,
-    },
-  };
-  setDoc(doc, null);
-  const coach = buildCoach(doc);
-  speakCoachLine(plain || coach.body.join(' '), doc.session.speakSteps);
+  setDoc(result.doc, null);
+  const coach = buildCoach(result.doc);
+  const spoken = result.residualNotes.join(' ') || coach.body.join(' ');
+  speakCoachLine(spoken, result.doc.session.speakSteps);
 }
 
 function loadSynthetic(): void {
-  const doc = syntheticDocument();
+  const doc = loadSyntheticWorkflow();
   setDoc(doc, null);
   const coach = buildCoach(doc);
   speakCoachLine(coach.body[0] ?? '', doc.session.speakSteps);
@@ -979,10 +1034,26 @@ function loadSynthetic(): void {
 
 /** One-click unstick for the milestone demo path. */
 function runMilestoneDemo(): void {
-  const doc = syntheticDocument();
-  // Seed state then adjust without requiring a second click.
-  state = { ...state, doc, view: 'survey', refuseMessage: null };
-  runAdjust(doc);
+  const result = runMilestoneDemoWorkflow();
+  if (!result.ok) {
+    setState({
+      doc: result.doc,
+      view: 'survey',
+      refuseMessage: result.reason ?? 'Milestone demo failed.',
+    });
+    return;
+  }
+  setState({
+    doc: result.doc,
+    view: 'survey',
+    refuseMessage: null,
+    showStage2Checklist: false,
+  });
+  const coach = buildCoach(result.doc);
+  speakCoachLine(
+    result.residualNotes.join(' ') || coach.body.join(' '),
+    result.doc.session.speakSteps,
+  );
 }
 
 function el(
