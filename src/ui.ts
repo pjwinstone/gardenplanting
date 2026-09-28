@@ -1,4 +1,4 @@
-/** Main UI: plan-first layout, task strip, print tags. Calls toolbox + workflows. */
+/** Main UI: plan-first layout, hamburger drawer, print tags. Calls toolbox + workflows. */
 
 import type { GardenDocument } from './model';
 import {
@@ -24,6 +24,15 @@ import {
 } from './cloudStatus';
 import { buildStamp } from './buildInfo';
 import { STAGE2_FIELD_STEPS } from './stage2Checklist';
+import {
+  clearErrorLog,
+  getErrorLog,
+  hasUnseenErrors,
+  logError,
+  markErrorsSeen,
+  subscribeErrorLog,
+  unseenErrorCount,
+} from './errorLog';
 import {
   ALL_ACTIONS,
   actionLabel,
@@ -57,6 +66,10 @@ export interface UiState {
   refuseMessage: string | null;
   /** Show Stage 2 field checklist summary in the survey layout. */
   showStage2Checklist: boolean;
+  /** Hamburger drawer open. */
+  menuOpen: boolean;
+  /** Open drawer scrolled to Error log and mark unseen cleared. */
+  openErrorLog: boolean;
 }
 
 type Listener = () => void;
@@ -66,7 +79,15 @@ let state: UiState = {
   view: 'survey',
   refuseMessage: null,
   showStage2Checklist: false,
+  menuOpen: false,
+  openErrorLog: false,
 };
+
+/** Surface a coach/refuse failure and append to the in-app error log. */
+function surfaceFail(message: string, source = 'coach'): void {
+  logError(message, { source });
+  setState({ refuseMessage: message });
+}
 
 const listeners: Listener[] = [];
 
@@ -92,10 +113,9 @@ function setState(partial: Partial<UiState>): void {
   if (partial.doc) {
     const saved = persistGardenLocal(partial.doc);
     if (!saved.ok && !state.refuseMessage) {
-      state = {
-        ...state,
-        refuseMessage: `Working copy updated, but could not save to this browser (${saved.error}). Export garden.json to keep your work.`,
-      };
+      const msg = `Working copy updated, but could not save to this browser (${saved.error}). Export garden.json to keep your work.`;
+      logError(msg, { source: 'persist' });
+      state = { ...state, refuseMessage: msg };
     }
     scheduleCloudBackup(partial.doc);
   }
@@ -141,6 +161,7 @@ export function mount(root: HTMLElement): void {
   subscribe(render);
   subscribeAuth(render);
   subscribeCloud(render);
+  subscribeErrorLog(render);
   render();
 }
 
@@ -152,7 +173,9 @@ export function applyAuthReady(init: AuthInitResult): void {
   if (!init.configured) return;
 
   if (init.error) {
-    setCloudMessage(`Microsoft sign-in problem: ${init.error}`);
+    const msg = `Microsoft sign-in problem: ${init.error}`;
+    logError(msg, { source: 'msal' });
+    setCloudMessage(msg);
     return;
   }
 
@@ -183,7 +206,9 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
       );
       return;
     }
-    setCloudMessage(`Signed in, but could not load from OneDrive: ${result.error}`);
+    const msg = `Signed in, but could not load from OneDrive: ${result.error}`;
+    logError(msg, { source: 'onedrive' });
+    setCloudMessage(msg);
     return;
   }
   setDoc(result.doc, null);
@@ -202,6 +227,32 @@ function onShellClick(e: Event): void {
     if (action) onModeAction(action);
     return;
   }
+  if (cmd === 'toggle-menu') {
+    setState({
+      menuOpen: !state.menuOpen,
+      openErrorLog: false,
+      refuseMessage: state.refuseMessage,
+    });
+    return;
+  }
+  if (cmd === 'close-menu') {
+    setState({ menuOpen: false, openErrorLog: false });
+    return;
+  }
+  if (cmd === 'open-error-log') {
+    markErrorsSeen();
+    setState({ menuOpen: true, openErrorLog: true });
+    return;
+  }
+  if (cmd === 'clear-error-log') {
+    clearErrorLog();
+    setState({ openErrorLog: true, menuOpen: true });
+    return;
+  }
+  if (cmd === 'mark-errors-seen') {
+    markErrorsSeen();
+    return;
+  }
   if (cmd === 'load-synthetic') {
     loadSynthetic();
     return;
@@ -218,6 +269,7 @@ function onShellClick(e: Event): void {
     setState({
       showStage2Checklist: !state.showStage2Checklist,
       refuseMessage: null,
+      menuOpen: false,
     });
     return;
   }
@@ -226,6 +278,7 @@ function onShellClick(e: Event): void {
       doc: createEmptyGarden(),
       refuseMessage: null,
       showStage2Checklist: false,
+      menuOpen: false,
     });
     return;
   }
@@ -234,7 +287,7 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'print-tags') {
-    setState({ view: 'tags', refuseMessage: null });
+    setState({ view: 'tags', refuseMessage: null, menuOpen: false });
     return;
   }
   if (cmd === 'back-survey') {
@@ -258,7 +311,7 @@ function onShellClick(e: Event): void {
     );
     const result = saveBaselineLengthWorkflow(state.doc, length, offsetA, offsetB, true);
     if (!result.ok) {
-      setState({ refuseMessage: result.reason ?? 'Could not save baseline.' });
+      surfaceFail(result.reason ?? 'Could not save baseline.', 'baseline');
       return;
     }
     setDoc(result.doc, null);
@@ -276,7 +329,7 @@ function onShellClick(e: Event): void {
       (panel?.querySelector('[data-field=offset]') as HTMLInputElement | null)?.value || 0,
     );
     if (edge != null && !(edge > 0)) {
-      setState({ refuseMessage: 'Edge length must be empty or a positive number in metres.' });
+      surfaceFail('Edge length must be empty or a positive number in metres.', 'house');
       return;
     }
     const next = addHouseCornerWorkflow(state.doc, edge, offset);
@@ -286,16 +339,21 @@ function onShellClick(e: Event): void {
   }
   if (cmd === 'close-house') {
     const result = closeHouseWorkflow(state.doc);
-    setDoc(result.doc, result.warn ? result.note : null);
-    if (!result.warn) setState({ refuseMessage: null });
+    if (result.warn) {
+      logError(result.note, { source: 'close-house' });
+      setDoc(result.doc, result.note);
+    } else {
+      setDoc(result.doc, null);
+    }
     speakCoachLine(result.note, result.doc.session.speakSteps);
     return;
   }
   if (cmd === 'record-tie') {
     if (!baselineReady(state.doc)) {
-      setState({
-        refuseMessage: 'Cannot record a baseline tie — establish the baseline length first.',
-      });
+      surfaceFail(
+        'Cannot record a baseline tie — establish the baseline length first.',
+        'tie',
+      );
       return;
     }
     const next = applyCannedBaselineTie(state.doc);
@@ -335,7 +393,9 @@ async function onSignIn(): Promise<void> {
   // loginRedirect navigates away on success; only clear busy on failure.
   if (!result.ok) {
     setCloudBusy(false);
-    setCloudMessage(result.error ?? 'Sign-in failed.');
+    const msg = result.error ?? 'Sign-in failed.';
+    logError(msg, { source: 'msal' });
+    setCloudMessage(msg);
   }
 }
 
@@ -344,7 +404,11 @@ async function onSignOut(): Promise<void> {
   setCloudMessage('Signing out…');
   const result = await signOut();
   setCloudBusy(false);
-  if (!result.ok) setCloudMessage(result.error ?? 'Sign-out failed.');
+  if (!result.ok) {
+    const msg = result.error ?? 'Sign-out failed.';
+    logError(msg, { source: 'msal' });
+    setCloudMessage(msg);
+  }
 }
 
 async function onOneDriveSave(): Promise<void> {
@@ -356,6 +420,7 @@ async function onOneDriveSave(): Promise<void> {
     setLastSaveIso(result.savedAt);
     setCloudMessage(`Saved to OneDrive (${getCloudStatus().pathHint}).`);
   } else {
+    logError(result.error, { source: 'onedrive' });
     setCloudMessage(result.error);
   }
 }
@@ -366,6 +431,7 @@ async function onOneDriveLoad(): Promise<void> {
   const result = await loadGardenCloud();
   setCloudBusy(false);
   if (!result.ok) {
+    logError(result.error, { source: 'onedrive' });
     setCloudMessage(result.error);
     return;
   }
@@ -399,18 +465,6 @@ function buildSurveyView(): HTMLElement {
 
   const wrap = el('div', { className: 'survey-layout survey-layout--plan-first' });
 
-  wrap.appendChild(buildTaskStrip(doc, coach, legal));
-
-  if (state.refuseMessage) {
-    wrap.appendChild(
-      el('div', {
-        className: 'refuse refuse--overlay',
-        attrs: { role: 'alert' },
-        text: state.refuseMessage,
-      }),
-    );
-  }
-
   const plan = el('section', {
     className: 'plan plan--backdrop',
     attrs: { 'aria-label': 'Garden plan' },
@@ -423,13 +477,29 @@ function buildSurveyView(): HTMLElement {
   plan.appendChild(planHost);
   wrap.appendChild(plan);
 
+  wrap.appendChild(buildHamburgerButton());
+  wrap.appendChild(buildMinimalChrome(doc, coach, legal));
+
+  if (state.refuseMessage) {
+    wrap.appendChild(
+      el('div', {
+        className: 'refuse refuse--overlay',
+        attrs: { role: 'alert' },
+        text: state.refuseMessage,
+      }),
+    );
+  }
+
+  if (state.menuOpen) {
+    wrap.appendChild(buildMenuDrawer(doc, coach, legal));
+  }
+
   const below = el('div', { className: 'survey-below' });
   if (state.showStage2Checklist) {
     below.appendChild(buildStage2ChecklistPanel());
   }
   const step = buildStepPanel(doc);
   if (step) below.appendChild(step);
-  below.appendChild(buildCloudPanel());
   if (doc.photos.length) {
     const thumbs = el('div', { className: 'thumbs' });
     for (const ph of doc.photos) {
@@ -455,52 +525,65 @@ function buildSurveyView(): HTMLElement {
   return wrap;
 }
 
-/** Compact mode + coach + primary next + action dropdown (replaces button wall). */
-function buildTaskStrip(
+/** Floating hamburger — red while unseen errors remain. */
+function buildHamburgerButton(): HTMLElement {
+  const unseen = hasUnseenErrors();
+  const count = unseenErrorCount();
+  const btn = el('button', {
+    className: 'hamburger' + (unseen ? ' hamburger--alert' : ''),
+    attrs: {
+      type: 'button',
+      'data-cmd': unseen && !state.menuOpen ? 'open-error-log' : 'toggle-menu',
+      'data-testid': 'hamburger',
+      'aria-label': unseen
+        ? `Menu — ${count} unseen error${count === 1 ? '' : 's'}`
+        : state.menuOpen
+          ? 'Close menu'
+          : 'Open menu',
+      'aria-expanded': state.menuOpen ? 'true' : 'false',
+    },
+  });
+  btn.appendChild(el('span', { className: 'hamburger__bars', attrs: { 'aria-hidden': 'true' } }));
+  if (unseen) {
+    btn.appendChild(
+      el('span', {
+        className: 'hamburger__badge',
+        text: count > 9 ? '9+' : String(count),
+        attrs: { 'aria-hidden': 'true' },
+      }),
+    );
+  }
+  return btn;
+}
+
+/** Mid-workflow chrome only: short coach line + primary next action. */
+function buildMinimalChrome(
   doc: GardenDocument,
   coach: ReturnType<typeof buildCoach>,
   legal: Set<ModeAction>,
 ): HTMLElement {
-  const strip = el('header', {
-    className: 'task-strip',
-    attrs: { role: 'status', 'data-testid': 'task-strip' },
+  const chrome = el('div', {
+    className: 'minimal-chrome',
+    attrs: { role: 'status', 'data-testid': 'minimal-chrome' },
   });
-
-  const top = el('div', { className: 'task-strip__top' });
-  top.appendChild(
-    el('div', { className: 'task-strip__mode', text: coach.banner }),
-  );
-  top.appendChild(
-    el('div', {
-      className: 'task-strip__build',
-      text: buildStamp(),
-      attrs: { 'data-testid': 'build-stamp' },
+  chrome.appendChild(
+    el('p', {
+      className: 'minimal-chrome__coach',
+      text: coach.body[0] ?? 'Follow the next action.',
+      attrs: { 'aria-live': 'polite' },
     }),
   );
-  strip.appendChild(top);
-
-  const coachLine = coach.body[0] ?? 'Follow the next action.';
-  strip.appendChild(
-    el('p', { className: 'task-strip__coach', text: coachLine, attrs: { 'aria-live': 'polite' } }),
-  );
-
-  if (coach.residualLine || coach.geometryLine) {
-    const meta = el('div', { className: 'task-strip__meta' });
-    if (coach.residualLine) {
-      meta.appendChild(el('span', { className: 'task-strip__residual', text: coach.residualLine }));
-    }
-    if (coach.geometryLine) {
-      meta.appendChild(el('span', { className: 'task-strip__geometry', text: coach.geometryLine }));
-    }
-    strip.appendChild(meta);
+  if (coach.residualLine) {
+    chrome.appendChild(
+      el('p', { className: 'minimal-chrome__meta', text: coach.residualLine }),
+    );
   }
 
-  const actionsRow = el('div', { className: 'task-strip__actions' });
-
+  const actions = el('div', { className: 'minimal-chrome__actions' });
   if (coach.nextAction && legal.has(coach.nextAction)) {
-    actionsRow.appendChild(
+    actions.appendChild(
       el('button', {
-        className: 'btn btn--suggested task-strip__primary',
+        className: 'btn btn--suggested minimal-chrome__primary',
         text: coach.nextButton ?? actionLabel(coach.nextAction),
         attrs: {
           type: 'button',
@@ -510,49 +593,80 @@ function buildTaskStrip(
       }),
     );
   } else if (doc.session.mode === 'START') {
-    actionsRow.appendChild(
+    actions.appendChild(
       el('button', {
-        className: 'btn btn--stage2 task-strip__primary',
+        className: 'btn btn--stage2 minimal-chrome__primary',
         text: 'Establish baseline',
         attrs: { type: 'button', 'data-cmd': 'start-stage2' },
       }),
     );
   }
+  if (actions.childNodes.length) chrome.appendChild(actions);
+  return chrome;
+}
 
-  // Legal actions dropdown (not a button wall).
-  const otherLegal = ALL_ACTIONS.filter(
-    (a) => legal.has(a) && a !== coach.nextAction,
+/** Full menu drawer — Sign-in, Tools, actions, Print, checklist, demos, I/O, stamp, Settings, Error log. */
+function buildMenuDrawer(
+  doc: GardenDocument,
+  coach: ReturnType<typeof buildCoach>,
+  legal: Set<ModeAction>,
+): HTMLElement {
+  const root = el('div', {
+    className: 'menu-drawer',
+    attrs: { 'data-testid': 'menu-drawer', role: 'dialog', 'aria-label': 'Menu' },
+  });
+  root.appendChild(
+    el('button', {
+      className: 'menu-drawer__backdrop',
+      attrs: { type: 'button', 'data-cmd': 'close-menu', 'aria-label': 'Close menu' },
+    }),
   );
-  if (otherLegal.length) {
-    const sel = el('select', {
-      className: 'task-strip__select',
-      attrs: {
-        'aria-label': 'Other legal actions',
-        'data-cmd': 'mode-select',
-      },
-    }) as HTMLSelectElement;
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = 'More actions…';
-    sel.appendChild(placeholder);
-    for (const action of otherLegal) {
-      const opt = document.createElement('option');
-      opt.value = action;
-      opt.textContent = actionLabel(action);
-      sel.appendChild(opt);
-    }
-    sel.addEventListener('change', () => {
-      const v = sel.value as ModeAction | '';
-      if (v) onModeAction(v);
-      sel.value = '';
-    });
-    actionsRow.appendChild(sel);
-  }
 
-  // Expandable: all actions (illegal still refuse with a sentence).
-  const allDetails = el('details', { className: 'task-strip__all' });
-  allDetails.appendChild(el('summary', { text: 'All mode actions' }));
-  const allList = el('div', { className: 'task-strip__all-list' });
+  const panel = el('div', { className: 'menu-drawer__panel' });
+  const head = el('div', { className: 'menu-drawer__head' });
+  head.appendChild(el('h2', { className: 'menu-drawer__title', text: 'Menu' }));
+  head.appendChild(
+    el('button', {
+      className: 'btn btn--util menu-drawer__close',
+      text: 'Close',
+      attrs: { type: 'button', 'data-cmd': 'close-menu' },
+    }),
+  );
+  panel.appendChild(head);
+
+  panel.appendChild(
+    el('p', {
+      className: 'menu-drawer__mode',
+      text: coach.banner,
+    }),
+  );
+
+  // Sign in / OneDrive
+  panel.appendChild(sectionTitle('Sign in / OneDrive'));
+  panel.appendChild(buildCloudPanel());
+
+  // Tools
+  panel.appendChild(sectionTitle('Tools'));
+  const tools = el('div', { className: 'menu-drawer__row' });
+  tools.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'New garden',
+      attrs: { type: 'button', 'data-cmd': 'new-garden' },
+    }),
+  );
+  tools.appendChild(
+    el('button', {
+      className: 'btn btn--util btn--stage2',
+      text: 'Establish baseline (Stage 2)',
+      attrs: { type: 'button', 'data-cmd': 'start-stage2' },
+    }),
+  );
+  panel.appendChild(tools);
+
+  // All mode actions
+  panel.appendChild(sectionTitle('All mode actions'));
+  const allList = el('div', { className: 'menu-drawer__actions' });
   for (const action of ALL_ACTIONS) {
     const isLegal = legal.has(action);
     allList.appendChild(
@@ -571,42 +685,51 @@ function buildTaskStrip(
       }),
     );
   }
-  allDetails.appendChild(allList);
-  actionsRow.appendChild(allDetails);
+  panel.appendChild(allList);
 
-  // Tools menu (demo, print, export, …).
-  const tools = el('details', { className: 'task-strip__tools' });
-  tools.appendChild(el('summary', { text: 'Tools' }));
-  const toolsBody = el('div', { className: 'task-strip__tools-body' });
-  toolsBody.appendChild(
+  // Print tags
+  panel.appendChild(sectionTitle('Print tags'));
+  panel.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Print tags (A4 belts + FNC01–04)',
+      attrs: { type: 'button', 'data-cmd': 'print-tags' },
+    }),
+  );
+
+  // Stage 2 checklist
+  panel.appendChild(sectionTitle('Stage 2 checklist'));
+  panel.appendChild(
     el('button', {
       className: 'btn btn--util btn--stage2',
       text: state.showStage2Checklist ? 'Hide Stage 2 checklist' : 'Show Stage 2 checklist',
       attrs: { type: 'button', 'data-cmd': 'toggle-stage2-checklist' },
     }),
   );
-  toolsBody.appendChild(
+
+  // Load demo
+  panel.appendChild(sectionTitle('Load demo'));
+  const demos = el('div', { className: 'menu-drawer__row' });
+  demos.appendChild(
     el('button', {
       className: 'btn btn--util btn--demo',
       text: 'Load synthetic demo',
       attrs: { type: 'button', 'data-cmd': 'load-synthetic' },
     }),
   );
-  toolsBody.appendChild(
+  demos.appendChild(
     el('button', {
       className: 'btn btn--util btn--demo',
       text: 'Run milestone demo',
       attrs: { type: 'button', 'data-cmd': 'run-milestone' },
     }),
   );
-  toolsBody.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: 'New garden',
-      attrs: { type: 'button', 'data-cmd': 'new-garden' },
-    }),
-  );
-  toolsBody.appendChild(
+  panel.appendChild(demos);
+
+  // Export / Import
+  panel.appendChild(sectionTitle('Export / Import'));
+  const io = el('div', { className: 'menu-drawer__row' });
+  io.appendChild(
     el('button', {
       className: 'btn btn--util',
       text: 'Export garden.json',
@@ -623,19 +746,28 @@ function buildTaskStrip(
     try {
       const imported = await importGarden(f);
       setDoc(imported, null);
+      setState({ menuOpen: false });
     } catch (err) {
-      setState({ refuseMessage: err instanceof Error ? err.message : 'Import failed.' });
+      const msg = err instanceof Error ? err.message : 'Import failed.';
+      surfaceFail(msg, 'import');
     }
   });
   fileLabel.appendChild(fileInput);
-  toolsBody.appendChild(fileLabel);
-  toolsBody.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: 'Print tags',
-      attrs: { type: 'button', 'data-cmd': 'print-tags' },
+  io.appendChild(fileLabel);
+  panel.appendChild(io);
+
+  // Build stamp
+  panel.appendChild(sectionTitle('Build stamp'));
+  panel.appendChild(
+    el('p', {
+      className: 'menu-drawer__stamp',
+      text: buildStamp(),
+      attrs: { 'data-testid': 'build-stamp' },
     }),
   );
+
+  // Settings
+  panel.appendChild(sectionTitle('Settings'));
   const speakLabel = el('label', { className: 'toggle' });
   const speak = el('input', {
     attrs: { type: 'checkbox', 'data-cmd': 'speak-toggle' },
@@ -643,25 +775,71 @@ function buildTaskStrip(
   speak.checked = doc.session.speakSteps;
   speakLabel.appendChild(speak);
   speakLabel.appendChild(document.createTextNode(' Speak steps'));
-  toolsBody.appendChild(speakLabel);
+  panel.appendChild(speakLabel);
 
-  // Extra coach lines in tools for phone space.
-  if (coach.body.length > 1 || coach.nextButton) {
-    const moreCoach = el('div', { className: 'task-strip__coach-more' });
-    for (const line of coach.body.slice(1)) {
-      moreCoach.appendChild(el('p', { text: line }));
+  // Error log
+  const errSection = el('section', {
+    className: 'menu-drawer__errors',
+    attrs: { 'data-testid': 'error-log', id: 'error-log' },
+  });
+  errSection.appendChild(sectionTitle('Error log'));
+  const errHead = el('div', { className: 'menu-drawer__row' });
+  errHead.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Mark seen',
+      attrs: { type: 'button', 'data-cmd': 'mark-errors-seen' },
+    }),
+  );
+  errHead.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Clear',
+      attrs: { type: 'button', 'data-cmd': 'clear-error-log' },
+    }),
+  );
+  errSection.appendChild(errHead);
+
+  const entries = getErrorLog();
+  if (!entries.length) {
+    errSection.appendChild(
+      el('p', { className: 'menu-drawer__empty', text: 'No errors captured this session.' }),
+    );
+  } else {
+    const list = el('ul', { className: 'error-log__list' });
+    for (const entry of entries) {
+      const item = el('li', { className: 'error-log__item' });
+      const when = new Date(entry.at).toLocaleString();
+      item.appendChild(
+        el('div', {
+          className: 'error-log__meta',
+          text: `${when}${entry.source ? ` · ${entry.source}` : ''}`,
+        }),
+      );
+      item.appendChild(el('div', { className: 'error-log__msg', text: entry.message }));
+      if (entry.stack) {
+        item.appendChild(el('pre', { className: 'error-log__stack', text: entry.stack }));
+      }
+      list.appendChild(item);
     }
-    if (coach.nextButton) {
-      moreCoach.appendChild(el('p', { className: 'coach__next', text: `Next: ${coach.nextButton}` }));
-    }
-    toolsBody.appendChild(moreCoach);
+    errSection.appendChild(list);
+  }
+  panel.appendChild(errSection);
+
+  root.appendChild(panel);
+
+  // Scroll to Error log when opened via the red hamburger.
+  if (state.openErrorLog) {
+    queueMicrotask(() => {
+      errSection.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
   }
 
-  tools.appendChild(toolsBody);
-  actionsRow.appendChild(tools);
-  strip.appendChild(actionsRow);
+  return root;
+}
 
-  return strip;
+function sectionTitle(text: string): HTMLElement {
+  return el('h3', { className: 'menu-drawer__section', text });
 }
 
 function buildCloudPanel(): HTMLElement {
@@ -814,10 +992,8 @@ function buildStage2ChecklistPanel(): HTMLElement {
 function startStage2FieldLoop(): void {
   const result = startStage2FieldWorkflow(state.doc);
   if (!result.ok) {
-    setState({
-      refuseMessage: result.reason ?? 'Could not start Stage 2.',
-      showStage2Checklist: true,
-    });
+    surfaceFail(result.reason ?? 'Could not start Stage 2.', 'stage2');
+    setState({ showStage2Checklist: true, menuOpen: false });
     return;
   }
   setState({
@@ -825,6 +1001,7 @@ function startStage2FieldLoop(): void {
     view: 'survey',
     refuseMessage: null,
     showStage2Checklist: result.showChecklist,
+    menuOpen: false,
   });
   const coach = buildCoach(result.doc);
   speakCoachLine(coach.body[0] ?? '', result.doc.session.speakSteps);
@@ -834,41 +1011,8 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
   const mode = doc.session.mode;
 
   if (mode === 'START') {
-    const panel = el('section', { className: 'step-panel step-panel--stage2' });
-    panel.appendChild(el('h2', { text: 'Stage 2 — baseline then house' }));
-    panel.appendChild(
-      el('p', {
-        text: 'Live plot: house-edge baseline → photo tie → grow ~10 corners → occupy → leapfrog / second baseline → adjust. OneDrive auto-saves when signed in.',
-      }),
-    );
-    panel.appendChild(
-      el('button', {
-        className: 'btn btn--util btn--stage2',
-        text: 'Start Stage 2 field loop',
-        attrs: { type: 'button', 'data-cmd': 'start-stage2' },
-      }),
-    );
-    panel.appendChild(
-      el('button', {
-        className: 'btn btn--util',
-        text: state.showStage2Checklist ? 'Hide field checklist' : 'Show field checklist',
-        attrs: { type: 'button', 'data-cmd': 'toggle-stage2-checklist' },
-      }),
-    );
-    panel.appendChild(el('h2', { className: 'step-panel__sub', text: 'Milestone (dry run)' }));
-    panel.appendChild(
-      el('p', {
-        text: 'Synthetic house-edge baseline + irregular shed + rod A → Adjust. Use indoors; Stage 2 is for the garden.',
-      }),
-    );
-    panel.appendChild(
-      el('button', {
-        className: 'btn btn--util btn--demo',
-        text: 'Run milestone demo (synthetic → Adjust)',
-        attrs: { type: 'button', 'data-cmd': 'run-milestone' },
-      }),
-    );
-    return panel;
+    // START: demos and checklist live in the hamburger — no button wall on the plan.
+    return null;
   }
 
   if (mode === 'BASELINE' || mode === 'HOUSE_BASELINE') {
@@ -1052,36 +1196,44 @@ function onModeAction(action: ModeAction): void {
   if (action === 'close_house') {
     const probe = canTransition(doc, action);
     if (!probe.ok) {
-      setState({ refuseMessage: probe.reason ?? 'Illegal transition.' });
+      surfaceFail(probe.reason ?? 'Illegal transition.', 'mode');
       speakCoachLine(probe.reason ?? '', doc.session.speakSteps);
       return;
     }
     const result = closeHouseWorkflow(doc);
-    setDoc(result.doc, result.warn ? result.note : null);
+    if (result.warn) {
+      logError(result.note, { source: 'close-house' });
+      setDoc(result.doc, result.note);
+    } else {
+      setDoc(result.doc, null);
+    }
     speakCoachLine(result.note, result.doc.session.speakSteps);
+    setState({ menuOpen: false });
     return;
   }
 
   const probe = canTransition(doc, action);
   if (!probe.ok) {
     const reason = probe.reason ?? 'Illegal transition.';
-    setState({ refuseMessage: reason });
+    surfaceFail(reason, 'mode');
     speakCoachLine(reason, doc.session.speakSteps);
     return;
   }
 
   if (action === 'adjust') {
     runAdjust(doc);
+    setState({ menuOpen: false });
     return;
   }
 
   const { doc: next, result } = applyTransition(doc, action);
   if (!result.ok) {
-    setState({ refuseMessage: result.reason ?? 'Illegal transition.' });
+    surfaceFail(result.reason ?? 'Illegal transition.', 'mode');
     speakCoachLine(result.reason ?? '', doc.session.speakSteps);
     return;
   }
   setDoc(next, null);
+  setState({ menuOpen: false });
   const coach = buildCoach(next);
   speakCoachLine(coach.body[0] ?? '', next.session.speakSteps);
 }
@@ -1089,7 +1241,7 @@ function onModeAction(action: ModeAction): void {
 function runAdjust(doc: GardenDocument): void {
   const result = toolboxRunAdjust(doc);
   if (!result.ok) {
-    setState({ refuseMessage: result.reason ?? 'Illegal transition.' });
+    surfaceFail(result.reason ?? 'Illegal transition.', 'adjust');
     speakCoachLine(result.reason ?? '', doc.session.speakSteps);
     return;
   }
@@ -1102,6 +1254,7 @@ function runAdjust(doc: GardenDocument): void {
 function loadSynthetic(): void {
   const doc = loadSyntheticWorkflow();
   setDoc(doc, null);
+  setState({ menuOpen: false });
   const coach = buildCoach(doc);
   speakCoachLine(coach.body[0] ?? '', doc.session.speakSteps);
 }
@@ -1110,10 +1263,12 @@ function loadSynthetic(): void {
 function runMilestoneDemo(): void {
   const result = runMilestoneDemoWorkflow();
   if (!result.ok) {
+    logError(result.reason ?? 'Milestone demo failed.', { source: 'demo' });
     setState({
       doc: result.doc,
       view: 'survey',
       refuseMessage: result.reason ?? 'Milestone demo failed.',
+      menuOpen: false,
     });
     return;
   }
@@ -1122,6 +1277,7 @@ function runMilestoneDemo(): void {
     view: 'survey',
     refuseMessage: null,
     showStage2Checklist: false,
+    menuOpen: false,
   });
   const coach = buildCoach(result.doc);
   speakCoachLine(

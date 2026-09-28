@@ -8,7 +8,7 @@ Static PWA (Vite + TypeScript) for surveying a ~20×20 m UK garden. No backend. 
 
 **Survey method (baseline first, then house polygon):** **[docs/plan-baseline-then-house.md](docs/plan-baseline-then-house.md)**.
 
-**Stage 2 — accurate measurements (field):** phone checklist → **[docs/stage-2-field-checklist.md](docs/stage-2-field-checklist.md)**. In the app: **Establish baseline** / **Show Stage 2 checklist**.
+**Stage 2 — accurate measurements (field):** phone checklist → **[docs/stage-2-field-checklist.md](docs/stage-2-field-checklist.md)**. In the app: hamburger → **Establish baseline** / **Show Stage 2 checklist**.
 
 **Microsoft sign-in + OneDrive:** saves `garden.json` to personal OneDrive at `/Garden Survey/garden.json`. Setup: **[docs/entra-onedrive-setup.md](docs/entra-onedrive-setup.md)**.
 
@@ -31,7 +31,7 @@ Production build uses Vite `base` `/gardenplanting/` for project Pages. Deploy i
 
 ## Field loop (session modes)
 
-Exactly one mode at a time. The task strip + coach always say where you are and what is legal next. For the live garden, follow **[Stage 2 field checklist](docs/stage-2-field-checklist.md)**.
+Exactly one mode at a time. The hamburger menu holds Sign-in, tools, and mode actions; on-screen you get a short coach line + primary next action. For the live garden, follow **[Stage 2 field checklist](docs/stage-2-field-checklist.md)**.
 
 1. **START** — New garden or load JSON / OneDrive / synthetic demo.
 2. **BASELINE** — Default: one **house edge**. Mark ends, enter length + optional offset mm. → *Establish baseline*

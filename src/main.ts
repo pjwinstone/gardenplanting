@@ -1,5 +1,8 @@
 import { initAuth, getAuthInitResult } from './msalAuth';
+import { installGlobalErrorCapture, logError } from './errorLog';
 import { mount, applyAuthReady } from './ui';
+
+installGlobalErrorCapture();
 
 async function boot(): Promise<void> {
   const root = document.querySelector<HTMLElement>('#app');
@@ -19,9 +22,13 @@ async function boot(): Promise<void> {
 
 boot().catch((err) => {
   console.error(err);
+  const msg = err instanceof Error ? err.message : 'Garden Survey failed to start.';
+  logError(msg, {
+    stack: err instanceof Error ? err.stack : undefined,
+    source: 'boot',
+  });
   const root = document.querySelector('#app');
   if (root) {
-    root.textContent =
-      err instanceof Error ? err.message : 'Garden Survey failed to start.';
+    root.textContent = msg;
   }
 });

@@ -12,7 +12,7 @@ The UI is **chatty and procedural**. At every moment the app states:
 The user and the code must agree on the current **session mode**. Never leave the user in a silent “upload a photo” void.
 
 ## Session modes (state machine)
-Exactly one mode at a time. Show it in the task strip + short spoken/text coach line.
+Exactly one mode at a time. Show it in the minimal coach chrome + short spoken/text coach line (full tools in the hamburger).
 
 1. `START` — New garden or load JSON.
 2. `BASELINE` — Mark two ends of a known-length baseline (default: **one house edge**). Enter length + optional mark offsets (mm). Coach: “This edge is your baseline. Measure it. Offsets are OK — tell me the roll/post radius if the mark is not the true corner.”
@@ -50,7 +50,7 @@ Default σ: tape 0.020 m, laser 0.002 m if flagged, rod length 0.005 m, clicks ~
 
 ## Chatty coach
 Coach copy lives only in `coach.ts`:
-- 1–3 sentences, large type (task strip shows the lead line)
+- 1–3 sentences, large type (minimal chrome shows the lead line)
 - Last residual in human units (mm)
 - Next legal button highlighted
 - Optional Web Speech Synthesis (toggle: Speak steps)
@@ -74,7 +74,7 @@ Codes: three letters + two digits (HSE, FNC, POL / A1 style for rods). Avoid O/I
 Print via `window.print()` with a print-only CSS stylesheet. What is printed must be the same IDs as in the document model. Include a one-page “how to wrap a toilet roll” instruction on the print sheet.
 
 ## Data / stack
-Vite + TypeScript. Modules: `model.ts`, `modes.ts`, `toolbox/`, `workflows/`, `adjustLayerA.ts`, `adjustLayerB.ts`, `photoGeometry.ts`, `storage.ts`, `planSvg.ts`, `tagsPrint.ts`, `coach.ts`, `ui.ts`.
+Vite + TypeScript. Modules: `model.ts`, `modes.ts`, `toolbox/`, `workflows/`, `adjustLayerA.ts`, `adjustLayerB.ts`, `photoGeometry.ts`, `storage.ts`, `planSvg.ts`, `tagsPrint.ts`, `coach.ts`, `errorLog.ts`, `ui.ts`.
 
 JSON document: points (with optional `offsetMm`), lines, polygons, **baselines**, observations, photos with thumbnails, setups.
 
@@ -83,7 +83,7 @@ Architecture: `docs/architecture-toolbox-workflows.md`. Method plan: `docs/plan-
 localStorage + export/import garden.json. OneDrive via Microsoft Graph (`/Garden Survey/garden.json`) when MSAL env is set — see `docs/entra-onedrive-setup.md`.
 
 ## First milestone (historical) + Stage 2
-1. Mode banner / task strip + coach + legal transitions.
+1. Minimal coach chrome + hamburger drawer + legal transitions.
 2. Synthetic baseline + irregular shed + rod A + occupy photos → Adjust draws SVG plan.
 3. Print tags page produces A4 rod belts + FNC01–04.
 4. Field checklist matches baseline-first loop.
