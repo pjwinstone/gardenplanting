@@ -56,7 +56,21 @@ import {
   saveBaselineLengthWorkflow,
   addHouseCornerWorkflow,
   closeHouseWorkflow,
+  workflowAddPoint,
 } from './workflows';
+import {
+  activeBaselineLabel,
+  baselinesByTrust,
+  createObject,
+  objectsOnLayer,
+  setBaselineTrust,
+  setStickyPanel,
+  stickyGeometry,
+  stickyLayer,
+  stickyObject,
+  updatePointMeasurement,
+} from './layers';
+import { GEOMETRY_CHOICES, type GeometryType } from './model';
 
 export type View = 'survey' | 'tags';
 
@@ -298,6 +312,100 @@ function onShellClick(e: Event): void {
     triggerPrint();
     return;
   }
+  if (cmd === 'add-photo') {
+    const result = workflowAddPoint(state.doc);
+    if (!result.ok) {
+      surfaceFail(result.reason, 'add-point');
+      setDoc(result.doc, result.reason);
+      return;
+    }
+    setDoc(result.doc, null);
+    speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
+    return;
+  }
+  if (cmd === 'inspect-point') {
+    const pointId = target.getAttribute('data-point-id');
+    if (!pointId) return;
+    const pt = state.doc.points.find((p) => p.id === pointId);
+    if (!pt) return;
+    // Seed sticky panel from this point's measurement history
+    let doc = {
+      ...state.doc,
+      session: {
+        ...state.doc.session,
+        inspectingPointId: pointId,
+        stickyLayerId: pt.layerId ?? state.doc.session.stickyLayerId,
+        stickyObjectId: pt.objectId ?? state.doc.session.stickyObjectId,
+        stickyObjectName:
+          (pt.objectId
+            ? state.doc.objects?.find((o) => o.id === pt.objectId)?.name
+            : undefined) ?? state.doc.session.stickyObjectName,
+        stickyGeometryType:
+          (pt.objectId
+            ? state.doc.objects?.find((o) => o.id === pt.objectId)?.geometryType
+            : undefined) ?? state.doc.session.stickyGeometryType,
+        currentBaselineId:
+          pt.measuredWithBaselineId ?? state.doc.session.currentBaselineId,
+      },
+    };
+    if (pt.measuredWithBaselineId) {
+      const bl = doc.baselines.find((b) => b.id === pt.measuredWithBaselineId);
+      if (bl) doc = { ...doc, session: { ...doc.session, activeBaselineEnds: { a: bl.a, b: bl.b } } };
+    }
+    setDoc(doc, null);
+    return;
+  }
+  if (cmd === 'close-inspector') {
+    setDoc({
+      ...state.doc,
+      session: { ...state.doc.session, inspectingPointId: undefined },
+    });
+    return;
+  }
+  if (cmd === 'apply-inspector') {
+    const panel = target.closest('.inspector-panel') ?? target.closest('.add-point-panel');
+    const pointId = state.doc.session.inspectingPointId;
+    if (!pointId || !panel) return;
+    const layerId = (panel.querySelector('[data-field=layer]') as HTMLSelectElement | null)?.value;
+    const objectName = (
+      panel.querySelector('[data-field=object-name]') as HTMLInputElement | null
+    )?.value;
+    const geometryType = (panel.querySelector('[data-field=geometry]') as HTMLSelectElement | null)
+      ?.value as GeometryType | undefined;
+    const baselineId = (panel.querySelector('[data-field=baseline]') as HTMLSelectElement | null)
+      ?.value;
+    const objectId =
+      (panel.querySelector('[data-field=object]') as HTMLSelectElement | null)?.value || undefined;
+    const next = updatePointMeasurement(state.doc, pointId, {
+      layerId,
+      objectId: objectId === '__new__' ? undefined : objectId,
+      objectName,
+      geometryType,
+      measuredWithBaselineId: baselineId || undefined,
+    });
+    setDoc(
+      {
+        ...next,
+        session: { ...next.session, inspectingPointId: pointId },
+      },
+      null,
+    );
+    return;
+  }
+  if (cmd === 'create-object') {
+    const panel = target.closest('.add-point-panel') ?? target.closest('.inspector-panel');
+    const name =
+      (panel?.querySelector('[data-field=object-name]') as HTMLInputElement | null)?.value?.trim() ||
+      'New object';
+    const layerId =
+      (panel?.querySelector('[data-field=layer]') as HTMLSelectElement | null)?.value ||
+      stickyLayer(state.doc).id;
+    const geometryType = ((panel?.querySelector('[data-field=geometry]') as HTMLSelectElement | null)
+      ?.value || stickyGeometry(state.doc)) as GeometryType;
+    const { doc } = createObject(state.doc, { layerId, name, geometryType });
+    setDoc(doc, null);
+    return;
+  }
   if (cmd === 'save-baseline') {
     const panel = target.closest('.step-panel');
     const length = Number(
@@ -440,12 +548,55 @@ async function onOneDriveLoad(): Promise<void> {
 }
 
 function onShellChange(e: Event): void {
-  const t = e.target as HTMLInputElement | null;
-  if (!t || t.getAttribute('data-cmd') !== 'speak-toggle') return;
-  setDoc({
-    ...state.doc,
-    session: { ...state.doc.session, speakSteps: t.checked },
-  });
+  const t = e.target as HTMLInputElement | HTMLSelectElement | null;
+  if (!t) return;
+  const cmd = t.getAttribute('data-cmd');
+  if (cmd === 'speak-toggle') {
+    setDoc({
+      ...state.doc,
+      session: { ...state.doc.session, speakSteps: (t as HTMLInputElement).checked },
+    });
+    return;
+  }
+  if (cmd === 'sticky-baseline') {
+    setDoc(setStickyPanel(state.doc, { currentBaselineId: t.value || undefined }), null);
+    return;
+  }
+  if (cmd === 'sticky-layer') {
+    setDoc(setStickyPanel(state.doc, { stickyLayerId: t.value }), null);
+    return;
+  }
+  if (cmd === 'sticky-object') {
+    if (t.value === '__new__') {
+      setDoc(setStickyPanel(state.doc, { stickyObjectId: null }), null);
+      return;
+    }
+    const obj = state.doc.objects?.find((o) => o.id === t.value);
+    setDoc(
+      setStickyPanel(state.doc, {
+        stickyObjectId: t.value,
+        stickyObjectName: obj?.name,
+        stickyGeometryType: obj?.geometryType,
+        stickyLayerId: obj?.layerId,
+      }),
+      null,
+    );
+    return;
+  }
+  if (cmd === 'sticky-object-name') {
+    setDoc(setStickyPanel(state.doc, { stickyObjectName: t.value }), null);
+    return;
+  }
+  if (cmd === 'sticky-geometry') {
+    setDoc(setStickyPanel(state.doc, { stickyGeometryType: t.value as GeometryType }), null);
+    return;
+  }
+  if (cmd === 'baseline-trust') {
+    const id = t.getAttribute('data-baseline-id');
+    if (!id) return;
+    setDoc(setBaselineTrust(state.doc, id, Number(t.value)), null);
+    return;
+  }
 }
 
 function buildApp(): HTMLElement {
@@ -479,6 +630,10 @@ function buildSurveyView(): HTMLElement {
 
   wrap.appendChild(buildHamburgerButton());
   wrap.appendChild(buildMinimalChrome(doc, coach, legal));
+  wrap.appendChild(buildAddPointPanel(doc));
+  if (doc.session.inspectingPointId) {
+    wrap.appendChild(buildInspectorPanel(doc));
+  }
 
   if (state.refuseMessage) {
     wrap.appendChild(
@@ -603,6 +758,229 @@ function buildMinimalChrome(
   }
   if (actions.childNodes.length) chrome.appendChild(actions);
   return chrome;
+}
+
+/** Sticky selectors: Baseline · Layer · Object · Geometry · Add photo. */
+function buildAddPointPanel(doc: GardenDocument): HTMLElement {
+  const panel = el('section', {
+    className: 'add-point-panel',
+    attrs: { 'data-testid': 'add-point-panel', 'aria-label': 'Add point' },
+  });
+  panel.appendChild(el('h2', { className: 'add-point-panel__title', text: '+ Point' }));
+  panel.appendChild(
+    el('p', {
+      className: 'add-point-panel__hint',
+      text: `Sticky · ${activeBaselineLabel(doc)}`,
+    }),
+  );
+
+  const grid = el('div', { className: 'add-point-panel__grid' });
+
+  const blWrap = el('label', { className: 'field' });
+  blWrap.appendChild(el('span', { text: 'Baseline' }));
+  const blSel = el('select', {
+    attrs: { 'data-field': 'baseline', 'data-cmd': 'sticky-baseline', 'aria-label': 'Baseline' },
+  }) as HTMLSelectElement;
+  const ranked = baselinesByTrust(doc);
+  if (!ranked.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'None yet — establish baseline';
+    blSel.appendChild(opt);
+  } else {
+    for (const b of ranked) {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      const used = b.usedForMeasurementCount ?? 0;
+      opt.textContent = `${b.a}–${b.b} · T${b.trust ?? 50}${used ? ` · used ×${used}` : ''}`;
+      if (b.id === (doc.session.currentBaselineId ?? ranked[0]?.id)) opt.selected = true;
+      blSel.appendChild(opt);
+    }
+  }
+  blWrap.appendChild(blSel);
+  grid.appendChild(blWrap);
+
+  const curBl = ranked.find((b) => b.id === doc.session.currentBaselineId) ?? ranked[0];
+  if (curBl) {
+    const trustWrap = el('label', { className: 'field field--trust' });
+    trustWrap.appendChild(el('span', { text: `Trust ${curBl.a}–${curBl.b}` }));
+    trustWrap.appendChild(
+      el('input', {
+        attrs: {
+          type: 'range',
+          min: '0',
+          max: '100',
+          value: String(curBl.trust ?? 50),
+          'data-cmd': 'baseline-trust',
+          'data-baseline-id': curBl.id,
+          'aria-label': 'Baseline trust',
+        },
+      }),
+    );
+    grid.appendChild(trustWrap);
+  }
+
+  const layerWrap = el('label', { className: 'field' });
+  layerWrap.appendChild(el('span', { text: 'Layer' }));
+  const layerSel = el('select', {
+    attrs: { 'data-field': 'layer', 'data-cmd': 'sticky-layer', 'aria-label': 'Layer' },
+  }) as HTMLSelectElement;
+  const layers = doc.layers?.length ? doc.layers : [{ id: 'walkway', name: 'Walkway' }];
+  const stickyL = stickyLayer(doc).id;
+  for (const l of layers) {
+    const opt = document.createElement('option');
+    opt.value = l.id;
+    opt.textContent = l.name;
+    if (l.id === stickyL) opt.selected = true;
+    layerSel.appendChild(opt);
+  }
+  layerWrap.appendChild(layerSel);
+  grid.appendChild(layerWrap);
+
+  const objWrap = el('label', { className: 'field' });
+  objWrap.appendChild(el('span', { text: 'Object' }));
+  const objSel = el('select', {
+    attrs: { 'data-field': 'object', 'data-cmd': 'sticky-object', 'aria-label': 'Object' },
+  }) as HTMLSelectElement;
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '— New object —';
+  objSel.appendChild(newOpt);
+  for (const o of objectsOnLayer(doc, stickyL)) {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.name;
+    if (o.id === doc.session.stickyObjectId) opt.selected = true;
+    objSel.appendChild(opt);
+  }
+  if (!doc.session.stickyObjectId) newOpt.selected = true;
+  objWrap.appendChild(objSel);
+  grid.appendChild(objWrap);
+
+  const nameWrap = el('label', { className: 'field' });
+  nameWrap.appendChild(el('span', { text: 'Object name' }));
+  nameWrap.appendChild(
+    el('input', {
+      attrs: {
+        type: 'text',
+        'data-field': 'object-name',
+        'data-cmd': 'sticky-object-name',
+        value: doc.session.stickyObjectName ?? stickyObject(doc)?.name ?? 'Path',
+        'aria-label': 'Object name',
+      },
+    }),
+  );
+  grid.appendChild(nameWrap);
+
+  const geoWrap = el('label', { className: 'field' });
+  geoWrap.appendChild(el('span', { text: 'Geometry' }));
+  const geoSel = el('select', {
+    attrs: { 'data-field': 'geometry', 'data-cmd': 'sticky-geometry', 'aria-label': 'Geometry' },
+  }) as HTMLSelectElement;
+  const geo = stickyGeometry(doc);
+  for (const g of GEOMETRY_CHOICES) {
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = g.label;
+    if (g.id === geo) opt.selected = true;
+    geoSel.appendChild(opt);
+  }
+  geoWrap.appendChild(geoSel);
+  grid.appendChild(geoWrap);
+
+  panel.appendChild(grid);
+
+  const actionsRow = el('div', { className: 'add-point-panel__actions' });
+  actionsRow.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'New object',
+      attrs: { type: 'button', 'data-cmd': 'create-object' },
+    }),
+  );
+  actionsRow.appendChild(
+    el('button', {
+      className: 'btn btn--suggested',
+      text: 'Add photo',
+      attrs: { type: 'button', 'data-cmd': 'add-photo', 'data-testid': 'add-photo' },
+    }),
+  );
+  panel.appendChild(actionsRow);
+  return panel;
+}
+
+function buildInspectorPanel(doc: GardenDocument): HTMLElement {
+  const pointId = doc.session.inspectingPointId!;
+  const pt = doc.points.find((p) => p.id === pointId);
+  const panel = el('section', {
+    className: 'inspector-panel',
+    attrs: {
+      'data-testid': 'inspector-panel',
+      role: 'dialog',
+      'aria-label': 'Measurement inspector',
+    },
+  });
+  const head = el('div', { className: 'inspector-panel__head' });
+  head.appendChild(
+    el('h2', { className: 'inspector-panel__title', text: pt ? `Point ${pt.id}` : 'Point' }),
+  );
+  head.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Close',
+      attrs: { type: 'button', 'data-cmd': 'close-inspector' },
+    }),
+  );
+  panel.appendChild(head);
+
+  if (!pt) {
+    panel.appendChild(el('p', { text: 'Point not found.' }));
+    return panel;
+  }
+
+  const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
+  const bl = pt.measuredWithBaselineId
+    ? doc.baselines.find((b) => b.id === pt.measuredWithBaselineId)
+    : undefined;
+
+  panel.appendChild(
+    el('p', {
+      className: 'inspector-panel__meta',
+      text: `Measured with ${bl ? `${bl.a}–${bl.b}` : '—'} · ${obj ? `${obj.layerId}/${obj.name}` : pt.layerId ?? '—'} · ${obj?.geometryType ?? '—'}`,
+    }),
+  );
+
+  const nested = buildAddPointPanel(doc);
+  nested.classList.add('add-point-panel--nested');
+  const title = nested.querySelector('.add-point-panel__title');
+  if (title) title.textContent = 'Revise measurement';
+  const addBtn = nested.querySelector('[data-cmd="add-photo"]');
+  if (addBtn) {
+    addBtn.setAttribute('data-cmd', 'apply-inspector');
+    addBtn.textContent = 'Save changes';
+  }
+  panel.appendChild(nested);
+
+  const photos = (pt.photoIds ?? [])
+    .map((id) => doc.photos.find((p) => p.id === id))
+    .filter(Boolean);
+  if (photos.length) {
+    panel.appendChild(el('h3', { className: 'inspector-panel__section', text: 'Photos / obs' }));
+    const list = el('ul', { className: 'inspector-panel__photos' });
+    for (const ph of photos) {
+      list.appendChild(el('li', { text: `${ph!.id}${ph!.note ? ` — ${ph!.note}` : ''}` }));
+    }
+    panel.appendChild(list);
+  }
+  if (obj?.residualMm != null) {
+    panel.appendChild(
+      el('p', {
+        className: 'inspector-panel__residual',
+        text: `Object residual ~${obj.residualMm.toFixed(0)} mm`,
+      }),
+    );
+  }
+  return panel;
 }
 
 /** Full menu drawer — Sign-in, Tools, actions, Print, checklist, demos, I/O, stamp, Settings, Error log. */

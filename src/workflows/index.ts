@@ -16,3 +16,4 @@ export {
   addHouseCornerWorkflow,
   closeHouseWorkflow,
 } from './measureHouse';
+export { workflowAddPoint } from './addPoint';

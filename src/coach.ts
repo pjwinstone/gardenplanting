@@ -9,6 +9,7 @@ import {
 } from './model';
 import { suggestedAction, actionLabel, legalActions, type ModeAction } from './modes';
 import { STAGE2_ENTRY_COACH } from './stage2Checklist';
+import { activeBaselineLabel, stickyChipLabel } from './layers';
 
 /**
  * All coach copy lives here — edit wording without touching the solver.
@@ -44,19 +45,19 @@ const MODE_COACH: Record<string, string> = {
   HOUSE_EDGES:
     'Grow the house polygon — tape the next reachable edge, photo-tie another corner, or leapfrog for the far side. Close house when you have enough corners.',
   ADD_POINT:
-    'Spike on the thing you are naming. Bubble the pole. Photograph live control (baseline ends and/or rod). Then name the point.',
+    'Observe this object. Pick baseline, layer, name, geometry — then Add photo.',
   ADD_POINT_EXTRA_YAW:
-    'Do not step. Only turn the phone so another mark sits in the middle of the frame. These photos share this point.',
+    'Same point — only yaw. Do not step.',
   LEAPFROG:
-    'Plant rod B in the new view for the far side / second baseline. Photograph A and B together before you pick A up.',
+    'Plant rod B. Photo A+B together before picking A up.',
   RODS_MOVED:
-    'Rod A is no longer the old coordinates. Establish another baseline if needed, or place the new live rod and keep surveying.',
+    'Rod A moved. Pick a trusted baseline or place the new live rod.',
   FENCE_TAG:
-    'You cannot stand in the fence. Stick a roll on the post, photograph it with live control.',
+    'Stick a roll on the post; photo with live control.',
   ADJUST:
-    'Layer A then Layer B are done. Residuals are in millimetres — baseline first, then edges, house close gap, then add-point stations.',
+    'Refit: baselines are not sacred — higher-trust ones are preferred. Residuals in mm.',
   REVIEW:
-    'Plan on an iPad-sized layout. Thumbnails sit beside points. Export or trust OneDrive when signed in.',
+    'Plan view. Tap a point to inspect how it was measured.',
 };
 
 export function modeBanner(mode: SessionMode): string {
@@ -134,14 +135,11 @@ export function buildCoach(doc: GardenDocument): CoachLines {
   }
 
   if (mode === 'ADD_POINT' || mode === 'ADD_POINT_EXTRA_YAW') {
+    body.push(`${stickyChipLabel(doc)} · baseline ${activeBaselineLabel(doc)}`);
     const occ = doc.session.currentAddPointId;
     if (occ) {
       const n = doc.photos.filter((p) => p.addPointId === occ).length;
-      if (n > 1) {
-        body.push(
-          `${n} photos on ${occ}. Say Repeat if this is another visit, or yaw-only if you did not move your feet.`,
-        );
-      }
+      if (n > 1) body.push(`${n} photos on ${occ}.`);
     }
   }
 

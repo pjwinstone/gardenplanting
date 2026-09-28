@@ -315,7 +315,131 @@ body {
 .survey-below {
   max-width: 960px;
   margin: 0 auto;
-  padding: 0.85rem 1.1rem 6rem;
+  padding: 0.85rem 1.1rem 10rem;
+}
+
+.add-point-panel {
+  position: fixed;
+  left: max(0.65rem, env(safe-area-inset-left));
+  right: max(0.65rem, env(safe-area-inset-right));
+  bottom: max(4.8rem, calc(env(safe-area-inset-bottom) + 4.2rem));
+  z-index: 28;
+  max-width: 28rem;
+  padding: 0.65rem 0.75rem 0.75rem;
+  background: rgba(246, 241, 230, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: 0 2px 14px rgba(26, 36, 28, 0.2);
+  color: var(--ink);
+}
+
+.add-point-panel__title {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.05rem;
+  margin: 0 0 0.15rem;
+  color: var(--moss);
+}
+
+.add-point-panel__hint {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  margin: 0 0 0.45rem;
+  color: var(--muted);
+}
+
+.add-point-panel__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 0.55rem;
+}
+
+.add-point-panel__grid .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.add-point-panel__grid .field span {
+  color: var(--muted);
+}
+
+.add-point-panel__grid .field input,
+.add-point-panel__grid .field select {
+  font: inherit;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: #fffdf8;
+}
+
+.add-point-panel__grid .field--trust {
+  grid-column: 1 / -1;
+}
+
+.add-point-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.add-point-panel--nested {
+  position: static;
+  max-width: none;
+  box-shadow: none;
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+}
+
+.inspector-panel {
+  position: fixed;
+  left: max(0.65rem, env(safe-area-inset-left));
+  right: max(0.65rem, env(safe-area-inset-right));
+  top: max(3.5rem, calc(env(safe-area-inset-top) + 3.2rem));
+  z-index: 45;
+  max-height: min(70vh, 36rem);
+  overflow: auto;
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 0.75rem 0.85rem 1rem;
+  background: #f6f1e6;
+  border: 1px solid var(--moss-2);
+  border-radius: 4px;
+  box-shadow: 0 4px 24px rgba(26, 36, 28, 0.28);
+}
+
+.inspector-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.inspector-panel__title {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.inspector-panel__meta,
+.inspector-panel__residual {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.4rem 0;
+}
+
+.inspector-panel__section {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 0.95rem;
+  margin: 0.75rem 0 0.3rem;
+}
+
+.inspector-panel__photos {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
 }
 
 .refuse--overlay {

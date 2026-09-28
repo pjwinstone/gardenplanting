@@ -1,4 +1,4 @@
-/** Garden Survey document model — points, baselines, polygons, observations, photos, setups. */
+/** Garden Survey document model — points, baselines, layers/objects, photos, setups. */
 
 export type SessionMode =
   | 'START'
@@ -21,6 +21,49 @@ export type SessionMode =
 
 export type PointKind = 'HSE' | 'FNC' | 'POL' | 'ROD' | 'OCC' | 'TRK' | 'BED' | 'BL';
 
+export type GeometryType = 'square' | 'circle' | 'triangle' | 'irregular_polygon' | 'line' | 'point';
+
+export const GEOMETRY_CHOICES: { id: GeometryType; label: string }[] = [
+  { id: 'square', label: 'Square' },
+  { id: 'circle', label: 'Circle' },
+  { id: 'triangle', label: 'Triangle' },
+  { id: 'irregular_polygon', label: 'Irregular polygon' },
+];
+
+export interface LayerDef {
+  id: string;
+  name: string;
+  colour?: string;
+}
+
+export interface SolvedCircle {
+  cx: number;
+  cy: number;
+  r: number;
+}
+
+export interface SolvedRectangle {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** Named thing on a layer (one level under layer). */
+export interface GardenObject {
+  id: string;
+  layerId: string;
+  name: string;
+  geometryType: GeometryType;
+  measuredPointIds: string[];
+  selectedPointIds: string[];
+  solvedCircle?: SolvedCircle;
+  solvedRectangle?: SolvedRectangle;
+  /** Ordered vertex ids for triangle / irregular polygon fuzzy outline. */
+  solvedPolygonIds?: string[];
+  residualMm?: number;
+}
+
 export interface Point {
   id: string;
   kind: PointKind;
@@ -33,6 +76,12 @@ export interface Point {
    * point is the brick arris, not the roll centre.
    */
   offsetMm?: number;
+  layerId?: string;
+  objectId?: string;
+  /** Baseline id used when this point was measured. */
+  measuredWithBaselineId?: string;
+  /** Photo ids attached to this measurement. */
+  photoIds?: string[];
 }
 
 export type LineKind = 'tape' | 'laser' | 'rod' | 'straight' | 'baseline';
@@ -57,6 +106,13 @@ export interface Baseline {
   /** True when B1–B2 is also a house polygon edge. */
   isHouseEdge?: boolean;
   label?: string;
+  /**
+   * Trust / z-order priority (higher = preferred for new measurements and draw order).
+   * Defaults to 50; bumped when used successfully.
+   */
+  trust?: number;
+  /** How many + Point measurements have used this baseline. */
+  usedForMeasurementCount?: number;
 }
 
 export interface Polygon {
@@ -121,6 +177,16 @@ export interface SessionState {
   currentAddPointId?: string;
   currentSetupId?: string;
   currentBaselineId?: string;
+  /** Sticky + Point target (default layer: walkway). */
+  stickyLayerId?: string;
+  stickyObjectId?: string;
+  /** Sticky object name for create / rename in + Point panel. */
+  stickyObjectName?: string;
+  stickyGeometryType?: GeometryType;
+  /** Plan-picked active baseline ends — not eternally sacred; Adjust can refit. */
+  activeBaselineEnds?: { a?: string; b?: string };
+  /** Point open in the measurement inspector (click on plan). */
+  inspectingPointId?: string;
 }
 
 export interface GardenDocument {
@@ -134,6 +200,8 @@ export interface GardenDocument {
   observations: Observation[];
   photos: Photo[];
   setups: Setup[];
+  layers: LayerDef[];
+  objects: GardenObject[];
   session: SessionState;
 }
 
@@ -164,10 +232,20 @@ export function emptyDocument(name = 'Untitled garden'): GardenDocument {
     observations: [],
     photos: [],
     setups: [],
+    layers: [
+      { id: 'walkway', name: 'Walkway', colour: '#6b8f71' },
+      { id: 'structure', name: 'Structure', colour: '#3d3428' },
+      { id: 'plants', name: 'Plants', colour: '#2f5d3a' },
+      { id: 'survey', name: 'Survey', colour: '#1a5f7a' },
+    ],
+    objects: [],
     session: {
       mode: 'START',
       speakSteps: false,
       geometryOk: false,
+      stickyLayerId: 'walkway',
+      stickyGeometryType: 'circle',
+      stickyObjectName: 'Path',
     },
   };
 }
@@ -184,8 +262,28 @@ export function normalizeDocument(raw: GardenDocument): GardenDocument {
     observations: raw.observations ?? [],
     photos: raw.photos ?? [],
     setups: raw.setups ?? [],
+    layers: raw.layers?.length
+      ? raw.layers
+      : [
+          { id: 'walkway', name: 'Walkway', colour: '#6b8f71' },
+          { id: 'structure', name: 'Structure', colour: '#3d3428' },
+          { id: 'plants', name: 'Plants', colour: '#2f5d3a' },
+          { id: 'survey', name: 'Survey', colour: '#1a5f7a' },
+        ],
+    objects: (raw.objects ?? []).map((o) => {
+      const g = (o as { geometryType?: string }).geometryType;
+      const geometryType =
+        g === 'rectangle' || g === 'free' || g === 'polygon'
+          ? (g === 'rectangle' ? 'square' : 'irregular_polygon')
+          : ((g as GeometryType | undefined) ?? 'circle');
+      return { ...o, geometryType };
+    }),
     session: { ...emptyDocument().session, ...raw.session },
   };
+  for (const b of doc.baselines) {
+    if (b.trust == null) b.trust = 50;
+    if (b.usedForMeasurementCount == null) b.usedForMeasurementCount = 0;
+  }
   const legacy = doc.session.mode as string;
   if (legacy === 'HOUSE_BASELINE') doc.session.mode = 'BASELINE';
   if (legacy === 'PLACE_ROD_A') doc.session.mode = 'HOUSE_EDGES';
@@ -252,6 +350,8 @@ export function syntheticDocument(): GardenDocument {
       kind: 'tape',
       isHouseEdge: true,
       label: 'House-edge baseline (south)',
+      trust: 70,
+      usedForMeasurementCount: 2,
     },
   ];
 
@@ -341,7 +441,28 @@ export function syntheticDocument(): GardenDocument {
     currentSetupId: setupId,
     currentBaselineId: 'BL-1',
     currentAddPointId: 'BED02P1',
+    stickyLayerId: 'walkway',
+    stickyGeometryType: 'circle',
+    stickyObjectName: 'Bed path',
+    activeBaselineEnds: { a: 'HSE01', b: 'HSE02' },
   };
+
+  doc.objects = [
+    {
+      id: 'obj-bed',
+      layerId: 'walkway',
+      name: 'Bed path',
+      geometryType: 'circle',
+      measuredPointIds: ['BED01P1', 'BED02P1'],
+      selectedPointIds: ['BED01P1', 'BED02P1'],
+    },
+  ];
+  doc.session.stickyObjectId = 'obj-bed';
+  doc.points = doc.points.map((p) =>
+    p.id === 'BED01P1' || p.id === 'BED02P1'
+      ? { ...p, layerId: 'walkway', objectId: 'obj-bed', measuredWithBaselineId: 'BL-1' }
+      : p,
+  );
 
   return doc;
 }
@@ -464,6 +585,8 @@ export function setBaseline(
     kind,
     isHouseEdge,
     label: opts.label ?? (isHouseEdge ? 'House-edge baseline' : 'Baseline'),
+    trust: 60,
+    usedForMeasurementCount: 0,
   };
 
   const lines = doc.lines.filter((l) => l.id !== `L-${id}` && !(l.a === aId && l.b === bId));

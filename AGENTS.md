@@ -18,7 +18,7 @@ Exactly one mode at a time. Show it in the minimal coach chrome + short spoken/t
 2. `BASELINE` — Mark two ends of a known-length baseline (default: **one house edge**). Enter length + optional mark offsets (mm). Coach: “This edge is your baseline. Measure it. Offsets are OK — tell me the roll/post radius if the mark is not the true corner.”
 3. `PHOTO_TIE_BASELINE` — Coach: “Stand where this photo contains both baseline ends AND the house mark you are fixing. Then tap those marks.”
 4. `HOUSE_EDGES` — Optional: tape the next reachable wall segment or add another baseline. Grow the irregular house polygon (~10 corners). Coach: “Add the next edge or corner when you can. Far side needs leapfrog.”
-5. `ADD_POINT` — **Add point** workflow (`+ Point`). Coach: “Spike on the thing you are naming. Bubble the pole. Photograph the live control (baseline ends and/or rod). Then name the point.”
+5. `ADD_POINT` — **Add point** workflow (`+ Point`): observe a **named object on a layer** (sticky baseline / layer / object / geometry). **Add photo** places/updates the point. Coach stays short.
 6. `ADD_POINT_EXTRA_YAW` — optional extra photos from the SAME add-point station, yaw only. Coach: “Do not step. Only turn the phone so another mark sits in the middle of the frame. These photos share this point.”
 7. `LEAPFROG` — Coach: “Plant rod B in the new view. Photograph A and B together before you pick A up. Use this for the far side of the house / a second baseline.”
 8. `RODS_MOVED` — User confirms rods moved. Close setup, open new setup. Coach: “Rod A is no longer the old coordinates.”
@@ -40,7 +40,9 @@ Refuse illegal actions with a sentence, e.g. Add point with no live control; “
 - **v1 photo-tie:** require **both baseline ends + target mark in one frame**. Full multi-image BA is later.
 - Two 4.000 m rods (A1 A2, B1 B2) for leapfrog / helper control. Optional mid 2.000 m checks — not a third station.
 - Setups dated/time-boxed. Photos belong to a setup via EXIF DateTimeOriginal + explicit Rods moved.
-- Camera on a plumbed ~1 m pole is the rover. **Add point** is a **workflow** that uses toolbox capabilities (photo, resection, naming, …); plumbed pole = that (x,y).
+- Camera on a plumbed ~1 m pole is the rover. **Add point** = observe an object on a layer (workflow → toolbox photo/resection/naming); plumbed pole = that (x,y). Geometry (square / circle / triangle / irregular polygon) emerges fuzzy as photos accumulate.
+- **Active baseline** is selectable (default = previous; trust / z-order preferred). Baselines used for measurements are drawn distinctly; Adjust can still refit — early control is not dogma.
+- Tap any plan point to open its measurement inspector (same fields as + Point).
 - Yaw-only extra photos share one add-point station. Do not treat a hand-wave as a new station.
 - Unique pose needs baseline ends or second rod or a third known mark in the frame (or across shared-C yaw set). If underdetermined, say so; do not invent coordinates.
 - Distances primary; photo angles/resection secondary.
@@ -78,7 +80,7 @@ Vite + TypeScript. Modules: `model.ts`, `modes.ts`, `toolbox/`, `workflows/`, `a
 
 JSON document: points (with optional `offsetMm`), lines, polygons, **baselines**, observations, photos with thumbnails, setups.
 
-Architecture: `docs/architecture-toolbox-workflows.md`. Method plan: `docs/plan-baseline-then-house.md`.
+Architecture: `docs/architecture-toolbox-workflows.md`. Method plan: `docs/plan-baseline-then-house.md`. Layers/objects plan: `docs/plan-layers-objects-add-point.md`.
 
 localStorage + export/import garden.json. OneDrive via Microsoft Graph (`/Garden Survey/garden.json`) when MSAL env is set — see `docs/entra-onedrive-setup.md`.
 
