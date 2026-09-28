@@ -59,7 +59,6 @@ import {
   workflowAddPoint,
 } from './workflows';
 import {
-  activeBaselineLabel,
   baselinesByTrust,
   createObject,
   objectsOnLayer,
@@ -1319,51 +1318,27 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   );
   dialog.appendChild(head);
 
-  dialog.appendChild(
-    el('p', {
-      className: 'point-dialog__hint',
-      text:
-        mode === 'inspect' && pt
-          ? `Edit · ${activeBaselineLabel(doc)}`
-          : `Sticky · ${activeBaselineLabel(doc)}`,
-    }),
-  );
-
-  if (mode === 'inspect' && pt) {
-    const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
-    const bl = pt.measuredWithBaselineId
-      ? doc.baselines.find((b) => b.id === pt.measuredWithBaselineId)
-      : undefined;
-    dialog.appendChild(
-      el('p', {
-        className: 'point-dialog__meta',
-        text: `Measured with ${bl ? `${bl.a}–${bl.b}` : '—'} · ${obj ? `${obj.layerId}/${obj.name}` : pt.layerId ?? '—'} · ${obj?.geometryType ?? '—'}`,
-      }),
-    );
-  }
-
   const grid = el('div', { className: 'point-dialog__grid' });
 
+  // Baseline — named only via the select (optgroup / first option), not repeated above.
   const blWrap = el('label', { className: 'field' });
-  blWrap.appendChild(el('span', { text: 'Baseline' }));
   const blSel = el('select', {
     attrs: { 'data-field': 'baseline', 'data-cmd': 'sticky-baseline', 'aria-label': 'Baseline' },
   }) as HTMLSelectElement;
   const ranked = baselinesByTrust(doc);
-  if (!ranked.length) {
+  const blHeader = document.createElement('option');
+  blHeader.value = '';
+  blHeader.disabled = true;
+  blHeader.textContent = 'Baseline…';
+  if (!ranked.length) blHeader.selected = true;
+  blSel.appendChild(blHeader);
+  for (const b of ranked) {
     const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = 'None yet — establish baseline';
+    opt.value = b.id;
+    const used = b.usedForMeasurementCount ?? 0;
+    opt.textContent = `${b.a}–${b.b} · T${b.trust ?? 50}${used ? ` · ×${used}` : ''}`;
+    if (b.id === (doc.session.currentBaselineId ?? ranked[0]?.id)) opt.selected = true;
     blSel.appendChild(opt);
-  } else {
-    for (const b of ranked) {
-      const opt = document.createElement('option');
-      opt.value = b.id;
-      const used = b.usedForMeasurementCount ?? 0;
-      opt.textContent = `${b.a}–${b.b} · T${b.trust ?? 50}${used ? ` · used ×${used}` : ''}`;
-      if (b.id === (doc.session.currentBaselineId ?? ranked[0]?.id)) opt.selected = true;
-      blSel.appendChild(opt);
-    }
   }
   blWrap.appendChild(blSel);
   grid.appendChild(blWrap);
@@ -1371,7 +1346,6 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   const curBl = ranked.find((b) => b.id === doc.session.currentBaselineId) ?? ranked[0];
   if (curBl) {
     const trustWrap = el('label', { className: 'field field--trust' });
-    trustWrap.appendChild(el('span', { text: `Trust ${curBl.a}–${curBl.b}` }));
     trustWrap.appendChild(
       el('input', {
         attrs: {
@@ -1381,7 +1355,8 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
           value: String(curBl.trust ?? 50),
           'data-cmd': 'baseline-trust',
           'data-baseline-id': curBl.id,
-          'aria-label': 'Baseline trust',
+          'aria-label': `Trust ${curBl.a}–${curBl.b}`,
+          title: `Trust ${curBl.trust ?? 50}`,
         },
       }),
     );
@@ -1389,10 +1364,14 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   }
 
   const layerWrap = el('label', { className: 'field' });
-  layerWrap.appendChild(el('span', { text: 'Layer' }));
   const layerSel = el('select', {
     attrs: { 'data-field': 'layer', 'data-cmd': 'sticky-layer', 'aria-label': 'Layer' },
   }) as HTMLSelectElement;
+  const layerHeader = document.createElement('option');
+  layerHeader.value = '';
+  layerHeader.disabled = true;
+  layerHeader.textContent = 'Layer…';
+  layerSel.appendChild(layerHeader);
   const layers = doc.layers?.length ? doc.layers : [{ id: 'walkway', name: 'Walkway' }];
   const stickyL = stickyLayer(doc).id;
   for (const l of layers) {
@@ -1406,10 +1385,14 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   grid.appendChild(layerWrap);
 
   const objWrap = el('label', { className: 'field' });
-  objWrap.appendChild(el('span', { text: 'Object' }));
   const objSel = el('select', {
     attrs: { 'data-field': 'object', 'data-cmd': 'sticky-object', 'aria-label': 'Object' },
   }) as HTMLSelectElement;
+  const objHeader = document.createElement('option');
+  objHeader.value = '';
+  objHeader.disabled = true;
+  objHeader.textContent = 'Object…';
+  objSel.appendChild(objHeader);
   const newOpt = document.createElement('option');
   newOpt.value = '__new__';
   newOpt.textContent = '— New object —';
@@ -1426,14 +1409,14 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   grid.appendChild(objWrap);
 
   const nameWrap = el('label', { className: 'field' });
-  nameWrap.appendChild(el('span', { text: 'Object name' }));
   nameWrap.appendChild(
     el('input', {
       attrs: {
         type: 'text',
         'data-field': 'object-name',
         'data-cmd': 'sticky-object-name',
-        value: doc.session.stickyObjectName ?? stickyObject(doc)?.name ?? 'Path',
+        value: doc.session.stickyObjectName ?? stickyObject(doc)?.name ?? '',
+        placeholder: 'Object name…',
         'aria-label': 'Object name',
       },
     }),
@@ -1441,10 +1424,14 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   grid.appendChild(nameWrap);
 
   const geoWrap = el('label', { className: 'field' });
-  geoWrap.appendChild(el('span', { text: 'Geometry' }));
   const geoSel = el('select', {
     attrs: { 'data-field': 'geometry', 'data-cmd': 'sticky-geometry', 'aria-label': 'Geometry' },
   }) as HTMLSelectElement;
+  const geoHeader = document.createElement('option');
+  geoHeader.value = '';
+  geoHeader.disabled = true;
+  geoHeader.textContent = 'Geometry…';
+  geoSel.appendChild(geoHeader);
   const geo = stickyGeometry(doc);
   for (const g of GEOMETRY_CHOICES) {
     const opt = document.createElement('option');
@@ -1458,39 +1445,30 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
 
   dialog.appendChild(grid);
 
-  // Photos / obs (inspect shows attached; add shows empty hint)
-  const photosSection = el('div', { className: 'point-dialog__photos' });
-  photosSection.appendChild(el('h3', { className: 'point-dialog__section', text: 'Photos / obs' }));
+  // Photos list only when there is something to show (no duplicate instructional prose).
   if (pt) {
     const photos = (pt.photoIds ?? [])
       .map((id) => doc.photos.find((p) => p.id === id))
       .filter(Boolean);
     if (photos.length) {
+      const photosSection = el('div', { className: 'point-dialog__photos' });
       const list = el('ul', { className: 'point-dialog__photo-list' });
       for (const ph of photos) {
         list.appendChild(el('li', { text: `${ph!.id}${ph!.note ? ` — ${ph!.note}` : ''}` }));
       }
       photosSection.appendChild(list);
-    } else {
-      photosSection.appendChild(
-        el('p', { className: 'point-dialog__empty', text: 'No photos on this point yet.' }),
-      );
+      dialog.appendChild(photosSection);
     }
     const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
     if (obj?.residualMm != null) {
-      photosSection.appendChild(
+      dialog.appendChild(
         el('p', {
           className: 'point-dialog__residual',
-          text: `Object residual ~${obj.residualMm.toFixed(0)} mm`,
+          text: `~${obj.residualMm.toFixed(0)} mm`,
         }),
       );
     }
-  } else {
-    photosSection.appendChild(
-      el('p', { className: 'point-dialog__empty', text: 'Add photo records a measurement.' }),
-    );
   }
-  dialog.appendChild(photosSection);
 
   const actionsRow = el('div', { className: 'point-dialog__actions' });
   actionsRow.appendChild(
@@ -1521,7 +1499,6 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
       }),
     );
   }
-  dialog.appendChild(actionsRow);
   actionsRow.appendChild(
     el('button', {
       className: 'btn btn--util point-dialog__close-footer',
@@ -1534,6 +1511,7 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
       },
     }),
   );
+  dialog.appendChild(actionsRow);
   return dialog;
 }
 

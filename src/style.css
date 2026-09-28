@@ -495,19 +495,19 @@ body {
   max-height: min(78vh, 36rem);
   overflow: auto;
   padding: 0.65rem 0.75rem 0.85rem;
-  background: rgba(246, 241, 230, 0.82);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(42, 36, 28, 0.22);
+  background: rgba(246, 241, 230, 0.52);
+  backdrop-filter: blur(10px) saturate(1.05);
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  border: 1px solid rgba(42, 36, 28, 0.18);
   border-radius: 4px;
-  box-shadow: 0 4px 22px rgba(26, 36, 28, 0.22);
+  box-shadow: 0 4px 22px rgba(26, 36, 28, 0.18);
   color: var(--ink);
   touch-action: none;
 }
 
 .point-dialog--dragging {
-  opacity: 0.92;
-  box-shadow: 0 8px 28px rgba(26, 36, 28, 0.32);
+  opacity: 0.9;
+  box-shadow: 0 8px 28px rgba(26, 36, 28, 0.28);
   user-select: none;
 }
 
@@ -601,31 +601,39 @@ body {
 .point-dialog__grid .field input,
 .point-dialog__grid .field select {
   font: inherit;
-  padding: 0.35rem 0.4rem;
-  border: 1px solid var(--line);
+  padding: 0.45rem 0.5rem;
+  min-height: 2.6rem;
+  border: 1px solid rgba(42, 36, 28, 0.2);
   border-radius: 2px;
-  background: rgba(255, 253, 248, 0.92);
+  background: rgba(255, 253, 248, 0.88);
 }
 
 .point-dialog__grid .field--trust {
   grid-column: 1 / -1;
 }
 
-.point-dialog__photos {
-  margin-top: 0.55rem;
+.point-dialog__grid .field--trust input[type='range'] {
+  min-height: 2rem;
+  padding: 0.35rem 0;
+  background: transparent;
+  border: none;
 }
 
-.point-dialog__section {
-  font-family: 'Fraunces', Georgia, serif;
-  font-size: 0.9rem;
-  margin: 0 0 0.25rem;
-  color: var(--moss-2);
+.point-dialog__photos {
+  margin-top: 0.55rem;
 }
 
 .point-dialog__photo-list {
   margin: 0;
   padding-left: 1.1rem;
   font-size: 0.8rem;
+}
+
+.point-dialog__residual {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  margin: 0.35rem 0 0;
+  color: var(--muted);
 }
 
 .point-dialog__actions {
