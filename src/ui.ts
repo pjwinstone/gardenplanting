@@ -22,7 +22,7 @@ import {
   setLastSaveIso,
   subscribeCloud,
 } from './cloudStatus';
-import { buildStamp } from './buildInfo';
+import { appBuild, appVersion, buildStamp } from './buildInfo';
 import { STAGE2_FIELD_STEPS } from './stage2Checklist';
 import {
   clearErrorLog,
@@ -74,21 +74,24 @@ import { GEOMETRY_CHOICES, type GeometryType } from './model';
 
 export type View = 'survey' | 'tags';
 
-/** One hamburger accordion open at a time (nothing stacked on the plan). */
+/** One hamburger accordion open at a time (point dialogue is separate, on-plan). */
 export type MenuSection =
   | null
+  | 'mode'
+  | 'version'
   | 'recommend'
   | 'coach'
-  | 'add-point'
   | 'baseline'
   | 'tie'
   | 'house'
   | 'leapfrog'
   | 'adjust'
-  | 'inspector'
   | 'error-log'
   | 'tools'
   | 'cloud';
+
+/** Unified + Point / inspect dialogue (on the plan, not in the menu). */
+export type PointDialogMode = null | 'add' | 'inspect';
 
 export interface UiState {
   doc: GardenDocument;
@@ -102,9 +105,36 @@ export interface UiState {
   openErrorLog: boolean;
   /** Which menu accordion section is expanded (one at a time). */
   menuFocus: MenuSection;
+  /** On-plan + Point / inspect dialogue (null = closed). */
+  pointDialog: PointDialogMode;
 }
 
 type Listener = () => void;
+
+/** Drag offset for the point dialogue — survives re-renders without setState thrash. */
+let pointDialogPos = { x: 12, y: 72 };
+
+const SEEN_BUILD_KEY = 'garden-survey-seen-build';
+
+function currentBuildKey(): string {
+  return `${appVersion()}·${appBuild()}`;
+}
+
+function hasSeenCurrentBuild(): boolean {
+  try {
+    return localStorage.getItem(SEEN_BUILD_KEY) === currentBuildKey();
+  } catch {
+    return true;
+  }
+}
+
+function markCurrentBuildSeen(): void {
+  try {
+    localStorage.setItem(SEEN_BUILD_KEY, currentBuildKey());
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 let state: UiState = {
   doc: loadCachedGarden() ?? createEmptyGarden(),
@@ -114,6 +144,7 @@ let state: UiState = {
   menuOpen: false,
   openErrorLog: false,
   menuFocus: 'recommend',
+  pointDialog: null,
 };
 
 function openMenuSection(section: MenuSection): void {
@@ -124,6 +155,69 @@ function openMenuSection(section: MenuSection): void {
     refuseMessage: state.refuseMessage,
   });
   if (section === 'error-log') markErrorsSeen();
+}
+
+function openPointDialog(mode: 'add' | 'inspect'): void {
+  setState({
+    pointDialog: mode,
+    menuOpen: false,
+    openErrorLog: false,
+    refuseMessage: state.refuseMessage,
+  });
+}
+
+function closePointDialog(): void {
+  const doc =
+    state.doc.session.inspectingPointId != null
+      ? {
+          ...state.doc,
+          session: { ...state.doc.session, inspectingPointId: undefined },
+        }
+      : state.doc;
+  setState({
+    doc,
+    pointDialog: null,
+    refuseMessage: null,
+  });
+}
+
+/** Enter ADD_POINT when legal, then open the on-plan dialogue with sticky defaults. */
+function startAddPointDialog(): void {
+  const legal = new Set(legalActions(state.doc));
+  if (
+    legal.has('add_point') &&
+    state.doc.session.mode !== 'ADD_POINT' &&
+    state.doc.session.mode !== 'ADD_POINT_EXTRA_YAW'
+  ) {
+    const probe = canTransition(state.doc, 'add_point');
+    if (probe.ok) {
+      const { doc: next, result } = applyTransition(state.doc, 'add_point');
+      if (result.ok) {
+        const cleared = {
+          ...next,
+          session: { ...next.session, inspectingPointId: undefined },
+        };
+        setState({
+          doc: cleared,
+          refuseMessage: null,
+          menuOpen: false,
+          pointDialog: 'add',
+          openErrorLog: false,
+        });
+        speakCoachLine(buildCoach(cleared).body[0] ?? '', cleared.session.speakSteps);
+        return;
+      }
+    }
+  }
+  const doc =
+    state.doc.session.inspectingPointId != null
+      ? {
+          ...state.doc,
+          session: { ...state.doc.session, inspectingPointId: undefined },
+        }
+      : state.doc;
+  if (doc !== state.doc) setDoc(doc, null);
+  openPointDialog('add');
 }
 
 /** Surface a coach/refuse failure and append to the in-app error log. */
@@ -271,10 +365,22 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'toggle-menu') {
+    if (state.menuOpen) {
+      setState({ menuOpen: false, openErrorLog: false, refuseMessage: state.refuseMessage });
+      return;
+    }
+    // Opening: first open after a new Build stamp → expand Version.
+    let focus: MenuSection = state.menuFocus ?? 'recommend';
+    if (!hasSeenCurrentBuild()) {
+      focus = 'version';
+      markCurrentBuildSeen();
+    } else if (!focus) {
+      focus = 'recommend';
+    }
     setState({
-      menuOpen: !state.menuOpen,
+      menuOpen: true,
       openErrorLog: false,
-      menuFocus: state.menuOpen ? state.menuFocus : state.menuFocus ?? 'recommend',
+      menuFocus: focus,
       refuseMessage: state.refuseMessage,
     });
     return;
@@ -297,32 +403,6 @@ function onShellClick(e: Event): void {
   }
   if (cmd === 'open-menu-section') {
     const section = (target.getAttribute('data-section') as MenuSection) || 'recommend';
-    if (section === 'add-point') {
-      const legal = new Set(legalActions(state.doc));
-      if (
-        legal.has('add_point') &&
-        state.doc.session.mode !== 'ADD_POINT' &&
-        state.doc.session.mode !== 'ADD_POINT_EXTRA_YAW'
-      ) {
-        const probe = canTransition(state.doc, 'add_point');
-        if (probe.ok) {
-          const { doc: next, result } = applyTransition(state.doc, 'add_point');
-          if (result.ok) {
-            setState({
-              doc: next,
-              refuseMessage: null,
-              menuOpen: true,
-              menuFocus: 'add-point',
-              openErrorLog: false,
-            });
-            speakCoachLine(buildCoach(next).body[0] ?? '', next.session.speakSteps);
-            return;
-          }
-        }
-      }
-      openMenuSection('add-point');
-      return;
-    }
     if (section === 'baseline') {
       if (state.doc.session.mode === 'START') {
         const result = startStage2FieldWorkflow(state.doc);
@@ -347,6 +427,14 @@ function onShellClick(e: Event): void {
       return;
     }
     openMenuSection(section);
+    return;
+  }
+  if (cmd === 'open-point-dialog') {
+    startAddPointDialog();
+    return;
+  }
+  if (cmd === 'close-point-dialog') {
+    closePointDialog();
     return;
   }
   if (cmd === 'open-error-log') {
@@ -413,11 +501,11 @@ function onShellClick(e: Event): void {
     if (!result.ok) {
       surfaceFail(result.reason, 'add-point');
       setDoc(result.doc, result.reason);
-      openMenuSection('add-point');
+      setState({ pointDialog: 'add', menuOpen: false });
       return;
     }
     setDoc(result.doc, null);
-    setState({ menuOpen: true, menuFocus: 'add-point', openErrorLog: false });
+    setState({ pointDialog: 'add', menuOpen: false, openErrorLog: false });
     speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
     return;
   }
@@ -451,19 +539,15 @@ function onShellClick(e: Event): void {
       if (bl) doc = { ...doc, session: { ...doc.session, activeBaselineEnds: { a: bl.a, b: bl.b } } };
     }
     setDoc(doc, null);
-    openMenuSection('inspector');
+    openPointDialog('inspect');
     return;
   }
-  if (cmd === 'close-inspector') {
-    setDoc({
-      ...state.doc,
-      session: { ...state.doc.session, inspectingPointId: undefined },
-    });
-    openMenuSection('recommend');
+  if (cmd === 'close-inspector' || cmd === 'close-point-dialog') {
+    closePointDialog();
     return;
   }
   if (cmd === 'apply-inspector') {
-    const panel = target.closest('.inspector-panel') ?? target.closest('.add-point-panel');
+    const panel = target.closest('.point-dialog') ?? target.closest('.add-point-panel');
     const pointId = state.doc.session.inspectingPointId;
     if (!pointId || !panel) return;
     const layerId = (panel.querySelector('[data-field=layer]') as HTMLSelectElement | null)?.value;
@@ -490,10 +574,11 @@ function onShellClick(e: Event): void {
       },
       null,
     );
+    setState({ pointDialog: 'inspect', menuOpen: false });
     return;
   }
   if (cmd === 'create-object') {
-    const panel = target.closest('.add-point-panel') ?? target.closest('.inspector-panel');
+    const panel = target.closest('.point-dialog') ?? target.closest('.add-point-panel');
     const name =
       (panel?.querySelector('[data-field=object-name]') as HTMLInputElement | null)?.value?.trim() ||
       'New object';
@@ -740,9 +825,14 @@ function buildSurveyView(): HTMLElement {
   plan.appendChild(planHost);
   wrap.appendChild(plan);
 
-  // Plan chrome: hamburger only (+ optional tiny mode hint, no cards).
+  // Plan chrome: hamburger only (+ translucent point dialogue when open).
   wrap.appendChild(buildHamburgerButton());
-  wrap.appendChild(buildModeHint(doc));
+
+  if (state.pointDialog) {
+    const dialog = buildPointDialog(doc, state.pointDialog);
+    wrap.appendChild(dialog);
+    attachPointDialogDrag(dialog);
+  }
 
   if (state.refuseMessage) {
     wrap.appendChild(
@@ -759,27 +849,6 @@ function buildSurveyView(): HTMLElement {
   }
 
   return wrap;
-}
-
-/** Tiny non-card mode label — not a recommendation panel. */
-function buildModeHint(doc: GardenDocument): HTMLElement {
-  const hint = el('div', {
-    className: 'mode-hint',
-    attrs: { 'data-testid': 'mode-hint' },
-  });
-  hint.appendChild(
-    el('button', {
-      className: 'mode-hint__btn',
-      text: doc.session.mode.replace(/_/g, ' '),
-      attrs: {
-        type: 'button',
-        'data-cmd': 'open-menu-section',
-        'data-section': 'recommend',
-        'aria-label': 'Open menu — Recommended next',
-      },
-    }),
-  );
-  return hint;
 }
 
 /** Floating hamburger — red while unseen errors remain. */
@@ -850,8 +919,8 @@ function buildRecommendBody(
         text: '+ Point',
         attrs: {
           type: 'button',
-          'data-cmd': 'open-menu-section',
-          'data-section': 'add-point',
+          'data-cmd': 'open-point-dialog',
+          'data-testid': 'recommend-add-point',
         },
       }),
     );
@@ -1006,21 +1075,72 @@ function menuAccordion(
   return details;
 }
 
-/** Sticky selectors: Baseline · Layer · Object · Geometry · Add photo. */
-function buildAddPointPanel(doc: GardenDocument): HTMLElement {
-  const panel = el('section', {
-    className: 'add-point-panel',
-    attrs: { 'data-testid': 'add-point-panel', 'aria-label': 'Add point' },
+/** Unified translucent + Point / inspect dialogue (same fields both modes). */
+function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLElement {
+  const inspectingId = mode === 'inspect' ? doc.session.inspectingPointId : undefined;
+  const pt = inspectingId ? doc.points.find((p) => p.id === inspectingId) : undefined;
+
+  const dialog = el('section', {
+    className: 'point-dialog',
+    attrs: {
+      'data-testid': 'point-dialog',
+      role: 'dialog',
+      'aria-label': mode === 'inspect' ? 'Point inspector' : 'Add point',
+      style: `transform: translate(${pointDialogPos.x}px, ${pointDialogPos.y}px)`,
+    },
   });
-  panel.appendChild(el('h2', { className: 'add-point-panel__title', text: '+ Point' }));
-  panel.appendChild(
+
+  const head = el('div', {
+    className: 'point-dialog__head',
+    attrs: { 'data-drag-handle': 'true' },
+  });
+  head.appendChild(
+    el('h2', {
+      className: 'point-dialog__title',
+      text: mode === 'inspect' ? (pt ? `Point ${pt.id}` : 'Point') : '+ Point',
+      attrs: { 'data-testid': 'point-dialog-title' },
+    }),
+  );
+  head.appendChild(
+    el('span', {
+      className: 'point-dialog__grip',
+      text: '⠿',
+      attrs: { 'aria-hidden': 'true', title: 'Drag' },
+    }),
+  );
+  head.appendChild(
+    el('button', {
+      className: 'btn btn--util point-dialog__close',
+      text: 'Close',
+      attrs: { type: 'button', 'data-cmd': 'close-point-dialog' },
+    }),
+  );
+  dialog.appendChild(head);
+
+  dialog.appendChild(
     el('p', {
-      className: 'add-point-panel__hint',
-      text: `Sticky · ${activeBaselineLabel(doc)}`,
+      className: 'point-dialog__hint',
+      text:
+        mode === 'inspect' && pt
+          ? `Edit · ${activeBaselineLabel(doc)}`
+          : `Sticky · ${activeBaselineLabel(doc)}`,
     }),
   );
 
-  const grid = el('div', { className: 'add-point-panel__grid' });
+  if (mode === 'inspect' && pt) {
+    const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
+    const bl = pt.measuredWithBaselineId
+      ? doc.baselines.find((b) => b.id === pt.measuredWithBaselineId)
+      : undefined;
+    dialog.appendChild(
+      el('p', {
+        className: 'point-dialog__meta',
+        text: `Measured with ${bl ? `${bl.a}–${bl.b}` : '—'} · ${obj ? `${obj.layerId}/${obj.name}` : pt.layerId ?? '—'} · ${obj?.geometryType ?? '—'}`,
+      }),
+    );
+  }
+
+  const grid = el('div', { className: 'point-dialog__grid' });
 
   const blWrap = el('label', { className: 'field' });
   blWrap.appendChild(el('span', { text: 'Baseline' }));
@@ -1134,9 +1254,43 @@ function buildAddPointPanel(doc: GardenDocument): HTMLElement {
   geoWrap.appendChild(geoSel);
   grid.appendChild(geoWrap);
 
-  panel.appendChild(grid);
+  dialog.appendChild(grid);
 
-  const actionsRow = el('div', { className: 'add-point-panel__actions' });
+  // Photos / obs (inspect shows attached; add shows empty hint)
+  const photosSection = el('div', { className: 'point-dialog__photos' });
+  photosSection.appendChild(el('h3', { className: 'point-dialog__section', text: 'Photos / obs' }));
+  if (pt) {
+    const photos = (pt.photoIds ?? [])
+      .map((id) => doc.photos.find((p) => p.id === id))
+      .filter(Boolean);
+    if (photos.length) {
+      const list = el('ul', { className: 'point-dialog__photo-list' });
+      for (const ph of photos) {
+        list.appendChild(el('li', { text: `${ph!.id}${ph!.note ? ` — ${ph!.note}` : ''}` }));
+      }
+      photosSection.appendChild(list);
+    } else {
+      photosSection.appendChild(
+        el('p', { className: 'point-dialog__empty', text: 'No photos on this point yet.' }),
+      );
+    }
+    const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
+    if (obj?.residualMm != null) {
+      photosSection.appendChild(
+        el('p', {
+          className: 'point-dialog__residual',
+          text: `Object residual ~${obj.residualMm.toFixed(0)} mm`,
+        }),
+      );
+    }
+  } else {
+    photosSection.appendChild(
+      el('p', { className: 'point-dialog__empty', text: 'Add photo records a measurement.' }),
+    );
+  }
+  dialog.appendChild(photosSection);
+
+  const actionsRow = el('div', { className: 'point-dialog__actions' });
   actionsRow.appendChild(
     el('button', {
       className: 'btn btn--util',
@@ -1144,89 +1298,78 @@ function buildAddPointPanel(doc: GardenDocument): HTMLElement {
       attrs: { type: 'button', 'data-cmd': 'create-object' },
     }),
   );
-  actionsRow.appendChild(
-    el('button', {
-      className: 'btn btn--suggested',
-      text: 'Add photo',
-      attrs: { type: 'button', 'data-cmd': 'add-photo', 'data-testid': 'add-photo' },
-    }),
-  );
-  panel.appendChild(actionsRow);
-  return panel;
-}
-
-function buildInspectorPanel(doc: GardenDocument): HTMLElement {
-  const pointId = doc.session.inspectingPointId!;
-  const pt = doc.points.find((p) => p.id === pointId);
-  const panel = el('section', {
-    className: 'inspector-panel',
-    attrs: {
-      'data-testid': 'inspector-panel',
-      role: 'dialog',
-      'aria-label': 'Measurement inspector',
-    },
-  });
-  const head = el('div', { className: 'inspector-panel__head' });
-  head.appendChild(
-    el('h2', { className: 'inspector-panel__title', text: pt ? `Point ${pt.id}` : 'Point' }),
-  );
-  head.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: 'Close',
-      attrs: { type: 'button', 'data-cmd': 'close-inspector' },
-    }),
-  );
-  panel.appendChild(head);
-
-  if (!pt) {
-    panel.appendChild(el('p', { text: 'Point not found.' }));
-    return panel;
-  }
-
-  const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
-  const bl = pt.measuredWithBaselineId
-    ? doc.baselines.find((b) => b.id === pt.measuredWithBaselineId)
-    : undefined;
-
-  panel.appendChild(
-    el('p', {
-      className: 'inspector-panel__meta',
-      text: `Measured with ${bl ? `${bl.a}–${bl.b}` : '—'} · ${obj ? `${obj.layerId}/${obj.name}` : pt.layerId ?? '—'} · ${obj?.geometryType ?? '—'}`,
-    }),
-  );
-
-  const nested = buildAddPointPanel(doc);
-  nested.classList.add('add-point-panel--nested');
-  const title = nested.querySelector('.add-point-panel__title');
-  if (title) title.textContent = 'Revise measurement';
-  const addBtn = nested.querySelector('[data-cmd="add-photo"]');
-  if (addBtn) {
-    addBtn.setAttribute('data-cmd', 'apply-inspector');
-    addBtn.textContent = 'Save changes';
-  }
-  panel.appendChild(nested);
-
-  const photos = (pt.photoIds ?? [])
-    .map((id) => doc.photos.find((p) => p.id === id))
-    .filter(Boolean);
-  if (photos.length) {
-    panel.appendChild(el('h3', { className: 'inspector-panel__section', text: 'Photos / obs' }));
-    const list = el('ul', { className: 'inspector-panel__photos' });
-    for (const ph of photos) {
-      list.appendChild(el('li', { text: `${ph!.id}${ph!.note ? ` — ${ph!.note}` : ''}` }));
-    }
-    panel.appendChild(list);
-  }
-  if (obj?.residualMm != null) {
-    panel.appendChild(
-      el('p', {
-        className: 'inspector-panel__residual',
-        text: `Object residual ~${obj.residualMm.toFixed(0)} mm`,
+  if (mode === 'inspect') {
+    actionsRow.appendChild(
+      el('button', {
+        className: 'btn btn--suggested',
+        text: 'Save',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'apply-inspector',
+          'data-testid': 'point-dialog-save',
+        },
+      }),
+    );
+  } else {
+    actionsRow.appendChild(
+      el('button', {
+        className: 'btn btn--suggested',
+        text: 'Add photo',
+        attrs: { type: 'button', 'data-cmd': 'add-photo', 'data-testid': 'add-photo' },
       }),
     );
   }
-  return panel;
+  dialog.appendChild(actionsRow);
+  return dialog;
+}
+
+/** Pointer drag on the dialogue header — updates transform live; persists offset. */
+function attachPointDialogDrag(dialog: HTMLElement): void {
+  const handle = dialog.querySelector('[data-drag-handle]') as HTMLElement | null;
+  if (!handle) return;
+
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let originX = 0;
+  let originY = 0;
+
+  const onMove = (ev: PointerEvent) => {
+    if (!dragging) return;
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    const x = originX + dx;
+    const y = originY + dy;
+    dialog.style.transform = `translate(${x}px, ${y}px)`;
+  };
+
+  const onUp = (ev: PointerEvent) => {
+    if (!dragging) return;
+    dragging = false;
+    handle.releasePointerCapture(ev.pointerId);
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    pointDialogPos = { x: originX + dx, y: originY + dy };
+    dialog.classList.remove('point-dialog--dragging');
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+  };
+
+  handle.addEventListener('pointerdown', (ev) => {
+    if ((ev.target as HTMLElement).closest('button')) return;
+    dragging = true;
+    startX = ev.clientX;
+    startY = ev.clientY;
+    originX = pointDialogPos.x;
+    originY = pointDialogPos.y;
+    dialog.classList.add('point-dialog--dragging');
+    handle.setPointerCapture(ev.pointerId);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    ev.preventDefault();
+  });
 }
 
 /** Full menu drawer — one accordion open at a time; plan stays chrome-free when closed. */
@@ -1257,14 +1400,39 @@ function buildMenuDrawer(
     }),
   );
   panel.appendChild(head);
-  panel.appendChild(
+
+  // —— Top: Mode + Version (near top of concertina) ——
+  const modeBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'mode-panel' } });
+  modeBody.appendChild(
     el('p', {
-      className: 'menu-drawer__mode',
-      text: coach.banner,
+      className: 'menu-acc__coach',
+      text: doc.session.mode.replace(/_/g, ' '),
+      attrs: { 'data-testid': 'menu-mode-label' },
     }),
   );
+  modeBody.appendChild(el('p', { className: 'menu-acc__meta', text: coach.banner }));
+  panel.appendChild(menuAccordion('mode', 'Mode', modeBody));
 
-  // —— Workflows (accordion) ——
+  const versionBody = el('div', {
+    className: 'menu-acc__body',
+    attrs: { 'data-testid': 'version-panel' },
+  });
+  versionBody.appendChild(
+    el('p', {
+      className: 'menu-drawer__stamp',
+      text: buildStamp(),
+      attrs: { 'data-testid': 'build-stamp' },
+    }),
+  );
+  versionBody.appendChild(
+    el('p', {
+      className: 'menu-acc__meta',
+      text: `Version ${appVersion()} · build ${appBuild()}`,
+    }),
+  );
+  panel.appendChild(menuAccordion('version', 'Build / version', versionBody));
+
+  // —— Workflows ——
   panel.appendChild(menuAccordion('recommend', 'Recommended next', buildRecommendBody(doc, coach, legal)));
 
   const coachBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'coach-panel' } });
@@ -1283,16 +1451,6 @@ function buildMenuDrawer(
   panel.appendChild(menuAccordion('tie', 'Baseline tie', buildTieForm(doc)));
   panel.appendChild(menuAccordion('house', 'House corners', buildHouseForm(doc)));
   panel.appendChild(menuAccordion('leapfrog', 'Leapfrog', buildLeapfrogForm(doc)));
-
-  const addPoint = buildAddPointPanel(doc);
-  addPoint.classList.add('add-point-panel--in-menu');
-  panel.appendChild(menuAccordion('add-point', '+ Point', addPoint));
-
-  if (doc.session.inspectingPointId) {
-    const insp = buildInspectorPanel(doc);
-    insp.classList.add('inspector-panel--in-menu');
-    panel.appendChild(menuAccordion('inspector', 'Point inspector', insp));
-  }
 
   // —— Cloud ——
   const cloudBody = el('div', { className: 'menu-acc__body' });
@@ -1315,6 +1473,13 @@ function buildMenuDrawer(
       className: 'btn btn--util btn--stage2',
       text: 'Establish baseline (Stage 2)',
       attrs: { type: 'button', 'data-cmd': 'start-stage2' },
+    }),
+  );
+  tools.appendChild(
+    el('button', {
+      className: 'btn btn--suggested',
+      text: '+ Point',
+      attrs: { type: 'button', 'data-cmd': 'open-point-dialog' },
     }),
   );
   toolsBody.appendChild(tools);
@@ -1408,15 +1573,6 @@ function buildMenuDrawer(
   fileLabel.appendChild(fileInput);
   io.appendChild(fileLabel);
   toolsBody.appendChild(io);
-
-  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Build stamp' }));
-  toolsBody.appendChild(
-    el('p', {
-      className: 'menu-drawer__stamp',
-      text: buildStamp(),
-      attrs: { 'data-testid': 'build-stamp' },
-    }),
-  );
 
   toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Settings' }));
   const speakLabel = el('label', { className: 'toggle' });
@@ -1680,7 +1836,7 @@ function menuFocusAfterMode(mode: string): MenuSection {
       return 'leapfrog';
     case 'ADD_POINT':
     case 'ADD_POINT_EXTRA_YAW':
-      return 'add-point';
+      return 'recommend';
     case 'ADJUST':
       return 'coach';
     default:
@@ -1782,11 +1938,19 @@ function onModeAction(action: ModeAction): void {
     return;
   }
   setDoc(next, null);
-  setState({
-    menuOpen: true,
-    menuFocus: menuFocusAfterMode(next.session.mode),
-    openErrorLog: false,
-  });
+  if (action === 'add_point') {
+    setState({
+      menuOpen: false,
+      pointDialog: 'add',
+      openErrorLog: false,
+    });
+  } else {
+    setState({
+      menuOpen: true,
+      menuFocus: menuFocusAfterMode(next.session.mode),
+      openErrorLog: false,
+    });
+  }
   const coach = buildCoach(next);
   speakCoachLine(coach.body[0] ?? '', next.session.speakSteps);
 }
