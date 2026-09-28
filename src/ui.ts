@@ -74,6 +74,22 @@ import { GEOMETRY_CHOICES, type GeometryType } from './model';
 
 export type View = 'survey' | 'tags';
 
+/** One hamburger accordion open at a time (nothing stacked on the plan). */
+export type MenuSection =
+  | null
+  | 'recommend'
+  | 'coach'
+  | 'add-point'
+  | 'baseline'
+  | 'tie'
+  | 'house'
+  | 'leapfrog'
+  | 'adjust'
+  | 'inspector'
+  | 'error-log'
+  | 'tools'
+  | 'cloud';
+
 export interface UiState {
   doc: GardenDocument;
   view: View;
@@ -84,6 +100,8 @@ export interface UiState {
   menuOpen: boolean;
   /** Open drawer scrolled to Error log and mark unseen cleared. */
   openErrorLog: boolean;
+  /** Which menu accordion section is expanded (one at a time). */
+  menuFocus: MenuSection;
 }
 
 type Listener = () => void;
@@ -95,7 +113,18 @@ let state: UiState = {
   showStage2Checklist: false,
   menuOpen: false,
   openErrorLog: false,
+  menuFocus: 'recommend',
 };
+
+function openMenuSection(section: MenuSection): void {
+  setState({
+    menuOpen: true,
+    menuFocus: section,
+    openErrorLog: section === 'error-log',
+    refuseMessage: state.refuseMessage,
+  });
+  if (section === 'error-log') markErrorsSeen();
+}
 
 /** Surface a coach/refuse failure and append to the in-app error log. */
 function surfaceFail(message: string, source = 'coach'): void {
@@ -245,6 +274,7 @@ function onShellClick(e: Event): void {
     setState({
       menuOpen: !state.menuOpen,
       openErrorLog: false,
+      menuFocus: state.menuOpen ? state.menuFocus : state.menuFocus ?? 'recommend',
       refuseMessage: state.refuseMessage,
     });
     return;
@@ -253,9 +283,74 @@ function onShellClick(e: Event): void {
     setState({ menuOpen: false, openErrorLog: false });
     return;
   }
+  if (cmd === 'menu-accordion') {
+    const section = (target.getAttribute('data-section') as MenuSection) || null;
+    // Toggle: same section closes; otherwise one open at a time.
+    const next = state.menuFocus === section ? null : section;
+    setState({
+      menuOpen: true,
+      menuFocus: next,
+      openErrorLog: next === 'error-log',
+    });
+    if (next === 'error-log') markErrorsSeen();
+    return;
+  }
+  if (cmd === 'open-menu-section') {
+    const section = (target.getAttribute('data-section') as MenuSection) || 'recommend';
+    if (section === 'add-point') {
+      const legal = new Set(legalActions(state.doc));
+      if (
+        legal.has('add_point') &&
+        state.doc.session.mode !== 'ADD_POINT' &&
+        state.doc.session.mode !== 'ADD_POINT_EXTRA_YAW'
+      ) {
+        const probe = canTransition(state.doc, 'add_point');
+        if (probe.ok) {
+          const { doc: next, result } = applyTransition(state.doc, 'add_point');
+          if (result.ok) {
+            setState({
+              doc: next,
+              refuseMessage: null,
+              menuOpen: true,
+              menuFocus: 'add-point',
+              openErrorLog: false,
+            });
+            speakCoachLine(buildCoach(next).body[0] ?? '', next.session.speakSteps);
+            return;
+          }
+        }
+      }
+      openMenuSection('add-point');
+      return;
+    }
+    if (section === 'baseline') {
+      if (state.doc.session.mode === 'START') {
+        const result = startStage2FieldWorkflow(state.doc);
+        if (result.ok) {
+          setState({
+            doc: result.doc,
+            view: 'survey',
+            refuseMessage: null,
+            showStage2Checklist: result.showChecklist,
+            menuOpen: true,
+            menuFocus: 'baseline',
+            openErrorLog: false,
+          });
+          speakCoachLine(
+            buildCoach(result.doc).body[0] ?? '',
+            result.doc.session.speakSteps,
+          );
+          return;
+        }
+      }
+      openMenuSection('baseline');
+      return;
+    }
+    openMenuSection(section);
+    return;
+  }
   if (cmd === 'open-error-log') {
-    markErrorsSeen();
-    setState({ menuOpen: true, openErrorLog: true });
+    openMenuSection('error-log');
     return;
   }
   if (cmd === 'clear-error-log') {
@@ -283,7 +378,8 @@ function onShellClick(e: Event): void {
     setState({
       showStage2Checklist: !state.showStage2Checklist,
       refuseMessage: null,
-      menuOpen: false,
+      menuOpen: true,
+      menuFocus: 'tools',
     });
     return;
   }
@@ -317,9 +413,11 @@ function onShellClick(e: Event): void {
     if (!result.ok) {
       surfaceFail(result.reason, 'add-point');
       setDoc(result.doc, result.reason);
+      openMenuSection('add-point');
       return;
     }
     setDoc(result.doc, null);
+    setState({ menuOpen: true, menuFocus: 'add-point', openErrorLog: false });
     speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
     return;
   }
@@ -353,6 +451,7 @@ function onShellClick(e: Event): void {
       if (bl) doc = { ...doc, session: { ...doc.session, activeBaselineEnds: { a: bl.a, b: bl.b } } };
     }
     setDoc(doc, null);
+    openMenuSection('inspector');
     return;
   }
   if (cmd === 'close-inspector') {
@@ -360,6 +459,7 @@ function onShellClick(e: Event): void {
       ...state.doc,
       session: { ...state.doc.session, inspectingPointId: undefined },
     });
+    openMenuSection('recommend');
     return;
   }
   if (cmd === 'apply-inspector') {
@@ -420,9 +520,11 @@ function onShellClick(e: Event): void {
     const result = saveBaselineLengthWorkflow(state.doc, length, offsetA, offsetB, true);
     if (!result.ok) {
       surfaceFail(result.reason ?? 'Could not save baseline.', 'baseline');
+      openMenuSection('baseline');
       return;
     }
     setDoc(result.doc, null);
+    setState({ menuOpen: true, menuFocus: 'tie', openErrorLog: false });
     speakCoachLine(
       'Baseline saved. Take a photo with both ends and the next house mark in frame.',
       result.doc.session.speakSteps,
@@ -438,10 +540,12 @@ function onShellClick(e: Event): void {
     );
     if (edge != null && !(edge > 0)) {
       surfaceFail('Edge length must be empty or a positive number in metres.', 'house');
+      openMenuSection('house');
       return;
     }
     const next = addHouseCornerWorkflow(state.doc, edge, offset);
     setDoc(next, null);
+    setState({ menuOpen: true, menuFocus: 'house', openErrorLog: false });
     speakCoachLine(next.session.lastAction ?? 'Corner added.', next.session.speakSteps);
     return;
   }
@@ -453,6 +557,11 @@ function onShellClick(e: Event): void {
     } else {
       setDoc(result.doc, null);
     }
+    setState({
+      menuOpen: true,
+      menuFocus: menuFocusAfterMode(result.doc.session.mode),
+      openErrorLog: false,
+    });
     speakCoachLine(result.note, result.doc.session.speakSteps);
     return;
   }
@@ -462,10 +571,12 @@ function onShellClick(e: Event): void {
         'Cannot record a baseline tie — establish the baseline length first.',
         'tie',
       );
+      openMenuSection('baseline');
       return;
     }
     const next = applyCannedBaselineTie(state.doc);
     setDoc(next, null);
+    setState({ menuOpen: true, menuFocus: 'recommend', openErrorLog: false });
     speakCoachLine(
       'I see both baseline ends and a target mark. Good tie.',
       next.session.speakSteps,
@@ -474,6 +585,7 @@ function onShellClick(e: Event): void {
   }
   if (cmd === 'confirm-ab') {
     setDoc(confirmAbTogether(state.doc), null);
+    setState({ menuOpen: true, menuFocus: 'leapfrog', openErrorLog: false });
     return;
   }
   if (cmd === 'ms-signin') {
@@ -628,12 +740,9 @@ function buildSurveyView(): HTMLElement {
   plan.appendChild(planHost);
   wrap.appendChild(plan);
 
+  // Plan chrome: hamburger only (+ optional tiny mode hint, no cards).
   wrap.appendChild(buildHamburgerButton());
-  wrap.appendChild(buildMinimalChrome(doc, coach, legal));
-  wrap.appendChild(buildAddPointPanel(doc));
-  if (doc.session.inspectingPointId) {
-    wrap.appendChild(buildInspectorPanel(doc));
-  }
+  wrap.appendChild(buildModeHint(doc));
 
   if (state.refuseMessage) {
     wrap.appendChild(
@@ -649,35 +758,28 @@ function buildSurveyView(): HTMLElement {
     wrap.appendChild(buildMenuDrawer(doc, coach, legal));
   }
 
-  const below = el('div', { className: 'survey-below' });
-  if (state.showStage2Checklist) {
-    below.appendChild(buildStage2ChecklistPanel());
-  }
-  const step = buildStepPanel(doc);
-  if (step) below.appendChild(step);
-  if (doc.photos.length) {
-    const thumbs = el('div', { className: 'thumbs' });
-    for (const ph of doc.photos) {
-      const card = el('figure', { className: 'thumb' });
-      if (ph.thumbnailDataUrl) {
-        card.appendChild(
-          el('img', {
-            attrs: { src: ph.thumbnailDataUrl, alt: ph.note ?? ph.id },
-          }),
-        );
-      }
-      card.appendChild(
-        el('figcaption', {
-          text: `${ph.id}${ph.addPointId ? ` → ${ph.addPointId}` : ''}`,
-        }),
-      );
-      thumbs.appendChild(card);
-    }
-    below.appendChild(thumbs);
-  }
-  wrap.appendChild(below);
-
   return wrap;
+}
+
+/** Tiny non-card mode label — not a recommendation panel. */
+function buildModeHint(doc: GardenDocument): HTMLElement {
+  const hint = el('div', {
+    className: 'mode-hint',
+    attrs: { 'data-testid': 'mode-hint' },
+  });
+  hint.appendChild(
+    el('button', {
+      className: 'mode-hint__btn',
+      text: doc.session.mode.replace(/_/g, ' '),
+      attrs: {
+        type: 'button',
+        'data-cmd': 'open-menu-section',
+        'data-section': 'recommend',
+        'aria-label': 'Open menu — Recommended next',
+      },
+    }),
+  );
+  return hint;
 }
 
 /** Floating hamburger — red while unseen errors remain. */
@@ -711,34 +813,53 @@ function buildHamburgerButton(): HTMLElement {
   return btn;
 }
 
-/** Mid-workflow chrome only: short coach line + primary next action. */
-function buildMinimalChrome(
+/** Tiny recommend body used inside the hamburger accordion. */
+function buildRecommendBody(
   doc: GardenDocument,
   coach: ReturnType<typeof buildCoach>,
   legal: Set<ModeAction>,
 ): HTMLElement {
-  const chrome = el('div', {
-    className: 'minimal-chrome',
-    attrs: { role: 'status', 'data-testid': 'minimal-chrome' },
-  });
-  chrome.appendChild(
+  const body = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'recommend-next' } });
+  body.appendChild(
     el('p', {
-      className: 'minimal-chrome__coach',
-      text: coach.body[0] ?? 'Follow the next action.',
-      attrs: { 'aria-live': 'polite' },
+      className: 'menu-acc__coach',
+      text: coach.body[0] ?? 'Open a workflow below.',
     }),
   );
   if (coach.residualLine) {
-    chrome.appendChild(
-      el('p', { className: 'minimal-chrome__meta', text: coach.residualLine }),
-    );
+    body.appendChild(el('p', { className: 'menu-acc__meta', text: coach.residualLine }));
   }
-
-  const actions = el('div', { className: 'minimal-chrome__actions' });
-  if (coach.nextAction && legal.has(coach.nextAction)) {
+  const actions = el('div', { className: 'menu-drawer__row' });
+  if (doc.session.mode === 'START' || legal.has('establish_baseline')) {
     actions.appendChild(
       el('button', {
-        className: 'btn btn--suggested minimal-chrome__primary',
+        className: 'btn btn--stage2',
+        text: 'Establish baseline',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'open-menu-section',
+          'data-section': 'baseline',
+        },
+      }),
+    );
+  }
+  if (legal.has('add_point') || doc.session.mode === 'ADD_POINT') {
+    actions.appendChild(
+      el('button', {
+        className: 'btn btn--suggested',
+        text: '+ Point',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'open-menu-section',
+          'data-section': 'add-point',
+        },
+      }),
+    );
+  }
+  if (coach.nextAction && legal.has(coach.nextAction) && coach.nextAction !== 'add_point' && coach.nextAction !== 'establish_baseline') {
+    actions.appendChild(
+      el('button', {
+        className: 'btn btn--util',
         text: coach.nextButton ?? actionLabel(coach.nextAction),
         attrs: {
           type: 'button',
@@ -747,17 +868,142 @@ function buildMinimalChrome(
         },
       }),
     );
-  } else if (doc.session.mode === 'START') {
-    actions.appendChild(
+  }
+  body.appendChild(actions);
+  return body;
+}
+
+function buildBaselineForm(doc: GardenDocument): HTMLElement {
+  const panel = el('div', { className: 'menu-acc__body step-panel', attrs: { 'data-testid': 'baseline-form' } });
+  panel.appendChild(
+    el('p', {
+      text: baselineReady(doc)
+        ? `Baseline set (${currentBaseline(doc)?.a}–${currentBaseline(doc)?.b}). Take baseline tie next.`
+        : 'Default: one house edge. Enter length (m) and optional mark offsets (mm).',
+    }),
+  );
+  const form = el('div', { className: 'step-form' });
+  form.appendChild(numField('Length (m)', 'length', '7'));
+  form.appendChild(numField('Offset A (mm)', 'offset-a', '0'));
+  form.appendChild(numField('Offset B (mm)', 'offset-b', '0'));
+  panel.appendChild(form);
+  panel.appendChild(
+    el('button', {
+      className: 'btn btn--util btn--stage2',
+      text: 'Save baseline',
+      attrs: { type: 'button', 'data-cmd': 'save-baseline' },
+    }),
+  );
+  return panel;
+}
+
+function buildTieForm(doc: GardenDocument): HTMLElement {
+  const panel = el('div', { className: 'menu-acc__body step-panel' });
+  panel.appendChild(
+    el('p', {
+      text: baselineTieReady(doc)
+        ? 'Both baseline ends + target mark present. Add point or measure more house edges.'
+        : 'v1: one frame with both baseline ends and the house mark. Indoors, use demo clicks.',
+    }),
+  );
+  if (!baselineTieReady(doc)) {
+    panel.appendChild(
       el('button', {
-        className: 'btn btn--stage2 minimal-chrome__primary',
-        text: 'Establish baseline',
-        attrs: { type: 'button', 'data-cmd': 'start-stage2' },
+        className: 'btn btn--util',
+        text: 'Record baseline tie (demo clicks)',
+        attrs: { type: 'button', 'data-cmd': 'record-tie' },
       }),
     );
   }
-  if (actions.childNodes.length) chrome.appendChild(actions);
-  return chrome;
+  return panel;
+}
+
+function buildHouseForm(doc: GardenDocument): HTMLElement {
+  const panel = el('div', { className: 'menu-acc__body step-panel' });
+  const n = houseCornerCount(doc);
+  const closed = housePolygon(doc)?.closed;
+  panel.appendChild(
+    el('p', {
+      text: closed
+        ? `House closed with ${n} corners.`
+        : `${n} corner(s) so far. Add next edge length (optional) + offset mm.`,
+    }),
+  );
+  if (!closed) {
+    const form = el('div', { className: 'step-form' });
+    form.appendChild(numField('Next edge (m, optional)', 'edge', ''));
+    form.appendChild(numField('Offset (mm)', 'offset', '0'));
+    panel.appendChild(form);
+    panel.appendChild(
+      el('button', {
+        className: 'btn btn--util',
+        text: 'Add house corner',
+        attrs: { type: 'button', 'data-cmd': 'add-house-corner' },
+      }),
+    );
+    if (n >= 3) {
+      panel.appendChild(
+        el('button', {
+          className: 'btn btn--util btn--stage2',
+          text: 'Close house',
+          attrs: { type: 'button', 'data-cmd': 'close-house' },
+        }),
+      );
+    }
+  }
+  return panel;
+}
+
+function buildLeapfrogForm(doc: GardenDocument): HTMLElement {
+  const panel = el('div', { className: 'menu-acc__body step-panel' });
+  const setup = currentSetup(doc);
+  panel.appendChild(
+    el('p', {
+      text: setup?.abPhotographedTogether
+        ? 'A and B are in a shared photo. Rods moved is now legal.'
+        : 'Photograph A and B together before you pick A up.',
+    }),
+  );
+  if (!setup?.abPhotographedTogether) {
+    panel.appendChild(
+      el('button', {
+        className: 'btn btn--util',
+        text: 'Confirm A and B photographed together',
+        attrs: { type: 'button', 'data-cmd': 'confirm-ab' },
+      }),
+    );
+  }
+  return panel;
+}
+
+function menuAccordion(
+  id: MenuSection,
+  title: string,
+  body: HTMLElement,
+): HTMLElement {
+  const details = el('details', {
+    className: 'menu-acc',
+    attrs: {
+      'data-section': id ?? undefined,
+      'data-testid': id ? `menu-acc-${id}` : undefined,
+    },
+  });
+  if (state.menuFocus === id) details.setAttribute('open', 'true');
+  const summary = el('summary', {
+    className: 'menu-acc__summary',
+    text: title,
+    attrs: {
+      'data-cmd': 'menu-accordion',
+      'data-section': id ?? undefined,
+    },
+  });
+  // Prevent native toggle racing with our one-at-a-time state
+  summary.addEventListener('click', (ev) => {
+    ev.preventDefault();
+  });
+  details.appendChild(summary);
+  details.appendChild(body);
+  return details;
 }
 
 /** Sticky selectors: Baseline · Layer · Object · Geometry · Add photo. */
@@ -983,7 +1229,7 @@ function buildInspectorPanel(doc: GardenDocument): HTMLElement {
   return panel;
 }
 
-/** Full menu drawer — Sign-in, Tools, actions, Print, checklist, demos, I/O, stamp, Settings, Error log. */
+/** Full menu drawer — one accordion open at a time; plan stays chrome-free when closed. */
 function buildMenuDrawer(
   doc: GardenDocument,
   coach: ReturnType<typeof buildCoach>,
@@ -1011,7 +1257,6 @@ function buildMenuDrawer(
     }),
   );
   panel.appendChild(head);
-
   panel.appendChild(
     el('p', {
       className: 'menu-drawer__mode',
@@ -1019,12 +1264,44 @@ function buildMenuDrawer(
     }),
   );
 
-  // Sign in / OneDrive
-  panel.appendChild(sectionTitle('Sign in / OneDrive'));
-  panel.appendChild(buildCloudPanel());
+  // —— Workflows (accordion) ——
+  panel.appendChild(menuAccordion('recommend', 'Recommended next', buildRecommendBody(doc, coach, legal)));
 
-  // Tools
-  panel.appendChild(sectionTitle('Tools'));
+  const coachBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'coach-panel' } });
+  for (const line of coach.body) {
+    coachBody.appendChild(el('p', { className: 'menu-acc__coach', text: line }));
+  }
+  if (coach.residualLine) {
+    coachBody.appendChild(el('p', { className: 'menu-acc__meta', text: coach.residualLine }));
+  }
+  if (coach.geometryLine) {
+    coachBody.appendChild(el('p', { className: 'menu-acc__meta', text: coach.geometryLine }));
+  }
+  panel.appendChild(menuAccordion('coach', 'Coach', coachBody));
+
+  panel.appendChild(menuAccordion('baseline', 'Establish baseline', buildBaselineForm(doc)));
+  panel.appendChild(menuAccordion('tie', 'Baseline tie', buildTieForm(doc)));
+  panel.appendChild(menuAccordion('house', 'House corners', buildHouseForm(doc)));
+  panel.appendChild(menuAccordion('leapfrog', 'Leapfrog', buildLeapfrogForm(doc)));
+
+  const addPoint = buildAddPointPanel(doc);
+  addPoint.classList.add('add-point-panel--in-menu');
+  panel.appendChild(menuAccordion('add-point', '+ Point', addPoint));
+
+  if (doc.session.inspectingPointId) {
+    const insp = buildInspectorPanel(doc);
+    insp.classList.add('inspector-panel--in-menu');
+    panel.appendChild(menuAccordion('inspector', 'Point inspector', insp));
+  }
+
+  // —— Cloud ——
+  const cloudBody = el('div', { className: 'menu-acc__body' });
+  cloudBody.appendChild(buildCloudPanel());
+  panel.appendChild(menuAccordion('cloud', 'Sign in / OneDrive', cloudBody));
+
+  // —— Tools ——
+  const toolsBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'tools-panel' } });
+  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Garden' }));
   const tools = el('div', { className: 'menu-drawer__row' });
   tools.appendChild(
     el('button', {
@@ -1040,10 +1317,9 @@ function buildMenuDrawer(
       attrs: { type: 'button', 'data-cmd': 'start-stage2' },
     }),
   );
-  panel.appendChild(tools);
+  toolsBody.appendChild(tools);
 
-  // All mode actions
-  panel.appendChild(sectionTitle('All mode actions'));
+  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'All mode actions' }));
   const allList = el('div', { className: 'menu-drawer__actions' });
   for (const action of ALL_ACTIONS) {
     const isLegal = legal.has(action);
@@ -1063,30 +1339,30 @@ function buildMenuDrawer(
       }),
     );
   }
-  panel.appendChild(allList);
+  toolsBody.appendChild(allList);
 
-  // Print tags
-  panel.appendChild(sectionTitle('Print tags'));
-  panel.appendChild(
+  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Print & checklist' }));
+  const printRow = el('div', { className: 'menu-drawer__row' });
+  printRow.appendChild(
     el('button', {
       className: 'btn btn--util',
       text: 'Print tags (A4 belts + FNC01–04)',
       attrs: { type: 'button', 'data-cmd': 'print-tags' },
     }),
   );
-
-  // Stage 2 checklist
-  panel.appendChild(sectionTitle('Stage 2 checklist'));
-  panel.appendChild(
+  printRow.appendChild(
     el('button', {
       className: 'btn btn--util btn--stage2',
       text: state.showStage2Checklist ? 'Hide Stage 2 checklist' : 'Show Stage 2 checklist',
       attrs: { type: 'button', 'data-cmd': 'toggle-stage2-checklist' },
     }),
   );
+  toolsBody.appendChild(printRow);
+  if (state.showStage2Checklist) {
+    toolsBody.appendChild(buildStage2ChecklistPanel());
+  }
 
-  // Load demo
-  panel.appendChild(sectionTitle('Load demo'));
+  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Load demo' }));
   const demos = el('div', { className: 'menu-drawer__row' });
   demos.appendChild(
     el('button', {
@@ -1102,10 +1378,9 @@ function buildMenuDrawer(
       attrs: { type: 'button', 'data-cmd': 'run-milestone' },
     }),
   );
-  panel.appendChild(demos);
+  toolsBody.appendChild(demos);
 
-  // Export / Import
-  panel.appendChild(sectionTitle('Export / Import'));
+  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Export / Import' }));
   const io = el('div', { className: 'menu-drawer__row' });
   io.appendChild(
     el('button', {
@@ -1132,11 +1407,10 @@ function buildMenuDrawer(
   });
   fileLabel.appendChild(fileInput);
   io.appendChild(fileLabel);
-  panel.appendChild(io);
+  toolsBody.appendChild(io);
 
-  // Build stamp
-  panel.appendChild(sectionTitle('Build stamp'));
-  panel.appendChild(
+  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Build stamp' }));
+  toolsBody.appendChild(
     el('p', {
       className: 'menu-drawer__stamp',
       text: buildStamp(),
@@ -1144,8 +1418,7 @@ function buildMenuDrawer(
     }),
   );
 
-  // Settings
-  panel.appendChild(sectionTitle('Settings'));
+  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Settings' }));
   const speakLabel = el('label', { className: 'toggle' });
   const speak = el('input', {
     attrs: { type: 'checkbox', 'data-cmd': 'speak-toggle' },
@@ -1153,14 +1426,14 @@ function buildMenuDrawer(
   speak.checked = doc.session.speakSteps;
   speakLabel.appendChild(speak);
   speakLabel.appendChild(document.createTextNode(' Speak steps'));
-  panel.appendChild(speakLabel);
+  toolsBody.appendChild(speakLabel);
+  panel.appendChild(menuAccordion('tools', 'Tools', toolsBody));
 
-  // Error log
-  const errSection = el('section', {
-    className: 'menu-drawer__errors',
+  // —— Error log ——
+  const errBody = el('div', {
+    className: 'menu-acc__body menu-drawer__errors',
     attrs: { 'data-testid': 'error-log', id: 'error-log' },
   });
-  errSection.appendChild(sectionTitle('Error log'));
   const errHead = el('div', { className: 'menu-drawer__row' });
   errHead.appendChild(
     el('button', {
@@ -1176,11 +1449,10 @@ function buildMenuDrawer(
       attrs: { type: 'button', 'data-cmd': 'clear-error-log' },
     }),
   );
-  errSection.appendChild(errHead);
-
+  errBody.appendChild(errHead);
   const entries = getErrorLog();
   if (!entries.length) {
-    errSection.appendChild(
+    errBody.appendChild(
       el('p', { className: 'menu-drawer__empty', text: 'No errors captured this session.' }),
     );
   } else {
@@ -1200,24 +1472,25 @@ function buildMenuDrawer(
       }
       list.appendChild(item);
     }
-    errSection.appendChild(list);
+    errBody.appendChild(list);
   }
-  panel.appendChild(errSection);
+  const errAcc = menuAccordion('error-log', 'Error log', errBody);
+  panel.appendChild(errAcc);
 
   root.appendChild(panel);
 
-  // Scroll to Error log when opened via the red hamburger.
-  if (state.openErrorLog) {
+  if (state.openErrorLog || state.menuFocus === 'error-log') {
     queueMicrotask(() => {
-      errSection.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      errAcc.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  } else if (state.menuFocus) {
+    queueMicrotask(() => {
+      const open = panel.querySelector(`details[data-section="${state.menuFocus}"]`);
+      open?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     });
   }
 
   return root;
-}
-
-function sectionTitle(text: string): HTMLElement {
-  return el('h3', { className: 'menu-drawer__section', text });
 }
 
 function buildCloudPanel(): HTMLElement {
@@ -1371,7 +1644,11 @@ function startStage2FieldLoop(): void {
   const result = startStage2FieldWorkflow(state.doc);
   if (!result.ok) {
     surfaceFail(result.reason ?? 'Could not start Stage 2.', 'stage2');
-    setState({ showStage2Checklist: true, menuOpen: false });
+    setState({
+      showStage2Checklist: true,
+      menuOpen: true,
+      menuFocus: 'tools',
+    });
     return;
   }
   setState({
@@ -1379,150 +1656,36 @@ function startStage2FieldLoop(): void {
     view: 'survey',
     refuseMessage: null,
     showStage2Checklist: result.showChecklist,
-    menuOpen: false,
+    menuOpen: true,
+    menuFocus: 'baseline',
+    openErrorLog: false,
   });
   const coach = buildCoach(result.doc);
   speakCoachLine(coach.body[0] ?? '', result.doc.session.speakSteps);
 }
 
-function buildStepPanel(doc: GardenDocument): HTMLElement | null {
-  const mode = doc.session.mode;
-
-  if (mode === 'START') {
-    // START: demos and checklist live in the hamburger — no button wall on the plan.
-    return null;
+/** Prefer keeping workflow forms open in the drawer after a mode change. */
+function menuFocusAfterMode(mode: string): MenuSection {
+  switch (mode) {
+    case 'BASELINE':
+    case 'HOUSE_BASELINE':
+      return 'baseline';
+    case 'PHOTO_TIE_BASELINE':
+    case 'PHOTO_TIE_HOUSE_ROD':
+      return 'tie';
+    case 'HOUSE_EDGES':
+    case 'PLACE_ROD_A':
+      return 'house';
+    case 'LEAPFROG':
+      return 'leapfrog';
+    case 'ADD_POINT':
+    case 'ADD_POINT_EXTRA_YAW':
+      return 'add-point';
+    case 'ADJUST':
+      return 'coach';
+    default:
+      return 'recommend';
   }
-
-  if (mode === 'BASELINE' || mode === 'HOUSE_BASELINE') {
-    const panel = el('section', { className: 'step-panel' });
-    panel.appendChild(el('h2', { text: 'Establish baseline (house edge)' }));
-    panel.appendChild(
-      el('p', {
-        text: baselineReady(doc)
-          ? `Baseline set (${currentBaseline(doc)?.a}–${currentBaseline(doc)?.b}). Take baseline tie next.`
-          : 'Default: one house edge. Enter length in metres and optional mark offsets (mm) if the roll is not the true corner.',
-      }),
-    );
-    const form = el('div', { className: 'step-form' });
-    form.appendChild(numField('Length (m)', 'length', '7'));
-    form.appendChild(numField('Offset A (mm)', 'offset-a', '0'));
-    form.appendChild(numField('Offset B (mm)', 'offset-b', '0'));
-    panel.appendChild(form);
-    panel.appendChild(
-      el('button', {
-        className: 'btn btn--util btn--stage2',
-        text: 'Save baseline',
-        attrs: { type: 'button', 'data-cmd': 'save-baseline' },
-      }),
-    );
-    return panel;
-  }
-
-  if (mode === 'PHOTO_TIE_BASELINE' || mode === 'PHOTO_TIE_HOUSE_ROD') {
-    const panel = el('section', { className: 'step-panel' });
-    panel.appendChild(el('h2', { text: 'Baseline photo tie' }));
-    panel.appendChild(
-      el('p', {
-        text: baselineTieReady(doc)
-          ? 'Both baseline ends + target mark present. Add point or measure more house edges.'
-          : 'v1: one frame with both baseline ends and the house mark. Indoors, use demo clicks.',
-      }),
-    );
-    if (!baselineTieReady(doc)) {
-      panel.appendChild(
-        el('button', {
-          className: 'btn btn--util',
-          text: 'Record baseline tie (demo clicks)',
-          attrs: { type: 'button', 'data-cmd': 'record-tie' },
-        }),
-      );
-    }
-    return panel;
-  }
-
-  if (mode === 'HOUSE_EDGES' || mode === 'PLACE_ROD_A') {
-    const panel = el('section', { className: 'step-panel' });
-    const n = houseCornerCount(doc);
-    const closed = housePolygon(doc)?.closed;
-    panel.appendChild(el('h2', { text: 'Grow house corners' }));
-    panel.appendChild(
-      el('p', {
-        text: closed
-          ? `House closed with ${n} corners.`
-          : `${n} corner(s) so far (~10 typical). Add the next edge length if you taped it, plus offset mm.`,
-      }),
-    );
-    if (!closed) {
-      const form = el('div', { className: 'step-form' });
-      form.appendChild(numField('Next edge (m, optional)', 'edge', ''));
-      form.appendChild(numField('Offset (mm)', 'offset', '0'));
-      panel.appendChild(form);
-      panel.appendChild(
-        el('button', {
-          className: 'btn btn--util',
-          text: 'Add house corner',
-          attrs: { type: 'button', 'data-cmd': 'add-house-corner' },
-        }),
-      );
-      if (n >= 3) {
-        panel.appendChild(
-          el('button', {
-            className: 'btn btn--util btn--stage2',
-            text: 'Close house',
-            attrs: { type: 'button', 'data-cmd': 'close-house' },
-          }),
-        );
-      }
-    }
-    return panel;
-  }
-
-  if (mode === 'LEAPFROG') {
-    const panel = el('section', { className: 'step-panel' });
-    const setup = currentSetup(doc);
-    panel.appendChild(el('h2', { text: 'Leapfrog A + B' }));
-    panel.appendChild(
-      el('p', {
-        text: setup?.abPhotographedTogether
-          ? 'A and B are in a shared photo. Rods moved is now legal.'
-          : 'Photograph A and B together before you pick A up. Confirm below — otherwise Rods moved is refused.',
-      }),
-    );
-    if (!setup?.abPhotographedTogether) {
-      panel.appendChild(
-        el('button', {
-          className: 'btn btn--util',
-          text: 'Confirm A and B photographed together',
-          attrs: { type: 'button', 'data-cmd': 'confirm-ab' },
-        }),
-      );
-    }
-    return panel;
-  }
-
-  if (mode === 'ADD_POINT' || mode === 'ADJUST') {
-    const panel = el('section', { className: 'step-panel step-panel--hint' });
-    panel.appendChild(
-      el('p', {
-        text:
-          mode === 'ADD_POINT'
-            ? 'Field: keep using Add point, or Start leapfrog when you need rod B. Press Adjust when you want millimetre residuals on the plan.'
-            : 'Read the coach residuals in mm. Good enough (<~15 mm) → keep surveying. Over ~50 mm → remeasure. Print tags anytime.',
-      }),
-    );
-    if (mode === 'ADJUST') {
-      panel.appendChild(
-        el('button', {
-          className: 'btn btn--util btn--demo',
-          text: 'Print tags (A4 belts + FNC01–04)',
-          attrs: { type: 'button', 'data-cmd': 'print-tags' },
-        }),
-      );
-    }
-    return panel;
-  }
-
-  return null;
 }
 
 function numField(label: string, field: string, value: string): HTMLElement {
@@ -1586,7 +1749,11 @@ function onModeAction(action: ModeAction): void {
       setDoc(result.doc, null);
     }
     speakCoachLine(result.note, result.doc.session.speakSteps);
-    setState({ menuOpen: false });
+    setState({
+      menuOpen: true,
+      menuFocus: menuFocusAfterMode(result.doc.session.mode),
+      openErrorLog: false,
+    });
     return;
   }
 
@@ -1600,7 +1767,11 @@ function onModeAction(action: ModeAction): void {
 
   if (action === 'adjust') {
     runAdjust(doc);
-    setState({ menuOpen: false });
+    setState({
+      menuOpen: true,
+      menuFocus: 'coach',
+      openErrorLog: false,
+    });
     return;
   }
 
@@ -1611,7 +1782,11 @@ function onModeAction(action: ModeAction): void {
     return;
   }
   setDoc(next, null);
-  setState({ menuOpen: false });
+  setState({
+    menuOpen: true,
+    menuFocus: menuFocusAfterMode(next.session.mode),
+    openErrorLog: false,
+  });
   const coach = buildCoach(next);
   speakCoachLine(coach.body[0] ?? '', next.session.speakSteps);
 }

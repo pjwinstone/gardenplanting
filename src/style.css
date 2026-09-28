@@ -126,43 +126,137 @@ body {
   text-align: center;
 }
 
-/* Mid-workflow: coach + primary only */
-.minimal-chrome {
+/* Tiny mode/build hint — not a recommendation card */
+.mode-hint {
   position: fixed;
   left: max(0.65rem, env(safe-area-inset-left));
-  right: max(3.6rem, calc(env(safe-area-inset-right) + 3.4rem));
   bottom: max(0.65rem, env(safe-area-inset-bottom));
   z-index: 30;
-  max-width: 28rem;
-  padding: 0.55rem 0.75rem 0.65rem;
-  background: rgba(26, 58, 42, 0.92);
-  color: #f6f1e6;
-  border-radius: 4px;
-  box-shadow: 0 2px 14px rgba(26, 36, 28, 0.28);
   pointer-events: auto;
 }
 
-.minimal-chrome__coach {
-  font-family: 'Fraunces', Georgia, serif;
-  font-size: clamp(0.95rem, 2.5vw, 1.1rem);
-  margin: 0;
-  line-height: 1.3;
+.mode-hint__btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid rgba(42, 36, 28, 0.18);
+  border-radius: 2px;
+  background: rgba(246, 241, 230, 0.88);
+  color: var(--muted);
+  cursor: pointer;
 }
 
-.minimal-chrome__meta {
+.mode-hint__btn:hover,
+.mode-hint__btn:focus-visible {
+  color: var(--moss);
+  border-color: var(--moss-2);
+}
+
+/* Drawer accordion — one section open at a time */
+.menu-acc {
+  border-top: 1px solid var(--line);
+  margin: 0;
+}
+
+.menu-acc:first-of-type,
+.menu-drawer__mode + .menu-acc {
+  border-top: none;
+}
+
+.menu-acc__summary {
+  list-style: none;
+  cursor: pointer;
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 1.05rem;
+  color: var(--moss);
+  padding: 0.7rem 0.15rem;
+  user-select: none;
+}
+
+.menu-acc__summary::-webkit-details-marker {
+  display: none;
+}
+
+.menu-acc__summary::after {
+  content: '+';
+  float: right;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.menu-acc[open] > .menu-acc__summary::after {
+  content: '−';
+}
+
+.menu-acc__body {
+  padding: 0 0.1rem 0.85rem;
+}
+
+.menu-acc__coach {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 0.98rem;
+  margin: 0 0 0.35rem;
+  line-height: 1.35;
+}
+
+.menu-acc__meta {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.78rem;
-  margin: 0.3rem 0 0;
-  opacity: 0.9;
+  color: var(--muted);
+  margin: 0 0 0.45rem;
 }
 
-.minimal-chrome__actions {
-  margin-top: 0.45rem;
+.menu-acc__sub {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 0.88rem;
+  margin: 0.85rem 0 0.35rem;
+  color: var(--moss-2);
 }
 
-.minimal-chrome__primary {
-  font-size: 0.95rem;
-  padding: 0.45rem 0.85rem;
+.menu-acc__sub:first-child {
+  margin-top: 0;
+}
+
+.menu-acc .step-panel {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.menu-acc .step-panel p {
+  margin: 0 0 0.45rem;
+  font-size: 0.9rem;
+}
+
+.menu-acc .step-form {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.55rem;
+}
+
+.menu-acc .step-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+}
+
+.menu-acc .step-form .field input {
+  font: inherit;
+  padding: 0.35rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: #fffdf8;
+}
+
+/* Mid-workflow chrome removed from plan (was .minimal-chrome) */
+.minimal-chrome {
+  display: none;
 }
 
 /* Drawer */
@@ -318,18 +412,19 @@ body {
   padding: 0.85rem 1.1rem 10rem;
 }
 
-.add-point-panel {
-  position: fixed;
-  left: max(0.65rem, env(safe-area-inset-left));
-  right: max(0.65rem, env(safe-area-inset-right));
-  bottom: max(4.8rem, calc(env(safe-area-inset-bottom) + 4.2rem));
-  z-index: 28;
-  max-width: 28rem;
-  padding: 0.65rem 0.75rem 0.75rem;
-  background: rgba(246, 241, 230, 0.96);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  box-shadow: 0 2px 14px rgba(26, 36, 28, 0.2);
+.add-point-panel,
+.add-point-panel--in-menu {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  z-index: auto;
+  max-width: none;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
   color: var(--ink);
 }
 
@@ -338,6 +433,10 @@ body {
   font-size: 1.05rem;
   margin: 0 0 0.15rem;
   color: var(--moss);
+}
+
+.add-point-panel--in-menu .add-point-panel__title {
+  display: none;
 }
 
 .add-point-panel__hint {
@@ -391,23 +490,26 @@ body {
   box-shadow: none;
   margin-top: 0.5rem;
   padding: 0.5rem;
+  border: 1px solid var(--line);
+  background: #fffdf8;
 }
 
-.inspector-panel {
-  position: fixed;
-  left: max(0.65rem, env(safe-area-inset-left));
-  right: max(0.65rem, env(safe-area-inset-right));
-  top: max(3.5rem, calc(env(safe-area-inset-top) + 3.2rem));
-  z-index: 45;
-  max-height: min(70vh, 36rem);
-  overflow: auto;
-  max-width: 28rem;
-  margin: 0 auto;
-  padding: 0.75rem 0.85rem 1rem;
-  background: #f6f1e6;
-  border: 1px solid var(--moss-2);
-  border-radius: 4px;
-  box-shadow: 0 4px 24px rgba(26, 36, 28, 0.28);
+.inspector-panel,
+.inspector-panel--in-menu {
+  position: static;
+  left: auto;
+  right: auto;
+  top: auto;
+  z-index: auto;
+  max-height: none;
+  overflow: visible;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .inspector-panel__head {
