@@ -81,6 +81,7 @@ export type MenuSection =
   | 'mode'
   | 'version'
   | 'recommend'
+  | 'add-point'
   | 'coach'
   | 'baseline'
   | 'tie'
@@ -1177,23 +1178,41 @@ function menuAccordion(
   id: MenuSection,
   title: string,
   body: HTMLElement,
+  status?: { tone: 'ok' | 'warn' | 'error' | 'idle'; text?: string },
 ): HTMLElement {
+  const tone = status?.tone ?? 'idle';
   const details = el('details', {
-    className: 'menu-acc',
+    className: 'menu-acc' + (tone !== 'idle' ? ` menu-acc--${tone}` : ''),
     attrs: {
       'data-section': id ?? undefined,
       'data-testid': id ? `menu-acc-${id}` : undefined,
+      'data-status': tone,
     },
   });
   if (state.menuFocus === id) details.setAttribute('open', 'true');
   const summary = el('summary', {
-    className: 'menu-acc__summary',
-    text: title,
+    className: 'menu-acc__summary' + (tone !== 'idle' ? ` menu-acc__summary--${tone}` : ''),
     attrs: {
       'data-cmd': 'menu-accordion',
       'data-section': id ?? undefined,
     },
   });
+  summary.appendChild(
+    el('span', {
+      className: 'menu-acc__dot',
+      attrs: { 'aria-hidden': 'true' },
+    }),
+  );
+  summary.appendChild(el('span', { className: 'menu-acc__label', text: title }));
+  if (status?.text) {
+    summary.appendChild(
+      el('span', {
+        className: 'menu-acc__status',
+        text: status.text,
+        attrs: { 'data-testid': id ? `menu-status-${id}` : undefined },
+      }),
+    );
+  }
   // Prevent native toggle racing with our one-at-a-time state
   summary.addEventListener('click', (ev) => {
     ev.preventDefault();
@@ -1201,6 +1220,53 @@ function menuAccordion(
   details.appendChild(summary);
   details.appendChild(body);
   return details;
+}
+
+/** Concertina status for Sign in / OneDrive (see docs/design-philosophy-status-colours.md). */
+function cloudSectionStatus(doc: GardenDocument): { tone: 'ok' | 'warn' | 'error' | 'idle'; text: string } {
+  const cloud = getCloudStatus();
+  if (!cloud.configured) {
+    return { tone: 'error', text: 'Not configured' };
+  }
+  if (cloud.message && /could not|error|problem|fail|denied|missing/i.test(cloud.message)) {
+    const short = cloud.message.length > 42 ? `${cloud.message.slice(0, 40)}…` : cloud.message;
+    return { tone: 'error', text: short };
+  }
+  if (!cloud.signedIn) {
+    return { tone: 'warn', text: 'Not signed in' };
+  }
+  const gardenLoaded =
+    doc.baselines.length > 0 ||
+    doc.points.some((p) => p.x != null && p.y != null) ||
+    Boolean(cloud.lastSaveIso);
+  if (gardenLoaded) {
+    return {
+      tone: 'ok',
+      text: cloud.accountLabel ? `Signed in · garden ready` : 'Signed in · garden ready',
+    };
+  }
+  return { tone: 'warn', text: 'Signed in · no garden yet' };
+}
+
+function baselineSectionStatus(doc: GardenDocument): { tone: 'ok' | 'warn' | 'error' | 'idle'; text?: string } {
+  if (baselineReady(doc)) {
+    const bl = preferredBaseline(doc) ?? currentBaseline(doc);
+    return {
+      tone: 'ok',
+      text: bl ? `${bl.a}–${bl.b}` : 'Set',
+    };
+  }
+  return { tone: 'warn', text: 'Not set' };
+}
+
+function addPointSectionStatus(doc: GardenDocument): { tone: 'ok' | 'warn' | 'error' | 'idle'; text?: string } {
+  if (!baselineReady(doc)) {
+    return { tone: 'warn', text: 'Needs baseline' };
+  }
+  if (doc.session.mode === 'ADD_POINT' || doc.session.mode === 'ADD_POINT_EXTRA_YAW') {
+    return { tone: 'ok', text: 'Ready' };
+  }
+  return { tone: 'idle', text: 'Open dialogue' };
 }
 
 /** Unified translucent + Point / inspect dialogue (same fields both modes). */
@@ -1218,29 +1284,37 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
     },
   });
 
-  const head = el('div', {
-    className: 'point-dialog__head',
-    attrs: { 'data-drag-handle': 'true' },
+  const head = el('div', { className: 'point-dialog__head' });
+  const drag = el('div', {
+    className: 'point-dialog__drag',
+    attrs: { 'data-drag-handle': 'true', title: 'Drag to move' },
   });
-  head.appendChild(
+  drag.appendChild(
     el('h2', {
       className: 'point-dialog__title',
       text: mode === 'inspect' ? (pt ? `Point ${pt.id}` : 'Point') : '+ Point',
       attrs: { 'data-testid': 'point-dialog-title' },
     }),
   );
-  head.appendChild(
+  drag.appendChild(
     el('span', {
       className: 'point-dialog__grip',
       text: '⠿',
-      attrs: { 'aria-hidden': 'true', title: 'Drag' },
+      attrs: { 'aria-hidden': 'true' },
     }),
   );
+  head.appendChild(drag);
   head.appendChild(
     el('button', {
       className: 'btn btn--util point-dialog__close',
-      text: 'Close',
-      attrs: { type: 'button', 'data-cmd': 'close-point-dialog' },
+      text: '✕',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'close-point-dialog',
+        'data-testid': 'point-dialog-close',
+        'aria-label': 'Close dialogue',
+        title: 'Close',
+      },
     }),
   );
   dialog.appendChild(head);
@@ -1448,6 +1522,18 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
     );
   }
   dialog.appendChild(actionsRow);
+  actionsRow.appendChild(
+    el('button', {
+      className: 'btn btn--util point-dialog__close-footer',
+      text: 'Close',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'close-point-dialog',
+        'data-testid': 'point-dialog-close-footer',
+        'aria-label': 'Close dialogue',
+      },
+    }),
+  );
   return dialog;
 }
 
@@ -1529,6 +1615,25 @@ function buildMenuDrawer(
   );
   panel.appendChild(head);
 
+  // Always-visible thumb control — not buried in Recommended next / Tools.
+  const quick = el('div', {
+    className: 'menu-drawer__quick',
+    attrs: { 'data-testid': 'menu-quick-actions' },
+  });
+  quick.appendChild(
+    el('button', {
+      className: 'btn btn--suggested btn--thumb',
+      text: '+ Point',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'open-point-dialog',
+        'data-testid': 'menu-open-add-point',
+        'aria-label': 'Open + Point dialogue',
+      },
+    }),
+  );
+  panel.appendChild(quick);
+
   // —— Top: Mode + Version (near top of concertina) ——
   const modeBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'mode-panel' } });
   modeBody.appendChild(
@@ -1563,6 +1668,29 @@ function buildMenuDrawer(
   // —— Workflows ——
   panel.appendChild(menuAccordion('recommend', 'Recommended next', buildRecommendBody(doc, coach, legal)));
 
+  const addPointBody = el('div', {
+    className: 'menu-acc__body',
+    attrs: { 'data-testid': 'menu-add-point-section' },
+  });
+  addPointBody.appendChild(
+    el('p', {
+      className: 'menu-acc__meta',
+      text: 'Opens the translucent + Point dialogue on the plan (sticky baseline, layer, object, geometry). Tap a measured point to inspect/edit in the same dialogue.',
+    }),
+  );
+  addPointBody.appendChild(
+    el('button', {
+      className: 'btn btn--suggested btn--thumb',
+      text: 'Open + Point',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'open-point-dialog',
+        'data-testid': 'menu-open-add-point-acc',
+      },
+    }),
+  );
+  panel.appendChild(menuAccordion('add-point', '+ Point', addPointBody, addPointSectionStatus(doc)));
+
   const coachBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'coach-panel' } });
   for (const line of coach.body) {
     coachBody.appendChild(el('p', { className: 'menu-acc__coach', text: line }));
@@ -1575,7 +1703,9 @@ function buildMenuDrawer(
   }
   panel.appendChild(menuAccordion('coach', 'Coach', coachBody));
 
-  panel.appendChild(menuAccordion('baseline', 'Establish baseline', buildBaselineForm(doc)));
+  panel.appendChild(
+    menuAccordion('baseline', 'Establish baseline', buildBaselineForm(doc), baselineSectionStatus(doc)),
+  );
   panel.appendChild(menuAccordion('tie', 'Baseline tie', buildTieForm(doc)));
   panel.appendChild(menuAccordion('house', 'House corners', buildHouseForm(doc)));
   panel.appendChild(menuAccordion('leapfrog', 'Leapfrog', buildLeapfrogForm(doc)));
@@ -1583,7 +1713,9 @@ function buildMenuDrawer(
   // —— Cloud ——
   const cloudBody = el('div', { className: 'menu-acc__body' });
   cloudBody.appendChild(buildCloudPanel());
-  panel.appendChild(menuAccordion('cloud', 'Sign in / OneDrive', cloudBody));
+  panel.appendChild(
+    menuAccordion('cloud', 'Sign in / OneDrive', cloudBody, cloudSectionStatus(doc)),
+  );
 
   // —— Tools ——
   const toolsBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'tools-panel' } });
@@ -1605,9 +1737,13 @@ function buildMenuDrawer(
   );
   tools.appendChild(
     el('button', {
-      className: 'btn btn--suggested',
+      className: 'btn btn--suggested btn--thumb',
       text: '+ Point',
-      attrs: { type: 'button', 'data-cmd': 'open-point-dialog' },
+      attrs: {
+        type: 'button',
+        'data-cmd': 'open-point-dialog',
+        'data-testid': 'tools-open-add-point',
+      },
     }),
   );
   toolsBody.appendChild(tools);
