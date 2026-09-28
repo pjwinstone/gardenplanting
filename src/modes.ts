@@ -16,7 +16,7 @@ export type ModeAction =
   | 'measure_house_edges'
   | 'close_house'
   | 'place_helper_rod'
-  | 'occupy'
+  | 'add_point'
   | 'another_photo_yaw'
   | 'start_leapfrog'
   | 'rods_moved'
@@ -36,7 +36,7 @@ const ACTION_LABELS: Record<ModeAction, string> = {
   measure_house_edges: 'Measure house edges',
   close_house: 'Close house',
   place_helper_rod: 'Place helper rod A',
-  occupy: 'Occupy',
+  add_point: '+ Point',
   another_photo_yaw: 'Another photo here (yaw)',
   start_leapfrog: 'Start leapfrog',
   rods_moved: 'Rods moved',
@@ -55,7 +55,7 @@ export const ALL_ACTIONS: ModeAction[] = [
   'measure_house_edges',
   'close_house',
   'place_helper_rod',
-  'occupy',
+  'add_point',
   'another_photo_yaw',
   'start_leapfrog',
   'rods_moved',
@@ -121,7 +121,7 @@ export function canTransition(
         mode === 'PHOTO_TIE_BASELINE' ||
         mode === 'BASELINE' ||
         mode === 'HOUSE_EDGES' ||
-        mode === 'OCCUPY' ||
+        mode === 'ADD_POINT' ||
         mode === 'ADJUST' ||
         mode === 'REVIEW'
       ) {
@@ -144,7 +144,7 @@ export function canTransition(
         mode === 'HOUSE_EDGES' ||
         mode === 'PHOTO_TIE_BASELINE' ||
         mode === 'ADJUST' ||
-        mode === 'OCCUPY'
+        mode === 'ADD_POINT'
       ) {
         if (houseCornerCount(doc) < 3) {
           return {
@@ -166,7 +166,7 @@ export function canTransition(
         mode === 'PHOTO_TIE_BASELINE' ||
         mode === 'HOUSE_EDGES' ||
         mode === 'RODS_MOVED' ||
-        mode === 'OCCUPY'
+        mode === 'ADD_POINT'
       ) {
         if (!baselineReady(doc) && mode !== 'RODS_MOVED') {
           return {
@@ -175,7 +175,7 @@ export function canTransition(
               'Place helper rod after the baseline exists (or after Rods moved in a new setup).',
           };
         }
-        return { ok: true, nextMode: mode === 'RODS_MOVED' ? 'OCCUPY' : mode };
+        return { ok: true, nextMode: mode === 'RODS_MOVED' ? 'ADD_POINT' : mode };
       }
       return {
         ok: false,
@@ -183,7 +183,7 @@ export function canTransition(
       };
     }
 
-    case 'occupy': {
+    case 'add_point': {
       if (mode === 'PHOTO_TIE_BASELINE') {
         if (!baselineTieReady(doc)) {
           return {
@@ -198,16 +198,16 @@ export function canTransition(
             reason: 'No live control exists. Keep the baseline or place a helper rod.',
           };
         }
-        return { ok: true, nextMode: 'OCCUPY' };
+        return { ok: true, nextMode: 'ADD_POINT' };
       }
       if (
         mode === 'HOUSE_EDGES' ||
-        mode === 'OCCUPY_EXTRA_YAW' ||
+        mode === 'ADD_POINT_EXTRA_YAW' ||
         mode === 'FENCE_TAG' ||
         mode === 'LEAPFROG' ||
         mode === 'ADJUST' ||
         mode === 'REVIEW' ||
-        mode === 'OCCUPY' ||
+        mode === 'ADD_POINT' ||
         mode === 'RODS_MOVED'
       ) {
         if (!hasLiveControl(doc)) {
@@ -215,47 +215,47 @@ export function canTransition(
             ok: false,
             reason:
               mode === 'RODS_MOVED'
-                ? 'New setup has no live control yet. Place helper rod A or establish a baseline before occupying.'
-                : 'No live control exists. You cannot occupy without a baseline or live rod.',
+                ? 'New setup has no live control yet. Place helper rod A or establish a baseline before you can Add point.'
+                : 'No live control exists. You cannot Add point without a baseline or live rod.',
           };
         }
-        return { ok: true, nextMode: 'OCCUPY' };
+        return { ok: true, nextMode: 'ADD_POINT' };
       }
       if (mode === 'START' || mode === 'BASELINE') {
         return {
           ok: false,
           reason:
-            'Cannot occupy yet — establish the baseline and take a baseline tie (or place a helper rod) first.',
+            'Cannot Add point yet — establish the baseline and take a baseline tie (or place a helper rod) first.',
         };
       }
       return {
         ok: false,
-        reason: `Cannot occupy from ${mode}. Get a baseline tie or live rod first.`,
+        reason: `Cannot Add point from ${mode}. Get a baseline tie or live rod first.`,
       };
     }
 
     case 'another_photo_yaw': {
-      if (mode === 'OCCUPY' || mode === 'OCCUPY_EXTRA_YAW') {
-        if (!doc.session.currentOccupyId) {
+      if (mode === 'ADD_POINT' || mode === 'ADD_POINT_EXTRA_YAW') {
+        if (!doc.session.currentAddPointId) {
           return {
             ok: false,
             reason:
-              'No current occupy point. Spike and name a point before taking a yaw-only extra photo.',
+              'No current Add point yet. Spike and name a point before taking a yaw-only extra photo.',
           };
         }
-        return { ok: true, nextMode: 'OCCUPY_EXTRA_YAW' };
+        return { ok: true, nextMode: 'ADD_POINT_EXTRA_YAW' };
       }
       return {
         ok: false,
         reason:
-          'Another photo here (yaw) only works during an occupy. Do not step — only turn the phone.',
+          'Another photo here (yaw) only works during Add point. Do not step — only turn the phone.',
       };
     }
 
     case 'start_leapfrog': {
       if (
-        mode === 'OCCUPY' ||
-        mode === 'OCCUPY_EXTRA_YAW' ||
+        mode === 'ADD_POINT' ||
+        mode === 'ADD_POINT_EXTRA_YAW' ||
         mode === 'HOUSE_EDGES' ||
         mode === 'REVIEW'
       ) {
@@ -266,7 +266,7 @@ export function canTransition(
       }
       return {
         ok: false,
-        reason: `Start leapfrog is not legal in ${mode}. Occupy or finish a house edge, then plant rod B for the far side.`,
+        reason: `Start leapfrog is not legal in ${mode}. Add point or finish a house edge, then plant rod B for the far side.`,
       };
     }
 
@@ -286,7 +286,7 @@ export function canTransition(
         return {
           ok: false,
           reason:
-            'Already confirmed rods moved. Place the new live rod, a second baseline, or occupy.',
+            'Already confirmed rods moved. Place the new live rod, a second baseline, or Add point.',
         };
       }
       return {
@@ -297,7 +297,7 @@ export function canTransition(
     }
 
     case 'fence_mark': {
-      if (mode === 'OCCUPY' || mode === 'OCCUPY_EXTRA_YAW' || mode === 'FENCE_TAG') {
+      if (mode === 'ADD_POINT' || mode === 'ADD_POINT_EXTRA_YAW' || mode === 'FENCE_TAG') {
         if (!hasLiveControl(doc)) {
           return {
             ok: false,
@@ -308,14 +308,14 @@ export function canTransition(
       }
       return {
         ok: false,
-        reason: `Fence mark is not legal in ${mode}. Occupy with live control, then stick a roll on the post.`,
+        reason: `Fence mark is not legal in ${mode}. Add point with live control, then stick a roll on the post.`,
       };
     }
 
     case 'adjust': {
       if (
-        mode === 'OCCUPY' ||
-        mode === 'OCCUPY_EXTRA_YAW' ||
+        mode === 'ADD_POINT' ||
+        mode === 'ADD_POINT_EXTRA_YAW' ||
         mode === 'HOUSE_EDGES' ||
         mode === 'PHOTO_TIE_BASELINE' ||
         mode === 'REVIEW' ||
@@ -332,12 +332,12 @@ export function canTransition(
       }
       return {
         ok: false,
-        reason: `Adjust is not legal in ${mode}. Establish a baseline (and preferably a tie or occupy) first.`,
+        reason: `Adjust is not legal in ${mode}. Establish a baseline (and preferably a tie or Add point) first.`,
       };
     }
 
     case 'done_with_setup': {
-      if (mode === 'ADJUST' || mode === 'OCCUPY' || mode === 'REVIEW' || mode === 'HOUSE_EDGES') {
+      if (mode === 'ADJUST' || mode === 'ADD_POINT' || mode === 'REVIEW' || mode === 'HOUSE_EDGES') {
         return { ok: true, nextMode: 'REVIEW' };
       }
       return {
@@ -357,6 +357,8 @@ function normalizeMode(mode: SessionMode): SessionMode {
   if (mode === 'HOUSE_BASELINE') return 'BASELINE';
   if (mode === 'PLACE_ROD_A') return 'HOUSE_EDGES';
   if (mode === 'PHOTO_TIE_HOUSE_ROD') return 'PHOTO_TIE_BASELINE';
+  if ((mode as string) === 'OCCUPY') return 'ADD_POINT';
+  if ((mode as string) === 'OCCUPY_EXTRA_YAW') return 'ADD_POINT_EXTRA_YAW';
   return mode;
 }
 
@@ -447,15 +449,15 @@ export function suggestedAction(doc: GardenDocument): ModeAction | null {
   const order: Partial<Record<SessionMode, ModeAction[]>> = {
     START: ['establish_baseline'],
     BASELINE: ['take_baseline_tie', 'place_helper_rod'],
-    PHOTO_TIE_BASELINE: ['measure_house_edges', 'occupy', 'adjust'],
-    HOUSE_EDGES: ['close_house', 'take_baseline_tie', 'occupy', 'start_leapfrog', 'adjust'],
-    OCCUPY: ['adjust', 'another_photo_yaw', 'start_leapfrog', 'measure_house_edges', 'fence_mark'],
-    OCCUPY_EXTRA_YAW: ['occupy', 'adjust'],
-    LEAPFROG: ['rods_moved', 'occupy'],
-    RODS_MOVED: ['establish_baseline', 'place_helper_rod', 'occupy'],
-    FENCE_TAG: ['occupy', 'adjust'],
-    ADJUST: ['done_with_setup', 'measure_house_edges', 'occupy'],
-    REVIEW: ['adjust', 'occupy', 'establish_baseline'],
+    PHOTO_TIE_BASELINE: ['measure_house_edges', 'add_point', 'adjust'],
+    HOUSE_EDGES: ['close_house', 'take_baseline_tie', 'add_point', 'start_leapfrog', 'adjust'],
+    ADD_POINT: ['adjust', 'another_photo_yaw', 'start_leapfrog', 'measure_house_edges', 'fence_mark'],
+    ADD_POINT_EXTRA_YAW: ['add_point', 'adjust'],
+    LEAPFROG: ['rods_moved', 'add_point'],
+    RODS_MOVED: ['establish_baseline', 'place_helper_rod', 'add_point'],
+    FENCE_TAG: ['add_point', 'adjust'],
+    ADJUST: ['done_with_setup', 'measure_house_edges', 'add_point'],
+    REVIEW: ['adjust', 'add_point', 'establish_baseline'],
   };
   const candidates = order[mode] ?? [];
   for (const a of candidates) {

@@ -5,17 +5,19 @@ export type SessionMode =
   | 'BASELINE'
   | 'PHOTO_TIE_BASELINE'
   | 'HOUSE_EDGES'
-  | 'OCCUPY'
-  | 'OCCUPY_EXTRA_YAW'
+  | 'ADD_POINT'
+  | 'ADD_POINT_EXTRA_YAW'
   | 'LEAPFROG'
   | 'RODS_MOVED'
   | 'FENCE_TAG'
   | 'ADJUST'
   | 'REVIEW'
-  /** @deprecated legacy — normalised to BASELINE on load helpers */
+  /** @deprecated legacy — normalised on load helpers */
   | 'HOUSE_BASELINE'
   | 'PLACE_ROD_A'
-  | 'PHOTO_TIE_HOUSE_ROD';
+  | 'PHOTO_TIE_HOUSE_ROD'
+  | 'OCCUPY'
+  | 'OCCUPY_EXTRA_YAW';
 
 export type PointKind = 'HSE' | 'FNC' | 'POL' | 'ROD' | 'OCC' | 'TRK' | 'BED' | 'BL';
 
@@ -88,7 +90,7 @@ export interface PhotoClick {
 export interface Photo {
   id: string;
   setupId: string;
-  occupyPointId?: string;
+  addPointId?: string;
   yawOnly?: boolean;
   thumbnailDataUrl?: string;
   width: number;
@@ -116,7 +118,7 @@ export interface SessionState {
   lastResidualMm?: number;
   lastAction?: string;
   geometryOk?: boolean;
-  currentOccupyId?: string;
+  currentAddPointId?: string;
   currentSetupId?: string;
   currentBaselineId?: string;
 }
@@ -188,6 +190,21 @@ export function normalizeDocument(raw: GardenDocument): GardenDocument {
   if (legacy === 'HOUSE_BASELINE') doc.session.mode = 'BASELINE';
   if (legacy === 'PLACE_ROD_A') doc.session.mode = 'HOUSE_EDGES';
   if (legacy === 'PHOTO_TIE_HOUSE_ROD') doc.session.mode = 'PHOTO_TIE_BASELINE';
+  if (legacy === 'OCCUPY') doc.session.mode = 'ADD_POINT';
+  if (legacy === 'OCCUPY_EXTRA_YAW') doc.session.mode = 'ADD_POINT_EXTRA_YAW';
+  // Migrate occupy* field names from older garden.json
+  const sess = doc.session as SessionState & { currentOccupyId?: string };
+  if (sess.currentOccupyId && !sess.currentAddPointId) {
+    sess.currentAddPointId = sess.currentOccupyId;
+    delete sess.currentOccupyId;
+  }
+  for (const ph of doc.photos) {
+    const legacyPh = ph as Photo & { occupyPointId?: string };
+    if (legacyPh.occupyPointId && !legacyPh.addPointId) {
+      legacyPh.addPointId = legacyPh.occupyPointId;
+      delete legacyPh.occupyPointId;
+    }
+  }
   return doc;
 }
 
@@ -197,7 +214,7 @@ export function placeholderThumb(colour = '#6b8f71'): string {
 }
 
 /**
- * Synthetic demo: house-edge baseline + irregular 6-corner shed + rod A + occupies.
+ * Synthetic demo: house-edge baseline + irregular 6-corner shed + rod A + add-point stations.
  * Not a forced rectangle — polygon vertices planted with truth coords.
  */
 export function syntheticDocument(): GardenDocument {
@@ -217,8 +234,8 @@ export function syntheticDocument(): GardenDocument {
     { id: 'A1', kind: 'ROD', x: 2.5, y: 9, label: 'Rod A near' },
     { id: 'A2', kind: 'ROD', x: 6.5, y: 9, label: 'Rod A far' },
     { id: 'A0', kind: 'ROD', x: 4.5, y: 9, label: 'Rod A mid' },
-    { id: 'BED01P1', kind: 'OCC', x: 3.5, y: 7, label: 'Bed occupy 1' },
-    { id: 'BED02P1', kind: 'OCC', x: 5.2, y: 7.8, label: 'Bed occupy 2' },
+    { id: 'BED01P1', kind: 'OCC', x: 3.5, y: 7, label: 'Bed point 1' },
+    { id: 'BED02P1', kind: 'OCC', x: 5.2, y: 7.8, label: 'Bed point 2' },
     { id: 'FNC01', kind: 'FNC', label: 'Fence post 1' },
     { id: 'FNC02', kind: 'FNC', label: 'Fence post 2' },
     { id: 'FNC03', kind: 'FNC', label: 'Fence post 3' },
@@ -287,12 +304,12 @@ export function syntheticDocument(): GardenDocument {
     {
       id: 'photo-occ-1',
       setupId,
-      occupyPointId: 'BED01P1',
+      addPointId: 'BED01P1',
       width: 1200,
       height: 900,
       thumbnailDataUrl: placeholderThumb('#7a9e7e'),
       exifDateTimeOriginal: now,
-      note: 'Occupy BED01P1 — rod A + baseline',
+      note: 'Add point BED01P1 — rod A + baseline',
       clicks: [
         { pointId: 'A1', px: 350, py: 400 },
         { pointId: 'A2', px: 850, py: 390 },
@@ -302,12 +319,12 @@ export function syntheticDocument(): GardenDocument {
     {
       id: 'photo-occ-2',
       setupId,
-      occupyPointId: 'BED02P1',
+      addPointId: 'BED02P1',
       width: 1200,
       height: 900,
       thumbnailDataUrl: placeholderThumb('#8fb894'),
       exifDateTimeOriginal: now,
-      note: 'Occupy BED02P1 — rod A live',
+      note: 'Add point BED02P1 — rod A live',
       clicks: [
         { pointId: 'A1', px: 300, py: 450 },
         { pointId: 'A2', px: 700, py: 420 },
@@ -317,13 +334,13 @@ export function syntheticDocument(): GardenDocument {
   ];
 
   doc.session = {
-    mode: 'OCCUPY',
+    mode: 'ADD_POINT',
     speakSteps: false,
     geometryOk: true,
     lastAction: 'Loaded synthetic house-edge baseline + irregular shed + rod A',
     currentSetupId: setupId,
     currentBaselineId: 'BL-1',
-    currentOccupyId: 'BED02P1',
+    currentAddPointId: 'BED02P1',
   };
 
   return doc;

@@ -11,7 +11,7 @@ Live app today still assumes **house rectangle first**. This plan replaces that 
 4. Round posts (or rolls on corners): the mark is not the true brick arris — store an **offset / radius parameter** per mark (mm) so the geometry can correct toward the real corner.
 5. After the first baseline: **add further baselines, taped edges, and corners** incrementally (not all 10 at once).
 6. Far side / front via **leapfrog** and additional baselines.
-7. Photo problem: shared-frame tie vs occupy-from-known (see below).
+7. Photo problem: shared-frame tie vs Add point from a known station (see below).
 
 ## Recommended field pattern
 
@@ -42,7 +42,7 @@ If a single frame cannot hold B1+B2+corner:
 
 | Fallback | When to use |
 |---|---|
-| **Occupy a known station** | Stand on B1 or B2 (or a previously occupied point), photo house marks only; need a second known mark in frame, or a yaw-only second photo sharing that station, or a second station |
+| **Add point at a known station** | Stand on B1 or B2 (or a previously added point), photo house marks only; need a second known mark in frame, or a yaw-only second photo sharing that station, or a second station |
 | **Short helper rod** | Plant rod A in view of house; photo **baseline + rod** first, then **rod + house marks** (leapfrog control toward the wall) |
 | **Two-station resection** | Photo from station S1 (baseline in view), move to S2 (house + one live rod); share constraints across photos — later module if v1 underdetermined |
 
@@ -76,7 +76,7 @@ If B1/B2 *are* two house corners with a taped edge between them:
 2. `BASELINE` — place marks + enter length  
 3. `PHOTO_TIE_BASELINE` — B1, B2, + target marks in frame (house corners, posts, …)  
 4. `HOUSE_EDGES` (optional) — tapewalk edges you can reach  
-5. `OCCUPY` / `OCCUPY_EXTRA_YAW` — unchanged idea (rover on plumbed pole)  
+5. `ADD_POINT` / `ADD_POINT_EXTRA_YAW` — Add point workflow (rover on plumbed pole); button **+ Point**  
 6. `LEAPFROG` / `RODS_MOVED` — unchanged idea; used heavily around the house  
 7. `ADJUST` / `REVIEW`
 
@@ -85,7 +85,7 @@ Remove assumption: “house rectangle must close before anything else.”
 ## Answering your photo puzzle directly
 **Best default:** move the baseline **away from** the wall so you can stand where **baseline ends and house corners share the frame**. The corner stays a **clicked mark** (disc on brick), not a place you stand.
 
-**Standing at a known point** (B1/B2/occupy) and shooting only the house works when that station is already fixed and the photo has enough other control (second mark, second rod, or yaw set). Alone with zero control in frame → underdetermined.
+**Standing at a known point** (B1/B2/Add point) and shooting only the house works when that station is already fixed and the photo has enough other control (second mark, second rod, or yaw set). Alone with zero control in frame → underdetermined.
 
 **Back to the baseline, facing the house only** → usually *hides* control; avoid as the primary method.
 

@@ -27,10 +27,10 @@ Live garden loop for accurate measurements. **Baseline first** (not a forced hou
 4. **Close house** (when enough corners)  
    Warns if close gap &gt; **50 mm**.
 
-5. **Occupy**  
-   Spike, bubble, photograph live control, name the point.
+5. **Add point** (`+ Point`)  
+   Spike, bubble, photograph live control, name the point. Plumbed pole = that (x,y).
 
-6. **Yaw (optional)** — do not step; only turn the phone.
+6. **Yaw (optional)** — do not step; only turn the phone. Extra photos share this point.
 
 7. **Leapfrog / second baseline**  
    Far side of the house: plant rod B, photo A+B together, Rods moved, then another baseline if needed.
@@ -44,7 +44,7 @@ Live garden loop for accurate measurements. **Baseline first** (not a forced hou
 | Residual | Meaning |
 |----------|---------|
 | under ~15 mm | Good enough to proceed |
-| ~15–50 mm | Usable — watch the next occupy |
+| ~15–50 mm | Usable — watch the next Add point |
 | over ~50 mm | Remeasure (house close gap warns above 50 mm) |
 
 Illegal buttons stay visible and answer with a sentence — never a silent void.

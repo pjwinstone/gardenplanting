@@ -28,13 +28,13 @@ export function runLayerB(doc: GardenDocument, layerAPoints: Point[]): LayerBRes
   let residualMm = 0;
   let weakCount = 0;
 
-  // Group yaw-only photos by occupyPointId (shared x,y).
-  const occupyGroups = new Map<string, Photo[]>();
+  // Group yaw-only photos by addPointId (shared x,y).
+  const addPointGroups = new Map<string, Photo[]>();
   for (const ph of photos) {
-    if (!ph.occupyPointId) continue;
-    const list = occupyGroups.get(ph.occupyPointId) ?? [];
+    if (!ph.addPointId) continue;
+    const list = addPointGroups.get(ph.addPointId) ?? [];
     list.push(ph);
-    occupyGroups.set(ph.occupyPointId, list);
+    addPointGroups.set(ph.addPointId, list);
   }
 
   for (const ph of photos) {
@@ -88,8 +88,8 @@ export function runLayerB(doc: GardenDocument, layerAPoints: Point[]): LayerBRes
     }
   }
 
-  // Assign occupy coordinates from (averaged) photo poses.
-  for (const [occId, group] of occupyGroups) {
+  // Assign add-point coordinates from (averaged) photo poses.
+  for (const [occId, group] of addPointGroups) {
     const poses = group.map((g) => g.pose).filter((p): p is NonNullable<typeof p> => !!p);
     if (!poses.length) {
       observations.push({
@@ -160,7 +160,7 @@ export function runLayerB(doc: GardenDocument, layerAPoints: Point[]): LayerBRes
 
   const summary =
     weakCount > 0
-      ? `Layer B: poses estimated; ${weakCount} weak occupy/photo warning(s).`
+      ? `Layer B: poses estimated; ${weakCount} weak add-point/photo warning(s).`
       : 'Layer B: per-photo poses estimated; yaw sets share (x,y).';
 
   return {

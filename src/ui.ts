@@ -513,7 +513,7 @@ function buildSurveyView(): HTMLElement {
       }
       card.appendChild(
         el('figcaption', {
-          text: `${ph.id}${ph.occupyPointId ? ` → ${ph.occupyPointId}` : ''}`,
+          text: `${ph.id}${ph.addPointId ? ` → ${ph.addPointId}` : ''}`,
         }),
       );
       thumbs.appendChild(card);
@@ -969,7 +969,7 @@ function buildStage2ChecklistPanel(): HTMLElement {
   panel.appendChild(
     el('p', {
       className: 'stage2-checklist__intro',
-      text: 'House → rod A → tie → occupy → (yaw) → leapfrog → rods moved → adjust. Full phone list: docs/stage-2-field-checklist.md',
+      text: 'House → rod A → tie → Add point → (yaw) → leapfrog → rods moved → adjust. Full phone list: docs/stage-2-field-checklist.md',
     }),
   );
   const list = el('ol', { className: 'stage2-checklist__list' });
@@ -1046,7 +1046,7 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
     panel.appendChild(
       el('p', {
         text: baselineTieReady(doc)
-          ? 'Both baseline ends + target mark present. Occupy or measure more house edges.'
+          ? 'Both baseline ends + target mark present. Add point or measure more house edges.'
           : 'v1: one frame with both baseline ends and the house mark. Indoors, use demo clicks.',
       }),
     );
@@ -1122,13 +1122,13 @@ function buildStepPanel(doc: GardenDocument): HTMLElement | null {
     return panel;
   }
 
-  if (mode === 'OCCUPY' || mode === 'ADJUST') {
+  if (mode === 'ADD_POINT' || mode === 'ADJUST') {
     const panel = el('section', { className: 'step-panel step-panel--hint' });
     panel.appendChild(
       el('p', {
         text:
-          mode === 'OCCUPY'
-            ? 'Field: keep occupying points, or Start leapfrog when you need rod B. Press Adjust when you want millimetre residuals on the plan.'
+          mode === 'ADD_POINT'
+            ? 'Field: keep using Add point, or Start leapfrog when you need rod B. Press Adjust when you want millimetre residuals on the plan.'
             : 'Read the coach residuals in mm. Good enough (<~15 mm) → keep surveying. Over ~50 mm → remeasure. Print tags anytime.',
       }),
     );

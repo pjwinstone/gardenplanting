@@ -37,8 +37,8 @@ Exactly one mode at a time. The hamburger menu holds Sign-in, tools, and mode ac
 2. **BASELINE** — Default: one **house edge**. Mark ends, enter length + optional offset mm. → *Establish baseline*
 3. **PHOTO_TIE_BASELINE** — Both baseline ends **and** the target mark in one frame. → *Take baseline tie*
 4. **HOUSE_EDGES** — Grow the irregular ~10-corner house; Close house warns if gap &gt; 50 mm. → *Measure house edges*
-5. **OCCUPY** — Spike, bubble, photograph live control, name the point. → *Occupy*
-6. **OCCUPY_EXTRA_YAW** — Do not step; only yaw. → *Another photo here (yaw)*
+5. **ADD_POINT** — Spike, bubble, photograph live control, name the point. → *+ Point* (Add point workflow)
+6. **ADD_POINT_EXTRA_YAW** — Do not step; only yaw. → *Another photo here (yaw)*
 7. **LEAPFROG** — Far side / second baseline; photo A+B together. → *Start leapfrog*
 8. **RODS_MOVED** — Old setup closes. → *Rods moved*
 9. **FENCE_TAG** — Roll on post + live control. → *Fence mark*

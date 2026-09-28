@@ -26,9 +26,9 @@ export const STAGE2_FIELD_STEPS: Stage2Step[] = [
     button: 'Measure house edges → Close house',
   },
   {
-    modeLabel: 'OCCUPY',
+    modeLabel: 'ADD POINT',
     doThis: 'Spike, bubble, photograph live control, name the point.',
-    button: 'Occupy',
+    button: '+ Point',
   },
   {
     modeLabel: 'EXTRA YAW (optional)',
@@ -48,4 +48,4 @@ export const STAGE2_FIELD_STEPS: Stage2Step[] = [
 ];
 
 export const STAGE2_ENTRY_COACH =
-  'Stage 2 field loop: house-edge baseline → photo tie → grow house corners → occupy → (yaw) → leapfrog / second baseline → adjust. OneDrive keeps saving when you are signed in.';
+  'Stage 2 field loop: house-edge baseline → photo tie → grow house corners → Add point → (yaw) → leapfrog / second baseline → adjust. OneDrive keeps saving when you are signed in.';

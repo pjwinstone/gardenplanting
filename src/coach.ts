@@ -22,8 +22,8 @@ const MODE_BANNER: Record<string, string> = {
   BASELINE: 'BASELINE',
   PHOTO_TIE_BASELINE: 'PHOTO TIE — BASELINE',
   HOUSE_EDGES: 'HOUSE EDGES',
-  OCCUPY: 'OCCUPY',
-  OCCUPY_EXTRA_YAW: 'OCCUPY — EXTRA YAW',
+  ADD_POINT: 'ADD POINT',
+  ADD_POINT_EXTRA_YAW: 'ADD POINT — EXTRA YAW',
   LEAPFROG: 'LEAPFROG',
   RODS_MOVED: 'RODS MOVED',
   FENCE_TAG: 'FENCE TAG',
@@ -43,9 +43,9 @@ const MODE_COACH: Record<string, string> = {
     'Stand where one photo contains both baseline ends AND the house mark you are fixing. Then tap those marks. Do not hide the baseline.',
   HOUSE_EDGES:
     'Grow the house polygon — tape the next reachable edge, photo-tie another corner, or leapfrog for the far side. Close house when you have enough corners.',
-  OCCUPY:
+  ADD_POINT:
     'Spike on the thing you are naming. Bubble the pole. Photograph live control (baseline ends and/or rod). Then name the point.',
-  OCCUPY_EXTRA_YAW:
+  ADD_POINT_EXTRA_YAW:
     'Do not step. Only turn the phone so another mark sits in the middle of the frame. These photos share this point.',
   LEAPFROG:
     'Plant rod B in the new view for the far side / second baseline. Photograph A and B together before you pick A up.',
@@ -54,7 +54,7 @@ const MODE_COACH: Record<string, string> = {
   FENCE_TAG:
     'You cannot stand in the fence. Stick a roll on the post, photograph it with live control.',
   ADJUST:
-    'Layer A then Layer B are done. Residuals are in millimetres — baseline first, then edges, house close gap, then occupies.',
+    'Layer A then Layer B are done. Residuals are in millimetres — baseline first, then edges, house close gap, then add-point stations.',
   REVIEW:
     'Plan on an iPad-sized layout. Thumbnails sit beside points. Export or trust OneDrive when signed in.',
 };
@@ -104,7 +104,7 @@ export function buildCoach(doc: GardenDocument): CoachLines {
 
   if (mode === 'PHOTO_TIE_BASELINE') {
     if (baselineTieReady(doc)) {
-      body.push('I see both baseline ends and a target mark. Good tie. Occupy or measure more house edges.');
+      body.push('I see both baseline ends and a target mark. Good tie. Add point or measure more house edges.');
     } else {
       body.push(
         'Only partial clicks so far. v1 needs both baseline ends and the target in one frame.',
@@ -133,10 +133,10 @@ export function buildCoach(doc: GardenDocument): CoachLines {
     }
   }
 
-  if (mode === 'OCCUPY' || mode === 'OCCUPY_EXTRA_YAW') {
-    const occ = doc.session.currentOccupyId;
+  if (mode === 'ADD_POINT' || mode === 'ADD_POINT_EXTRA_YAW') {
+    const occ = doc.session.currentAddPointId;
     if (occ) {
-      const n = doc.photos.filter((p) => p.occupyPointId === occ).length;
+      const n = doc.photos.filter((p) => p.addPointId === occ).length;
       if (n > 1) {
         body.push(
           `${n} photos on ${occ}. Say Repeat if this is another visit, or yaw-only if you did not move your feet.`,
@@ -174,7 +174,7 @@ export function formatResidualLine(mm: number | undefined): string | null {
   const amount =
     abs < 1 ? 'Last residual: under 1 mm' : `Last residual: ${abs.toFixed(0)} mm`;
   if (abs < RESIDUAL_GOOD_MM) return `${amount} — good enough to proceed.`;
-  if (abs < RESIDUAL_USABLE_MM) return `${amount} — usable; watch the next occupy.`;
+  if (abs < RESIDUAL_USABLE_MM) return `${amount} — usable; watch the next Add point.`;
   return `${amount} — remeasure before you trust the plan.`;
 }
 
@@ -190,7 +190,7 @@ export function formatGeometryLine(doc: GardenDocument): string | null {
     return 'Baseline set — good enough to proceed to a photo tie.';
   }
   if (mode === 'PHOTO_TIE_BASELINE' && baselineTieReady(doc)) {
-    return 'Tie is complete — good enough to grow the house or Occupy.';
+    return 'Tie is complete — good enough to grow the house or Add point.';
   }
   return null;
 }
