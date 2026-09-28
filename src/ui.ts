@@ -89,7 +89,8 @@ export type MenuSection =
   | 'adjust'
   | 'error-log'
   | 'tools'
-  | 'cloud';
+  | 'cloud'
+  | 'glossary';
 
 /** Unified + Point / inspect dialogue (on the plan, not in the menu). */
 export type PointDialogMode = null | 'add' | 'inspect';
@@ -763,7 +764,7 @@ function onShellClick(e: Event): void {
     const panel = target.closest('.point-dialog') ?? target.closest('.add-point-panel');
     const name =
       (panel?.querySelector('[data-field=object-name]') as HTMLInputElement | null)?.value?.trim() ||
-      'New object';
+      'Untitled';
     const layerId =
       (panel?.querySelector('[data-field=layer]') as HTMLSelectElement | null)?.value ||
       stickyLayer(state.doc).id;
@@ -771,6 +772,47 @@ function onShellClick(e: Event): void {
       ?.value || stickyGeometry(state.doc)) as GeometryType;
     const { doc } = createObject(state.doc, { layerId, name, geometryType });
     setDoc(doc, null);
+    return;
+  }
+  if (cmd === 'save-object') {
+    // Rename / update sticky fields for the selected existing object.
+    const panel = target.closest('.point-dialog') ?? target.closest('.add-point-panel');
+    if (!panel) return;
+    const objectId = (panel.querySelector('[data-field=object]') as HTMLSelectElement | null)?.value;
+    if (!objectId || objectId === '__new__') {
+      surfaceFail('Select an existing object to rename, or use + Object.', 'object');
+      return;
+    }
+    const objectName =
+      (panel.querySelector('[data-field=object-name]') as HTMLInputElement | null)?.value?.trim() ||
+      undefined;
+    const layerId = (panel.querySelector('[data-field=layer]') as HTMLSelectElement | null)?.value;
+    const geometryType = (panel.querySelector('[data-field=geometry]') as HTMLSelectElement | null)
+      ?.value as GeometryType | undefined;
+    const objects = (state.doc.objects ?? []).map((o) =>
+      o.id === objectId
+        ? {
+            ...o,
+            name: objectName || o.name,
+            layerId: layerId || o.layerId,
+            geometryType: geometryType || o.geometryType,
+          }
+        : o,
+    );
+    setDoc(
+      {
+        ...state.doc,
+        objects,
+        session: {
+          ...state.doc.session,
+          stickyObjectId: objectId,
+          stickyObjectName: objectName || state.doc.session.stickyObjectName,
+          stickyLayerId: layerId || state.doc.session.stickyLayerId,
+          stickyGeometryType: geometryType || state.doc.session.stickyGeometryType,
+        },
+      },
+      null,
+    );
     return;
   }
   if (cmd === 'save-baseline') {
@@ -1462,7 +1504,7 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
     attrs: {
       'data-testid': 'point-dialog',
       role: 'dialog',
-      'aria-label': mode === 'inspect' ? 'Point inspector' : 'Add point',
+      'aria-label': mode === 'inspect' ? 'Point inspector' : '+ Point',
       style: `transform: translate(${pointDialogPos.x}px, ${pointDialogPos.y}px)`,
     },
   });
@@ -1579,7 +1621,7 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   objSel.appendChild(objHeader);
   const newOpt = document.createElement('option');
   newOpt.value = '__new__';
-  newOpt.textContent = '— New object —';
+  newOpt.textContent = '+ Object';
   objSel.appendChild(newOpt);
   for (const o of objectsOnLayer(doc, stickyL)) {
     const opt = document.createElement('option');
@@ -1658,28 +1700,41 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   actionsRow.appendChild(
     el('button', {
       className: 'btn btn--util',
-      text: 'New object',
-      attrs: { type: 'button', 'data-cmd': 'create-object' },
+      text: '+ Object',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'create-object',
+        'data-testid': 'plus-object',
+        'aria-label': 'Create new object',
+      },
     }),
   );
-  if (mode === 'inspect') {
+  // Save renames/updates the selected existing object (name + layer + geometry).
+  if (mode === 'inspect' || doc.session.stickyObjectId) {
     actionsRow.appendChild(
       el('button', {
-        className: 'btn btn--suggested',
+        className: 'btn btn--util',
         text: 'Save',
         attrs: {
           type: 'button',
-          'data-cmd': 'apply-inspector',
+          'data-cmd': mode === 'inspect' ? 'apply-inspector' : 'save-object',
           'data-testid': 'point-dialog-save',
+          'aria-label': 'Save object changes',
         },
       }),
     );
-  } else {
+  }
+  if (mode === 'add') {
     actionsRow.appendChild(
       el('button', {
         className: 'btn btn--suggested',
-        text: 'Add photo',
-        attrs: { type: 'button', 'data-cmd': 'add-photo', 'data-testid': 'add-photo' },
+        text: '+ Point',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'add-photo',
+          'data-testid': 'add-photo',
+          'aria-label': 'Add measurement point',
+        },
       }),
     );
   }
@@ -1768,13 +1823,6 @@ function buildMenuDrawer(
   const panel = el('div', { className: 'menu-drawer__panel' });
   const head = el('div', { className: 'menu-drawer__head' });
   head.appendChild(el('h2', { className: 'menu-drawer__title', text: 'Menu' }));
-  head.appendChild(
-    el('button', {
-      className: 'btn btn--util menu-drawer__close',
-      text: 'Close',
-      attrs: { type: 'button', 'data-cmd': 'close-menu' },
-    }),
-  );
   panel.appendChild(head);
 
   // Always-visible thumb control — not buried in Recommended next / Tools.
@@ -1834,11 +1882,12 @@ function buildMenuDrawer(
   addPointBody.appendChild(
     el('button', {
       className: 'btn btn--suggested btn--thumb',
-      text: 'Open + Point',
+      text: '+ Point',
       attrs: {
         type: 'button',
         'data-cmd': 'open-point-dialog',
         'data-testid': 'menu-open-add-point-acc',
+        'aria-label': 'Open + Point dialogue',
       },
     }),
   );
@@ -2049,6 +2098,47 @@ function buildMenuDrawer(
   }
   const errAcc = menuAccordion('error-log', 'Error log', errBody);
   panel.appendChild(errAcc);
+
+  // —— Glossary ——
+  const glossaryBody = el('div', {
+    className: 'menu-acc__body glossary',
+    attrs: { 'data-testid': 'glossary' },
+  });
+  const glossary: Array<[string, string]> = [
+    ['+ Point', 'New measurement on the current object.'],
+    ['+ Object', 'New named thing on the current layer.'],
+    ['Baseline', 'Control segment used for measurements.'],
+    ['Layer', 'Grouping plane for objects (e.g. walkway, bed).'],
+    ['Object', 'Named thing you measure points on.'],
+    ['Geometry', 'Shape hint for the object (square, circle, …).'],
+    ['Menu', 'Idle mode when no workflow dialog is open.'],
+  ];
+  const dl = el('dl', { className: 'glossary__list' });
+  for (const [term, def] of glossary) {
+    dl.appendChild(el('dt', { className: 'glossary__term', text: term }));
+    dl.appendChild(el('dd', { className: 'glossary__def', text: def }));
+  }
+  glossaryBody.appendChild(dl);
+  panel.appendChild(menuAccordion('glossary', 'Glossary', glossaryBody));
+
+  // Close lives bottom-right (thumb zone, near ☰) — not only top-right.
+  const foot = el('div', {
+    className: 'menu-drawer__foot',
+    attrs: { 'data-testid': 'menu-drawer-foot' },
+  });
+  foot.appendChild(
+    el('button', {
+      className: 'btn btn--util menu-drawer__close',
+      text: 'Close',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'close-menu',
+        'data-testid': 'menu-close',
+        'aria-label': 'Close menu',
+      },
+    }),
+  );
+  panel.appendChild(foot);
 
   root.appendChild(panel);
 

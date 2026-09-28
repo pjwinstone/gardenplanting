@@ -349,7 +349,7 @@ body {
   width: min(22rem, 92vw);
   max-height: 100%;
   overflow: auto;
-  padding: 1rem 1rem 2.5rem;
+  padding: 1rem 1rem 5.5rem;
   background: #f6f1e6;
   color: var(--ink);
   box-shadow: -4px 0 24px rgba(26, 36, 28, 0.28);
@@ -362,6 +362,28 @@ body {
   justify-content: space-between;
   gap: 0.75rem;
   margin-bottom: 0.35rem;
+}
+
+.menu-drawer__foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem -1rem -5.5rem;
+  padding: 0.65rem 1rem;
+  padding-bottom: max(0.65rem, env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(246, 241, 230, 0) 0%, #f6f1e6 28%);
+  pointer-events: none;
+}
+
+.menu-drawer__foot .menu-drawer__close {
+  pointer-events: auto;
+  min-width: 5.5rem;
+  min-height: 2.75rem;
+  touch-action: manipulation;
 }
 
 .menu-mode-select {
@@ -446,6 +468,28 @@ body {
   font-size: 0.88rem;
   margin-top: 0.2rem;
   word-break: break-word;
+}
+
+.glossary__list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 0.75rem;
+  align-items: baseline;
+}
+
+.glossary__term {
+  margin: 0;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--moss);
+  white-space: nowrap;
+}
+
+.glossary__def {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink);
 }
 
 .error-log__stack {

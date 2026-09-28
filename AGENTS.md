@@ -18,7 +18,7 @@ Exactly one mode at a time. Show it in the minimal coach chrome + short spoken/t
 2. `BASELINE` — Mark two ends of a known-length baseline (default: **one house edge**). Enter length + optional mark offsets (mm). Coach: “This edge is your baseline. Measure it. Offsets are OK — tell me the roll/post radius if the mark is not the true corner.”
 3. `PHOTO_TIE_BASELINE` — Coach: “Stand where this photo contains both baseline ends AND the house mark you are fixing. Then tap those marks.”
 4. `HOUSE_EDGES` — Optional: tape the next reachable wall segment or add another baseline. Grow the irregular house polygon (~10 corners). Coach: “Add the next edge or corner when you can. Far side needs leapfrog.”
-5. `ADD_POINT` — **Add point** workflow (`+ Point`): observe a **named object on a layer** (sticky baseline / layer / object / geometry). **Add photo** places/updates the point. Coach stays short.
+5. `ADD_POINT` — **+ Point** workflow: observe a **named object on a layer** (sticky baseline / layer / object / geometry). **+ Point** places/updates the measurement. **+ Object** creates a new named thing on the layer. Rename via object name + **Save**. Coach stays short.
 6. `ADD_POINT_EXTRA_YAW` — optional extra photos from the SAME add-point station, yaw only. Coach: “Do not step. Only turn the phone so another mark sits in the middle of the frame. These photos share this point.”
 7. `LEAPFROG` — Coach: “Plant rod B in the new view. Photograph A and B together before you pick A up. Use this for the far side of the house / a second baseline.”
 8. `RODS_MOVED` — User confirms rods moved. Close setup, open new setup. Coach: “Rod A is no longer the old coordinates.”

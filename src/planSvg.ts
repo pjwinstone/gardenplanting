@@ -8,7 +8,7 @@ export function renderPlanSvg(doc: GardenDocument, width = 720, height = 560): s
   if (!pts.length) {
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Empty plan">
       <rect width="100%" height="100%" fill="#e8e2d6"/>
-      <text x="50%" y="50%" text-anchor="middle" fill="#5a5348" font-family="Georgia, serif" font-size="18">No coordinates yet — Add photo or run Adjust</text>
+      <text x="50%" y="50%" text-anchor="middle" fill="#5a5348" font-family="Georgia, serif" font-size="18">No coordinates yet — + Point or run Adjust</text>
     </svg>`;
   }
 
