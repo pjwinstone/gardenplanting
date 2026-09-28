@@ -1,6 +1,7 @@
 /** Garden Survey document model — points, baselines, layers/objects, photos, setups. */
 
 export type SessionMode =
+  | 'MENU'
   | 'START'
   | 'BASELINE'
   | 'PHOTO_TIE_BASELINE'

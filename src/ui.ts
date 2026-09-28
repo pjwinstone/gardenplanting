@@ -169,15 +169,16 @@ function openPointDialog(mode: 'add' | 'inspect'): void {
 }
 
 function closePointDialog(): void {
-  const doc =
-    state.doc.session.inspectingPointId != null
-      ? {
-          ...state.doc,
-          session: { ...state.doc.session, inspectingPointId: undefined },
-        }
-      : state.doc;
+  // Closing + Point / inspect returns chrome to Menu — do not leave mode stuck on ADD_POINT.
   setState({
-    doc,
+    doc: {
+      ...state.doc,
+      session: {
+        ...state.doc.session,
+        mode: 'MENU',
+        inspectingPointId: undefined,
+      },
+    },
     pointDialog: null,
     refuseMessage: null,
   });
@@ -211,15 +212,185 @@ function startAddPointDialog(): void {
       }
     }
   }
-  const doc =
+  // Soft-set ADD_POINT for chrome when already legal/active, or dialog-only open.
+  const base =
     state.doc.session.inspectingPointId != null
       ? {
           ...state.doc,
           session: { ...state.doc.session, inspectingPointId: undefined },
         }
       : state.doc;
-  if (doc !== state.doc) setDoc(doc, null);
-  openPointDialog('add');
+  const doc =
+    base.session.mode === 'ADD_POINT' || base.session.mode === 'ADD_POINT_EXTRA_YAW'
+      ? base
+      : { ...base, session: { ...base.session, mode: 'ADD_POINT' as const } };
+  setState({
+    doc,
+    pointDialog: 'add',
+    menuOpen: false,
+    openErrorLog: false,
+    refuseMessage: null,
+  });
+}
+
+/** Mode shown in the Mode picker — Menu when no workflow dialog is active. */
+function displayedChromeMode(): string {
+  if (state.pointDialog === 'add') return 'ADD_POINT';
+  if (state.pointDialog === 'inspect') return 'REVIEW';
+  const m = state.doc.session.mode;
+  if (m === 'START' || m === 'MENU') return 'MENU';
+  if (m === 'ADD_POINT' || m === 'ADD_POINT_EXTRA_YAW') return 'MENU';
+  if (m === 'HOUSE_BASELINE') return 'BASELINE';
+  if (m === 'PLACE_ROD_A') return 'HOUSE_EDGES';
+  if (m === 'PHOTO_TIE_HOUSE_ROD') return 'PHOTO_TIE_BASELINE';
+  if ((m as string) === 'OCCUPY') return 'MENU';
+  return m;
+}
+
+/** Picker entries — real session modes + Menu idle chrome. */
+const MODE_PICKER: { value: string; label: string }[] = [
+  { value: 'MENU', label: 'Menu' },
+  { value: 'BASELINE', label: 'Establish baseline' },
+  { value: 'PHOTO_TIE_BASELINE', label: 'Baseline photo tie' },
+  { value: 'HOUSE_EDGES', label: 'Measure house edges' },
+  { value: 'ADD_POINT', label: '+ Point' },
+  { value: 'LEAPFROG', label: 'Leapfrog' },
+  { value: 'RODS_MOVED', label: 'Rods moved' },
+  { value: 'FENCE_TAG', label: 'Fence mark' },
+  { value: 'ADJUST', label: 'Adjust' },
+  { value: 'REVIEW', label: 'Review' },
+];
+
+function buildModePicker(doc: GardenDocument): HTMLElement {
+  const body = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'mode-panel' } });
+  const current = displayedChromeMode();
+  const label = MODE_PICKER.find((m) => m.value === current)?.label ?? current;
+  body.appendChild(
+    el('p', {
+      className: 'menu-acc__meta',
+      text: `Current: ${label}`,
+      attrs: { 'data-testid': 'menu-mode-label' },
+    }),
+  );
+  const sel = el('select', {
+    className: 'menu-mode-select',
+    attrs: {
+      'data-cmd': 'select-chrome-mode',
+      'data-testid': 'mode-picker',
+      'aria-label': 'Survey mode',
+    },
+  }) as HTMLSelectElement;
+  for (const opt of MODE_PICKER) {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    if (opt.value === current) o.selected = true;
+    sel.appendChild(o);
+  }
+  body.appendChild(sel);
+  body.appendChild(
+    el('p', {
+      className: 'menu-acc__meta',
+      text: buildCoach(doc).banner,
+    }),
+  );
+  return body;
+}
+
+function selectChromeMode(value: string): void {
+  if (value === 'MENU') {
+    setState({
+      doc: {
+        ...state.doc,
+        session: { ...state.doc.session, mode: 'MENU', inspectingPointId: undefined },
+      },
+      pointDialog: null,
+      menuOpen: true,
+      menuFocus: 'recommend',
+      openErrorLog: false,
+    });
+    return;
+  }
+  if (value === 'ADD_POINT') {
+    startAddPointDialog();
+    return;
+  }
+  if (value === 'BASELINE') {
+    // Reuse Establish baseline open path
+    if (state.doc.session.mode === 'START' || state.doc.session.mode === 'MENU') {
+      const result = startStage2FieldWorkflow(state.doc);
+      if (result.ok) {
+        setState({
+          doc: result.doc,
+          view: 'survey',
+          refuseMessage: null,
+          showStage2Checklist: result.showChecklist,
+          menuOpen: true,
+          menuFocus: 'baseline',
+          pointDialog: null,
+          openErrorLog: false,
+        });
+        return;
+      }
+    }
+    setState({
+      doc: { ...state.doc, session: { ...state.doc.session, mode: 'BASELINE' } },
+      pointDialog: null,
+      menuOpen: true,
+      menuFocus: 'baseline',
+    });
+    return;
+  }
+  if (value === 'PHOTO_TIE_BASELINE') {
+    setState({
+      pointDialog: null,
+      menuOpen: true,
+      menuFocus: 'tie',
+    });
+    if (canTransition(state.doc, 'take_baseline_tie').ok) {
+      onModeAction('take_baseline_tie');
+    }
+    return;
+  }
+  if (value === 'HOUSE_EDGES') {
+    setState({ pointDialog: null, menuOpen: true, menuFocus: 'house' });
+    if (canTransition(state.doc, 'measure_house_edges').ok) {
+      onModeAction('measure_house_edges');
+    } else {
+      setDoc({ ...state.doc, session: { ...state.doc.session, mode: 'HOUSE_EDGES' } }, null);
+    }
+    return;
+  }
+  if (value === 'LEAPFROG') {
+    setState({ pointDialog: null, menuOpen: true, menuFocus: 'leapfrog' });
+    if (canTransition(state.doc, 'start_leapfrog').ok) {
+      onModeAction('start_leapfrog');
+    }
+    return;
+  }
+  if (value === 'RODS_MOVED') {
+    onModeAction('rods_moved');
+    return;
+  }
+  if (value === 'FENCE_TAG') {
+    onModeAction('fence_mark');
+    return;
+  }
+  if (value === 'ADJUST') {
+    onModeAction('adjust');
+    return;
+  }
+  if (value === 'REVIEW') {
+    setState({
+      doc: {
+        ...state.doc,
+        session: { ...state.doc.session, mode: 'REVIEW', inspectingPointId: undefined },
+      },
+      pointDialog: null,
+      menuOpen: true,
+      menuFocus: 'coach',
+    });
+  }
 }
 
 /** Surface a coach/refuse failure and append to the in-app error log. */
@@ -372,6 +543,7 @@ function onShellClick(e: Event): void {
       return;
     }
     // Opening: first open after a new Build stamp → expand Version.
+    // Also: if + Point dialog is closed, don't leave session stuck on ADD_POINT.
     let focus: MenuSection = state.menuFocus ?? 'recommend';
     if (!hasSeenCurrentBuild()) {
       focus = 'version';
@@ -379,7 +551,15 @@ function onShellClick(e: Event): void {
     } else if (!focus) {
       focus = 'recommend';
     }
+    let doc = state.doc;
+    if (
+      !state.pointDialog &&
+      (doc.session.mode === 'ADD_POINT' || doc.session.mode === 'ADD_POINT_EXTRA_YAW')
+    ) {
+      doc = { ...doc, session: { ...doc.session, mode: 'MENU' } };
+    }
     setState({
+      doc,
       menuOpen: true,
       openErrorLog: false,
       menuFocus: focus,
@@ -767,6 +947,10 @@ function onShellChange(e: Event): void {
       ...state.doc,
       session: { ...state.doc.session, speakSteps: (t as HTMLInputElement).checked },
     });
+    return;
+  }
+  if (cmd === 'select-chrome-mode') {
+    selectChromeMode(t.value);
     return;
   }
   if (cmd === 'sticky-baseline') {
@@ -1613,16 +1797,7 @@ function buildMenuDrawer(
   panel.appendChild(quick);
 
   // —— Top: Mode + Version (near top of concertina) ——
-  const modeBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'mode-panel' } });
-  modeBody.appendChild(
-    el('p', {
-      className: 'menu-acc__coach',
-      text: doc.session.mode.replace(/_/g, ' '),
-      attrs: { 'data-testid': 'menu-mode-label' },
-    }),
-  );
-  modeBody.appendChild(el('p', { className: 'menu-acc__meta', text: coach.banner }));
-  panel.appendChild(menuAccordion('mode', 'Mode', modeBody));
+  panel.appendChild(menuAccordion('mode', 'Mode', buildModePicker(doc)));
 
   const versionBody = el('div', {
     className: 'menu-acc__body',

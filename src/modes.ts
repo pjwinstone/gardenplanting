@@ -76,7 +76,7 @@ export function canTransition(
 
   switch (action) {
     case 'establish_baseline': {
-      if (mode === 'START' || mode === 'REVIEW' || mode === 'HOUSE_EDGES' || mode === 'RODS_MOVED') {
+      if (mode === 'START' || mode === 'MENU' || mode === 'REVIEW' || mode === 'HOUSE_EDGES' || mode === 'RODS_MOVED') {
         return { ok: true, nextMode: 'BASELINE' };
       }
       if (mode === 'BASELINE') {
@@ -207,6 +207,7 @@ export function canTransition(
         mode === 'LEAPFROG' ||
         mode === 'ADJUST' ||
         mode === 'REVIEW' ||
+        mode === 'MENU' ||
         mode === 'ADD_POINT' ||
         mode === 'RODS_MOVED'
       ) {
@@ -447,6 +448,7 @@ export function legalActions(doc: GardenDocument): ModeAction[] {
 export function suggestedAction(doc: GardenDocument): ModeAction | null {
   const mode = normalizeMode(doc.session.mode);
   const order: Partial<Record<SessionMode, ModeAction[]>> = {
+    MENU: ['establish_baseline', 'add_point', 'adjust', 'measure_house_edges'],
     START: ['establish_baseline'],
     BASELINE: ['take_baseline_tie', 'place_helper_rod'],
     PHOTO_TIE_BASELINE: ['measure_house_edges', 'add_point', 'adjust'],

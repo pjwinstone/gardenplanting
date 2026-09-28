@@ -19,6 +19,7 @@ const RESIDUAL_GOOD_MM = 15;
 const RESIDUAL_USABLE_MM = 50;
 
 const MODE_BANNER: Record<string, string> = {
+  MENU: 'MENU',
   START: 'START',
   BASELINE: 'BASELINE',
   PHOTO_TIE_BASELINE: 'PHOTO TIE — BASELINE',
@@ -36,6 +37,8 @@ const MODE_BANNER: Record<string, string> = {
 };
 
 const MODE_COACH: Record<string, string> = {
+  MENU:
+    'Menu. Pick a workflow below, open + Point, or choose a mode from the Mode list.',
   START:
     'New garden or load JSON. For the live plot, Establish baseline (default: one house edge). For a dry run, Load synthetic demo then Adjust.',
   BASELINE:
