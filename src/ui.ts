@@ -1421,13 +1421,27 @@ function menuAccordion(
       'data-section': id ?? undefined,
     },
   });
-  summary.appendChild(
-    el('span', {
-      className: 'menu-acc__dot',
-      attrs: { 'aria-hidden': 'true' },
-    }),
-  );
   summary.appendChild(el('span', { className: 'menu-acc__label', text: title }));
+  if (tone !== 'idle') {
+    const iconLabel =
+      tone === 'ok' ? 'Ready' : tone === 'warn' ? 'Not ready' : 'Problem';
+    summary.appendChild(
+      el('span', {
+        className: `menu-acc__status-icon menu-acc__status-icon--${tone}`,
+        attrs: {
+          'aria-hidden': 'true',
+          title: status?.text ?? iconLabel,
+        },
+      }),
+    );
+  } else {
+    summary.appendChild(
+      el('span', {
+        className: 'menu-acc__dot menu-acc__dot--idle',
+        attrs: { 'aria-hidden': 'true' },
+      }),
+    );
+  }
   if (status?.text) {
     summary.appendChild(
       el('span', {
@@ -1873,7 +1887,7 @@ function buildMenuDrawer(
   panel.appendChild(menuAccordion('coach', 'Coach', coachBody));
 
   panel.appendChild(
-    menuAccordion('baseline', 'Establish baseline', buildBaselineForm(doc), baselineSectionStatus(doc)),
+    menuAccordion('baseline', 'Baseline', buildBaselineForm(doc), baselineSectionStatus(doc)),
   );
   panel.appendChild(menuAccordion('tie', 'Baseline tie', buildTieForm(doc)));
   panel.appendChild(menuAccordion('house', 'House corners', buildHouseForm(doc)));

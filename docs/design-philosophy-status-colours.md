@@ -1,6 +1,6 @@
 # Design philosophy — concertina status colours
 
-Hamburger **concertina** rows should show state at a glance via colour (dot, chevron, or section header accent).
+Hamburger **concertina** rows should show state at a glance via a **small status icon** immediately after the section label (green / orange / red). The section title stays neutral; the icon carries the primary signal. Optional subtitle text can repeat the detail.
 
 ## Status colours (default)
 | Colour | Meaning |
@@ -12,7 +12,8 @@ Hamburger **concertina** rows should show state at a glance via colour (dot, che
 
 ## Apply to
 - **Sign in / OneDrive** row first (highest priority signal)
-- Other sections when they have clear state (e.g. baseline missing = orange; Adjust failed = red; baseline OK = green)
+- **Baseline** row: label always **Baseline**; orange icon when not set, green when established (never red for “not set”)
+- Other sections when they have clear state (e.g. OneDrive not signed in = orange; save/load failure = red)
 - Align with red **☰** badge for unseen errors (global attention); per-row colour is section-local status
 
 ## Don’t

@@ -171,8 +171,33 @@ body {
   flex-shrink: 0;
 }
 
+.menu-acc__dot--idle {
+  margin-left: 0.15rem;
+}
+
+/* Status icon after section label — colour carries row state (see design-philosophy-status-colours.md). */
+.menu-acc__status-icon {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(42, 36, 28, 0.12);
+}
+
+.menu-acc__status-icon--ok {
+  background: #2f7a45;
+}
+
+.menu-acc__status-icon--warn {
+  background: #e0892a;
+}
+
+.menu-acc__status-icon--error {
+  background: var(--refuse);
+}
+
 .menu-acc__label {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -197,44 +222,15 @@ body {
   content: '−';
 }
 
-.menu-acc__summary--warn,
-.menu-acc--warn > .menu-acc__summary {
-  color: #9a5b12;
-}
-
-.menu-acc__summary--warn .menu-acc__dot,
-.menu-acc--warn > .menu-acc__summary .menu-acc__dot {
-  background: #e0892a;
-}
-
+/* Row title stays neutral — status icon (+ optional subtitle) carries colour. */
 .menu-acc__summary--warn .menu-acc__status,
 .menu-acc--warn > .menu-acc__summary .menu-acc__status {
   color: #9a5b12;
 }
 
-.menu-acc__summary--error,
-.menu-acc--error > .menu-acc__summary {
-  color: var(--refuse);
-}
-
-.menu-acc__summary--error .menu-acc__dot,
-.menu-acc--error > .menu-acc__summary .menu-acc__dot {
-  background: var(--refuse);
-}
-
 .menu-acc__summary--error .menu-acc__status,
 .menu-acc--error > .menu-acc__summary .menu-acc__status {
   color: var(--refuse);
-}
-
-.menu-acc__summary--ok,
-.menu-acc--ok > .menu-acc__summary {
-  color: var(--moss-2);
-}
-
-.menu-acc__summary--ok .menu-acc__dot,
-.menu-acc--ok > .menu-acc__summary .menu-acc__dot {
-  background: #2f7a45;
 }
 
 .menu-acc__summary--ok .menu-acc__status,
