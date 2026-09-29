@@ -270,7 +270,7 @@ function modeSectionStatus(): { tone: 'idle'; inline: string } {
   };
 }
 
-function buildModePicker(_doc: GardenDocument): HTMLElement {
+function buildModePicker(doc: GardenDocument): HTMLElement {
   const body = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'mode-panel' } });
   const current = displayedChromeMode();
   const sel = el('select', {
