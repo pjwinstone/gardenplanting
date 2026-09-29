@@ -349,7 +349,7 @@ body {
   width: min(22rem, 92vw);
   max-height: 100%;
   overflow: auto;
-  padding: 1rem 1rem 5.5rem;
+  padding: 1rem 1rem max(1.5rem, env(safe-area-inset-bottom));
   background: #f6f1e6;
   color: var(--ink);
   box-shadow: -4px 0 24px rgba(26, 36, 28, 0.28);
@@ -365,22 +365,15 @@ body {
 }
 
 .menu-drawer__foot {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 0.5rem;
-  margin: 1rem -1rem -5.5rem;
-  padding: 0.65rem 1rem;
-  padding-bottom: max(0.65rem, env(safe-area-inset-bottom));
-  background: linear-gradient(180deg, rgba(246, 241, 230, 0) 0%, #f6f1e6 28%);
-  pointer-events: none;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
 }
 
 .menu-drawer__foot .menu-drawer__close {
-  pointer-events: auto;
   min-width: 5.5rem;
   min-height: 2.75rem;
   touch-action: manipulation;

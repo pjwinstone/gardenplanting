@@ -80,7 +80,6 @@ export type MenuSection =
   | 'mode'
   | 'version'
   | 'recommend'
-  | 'add-point'
   | 'coach'
   | 'baseline'
   | 'tie'
@@ -1484,16 +1483,6 @@ function baselineSectionStatus(doc: GardenDocument): { tone: 'ok' | 'warn' | 'er
   return { tone: 'warn', text: 'Not set' };
 }
 
-function addPointSectionStatus(doc: GardenDocument): { tone: 'ok' | 'warn' | 'error' | 'idle'; text?: string } {
-  if (!baselineReady(doc)) {
-    return { tone: 'warn', text: 'Needs baseline' };
-  }
-  if (doc.session.mode === 'ADD_POINT' || doc.session.mode === 'ADD_POINT_EXTRA_YAW') {
-    return { tone: 'ok', text: 'Ready' };
-  }
-  return { tone: 'idle', text: 'Open dialogue' };
-}
-
 /** Unified translucent + Point / inspect dialogue (same fields both modes). */
 function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLElement {
   const inspectingId = mode === 'inspect' ? doc.session.inspectingPointId : undefined;
@@ -1869,29 +1858,7 @@ function buildMenuDrawer(
   // —— Workflows ——
   panel.appendChild(menuAccordion('recommend', 'Recommended next', buildRecommendBody(doc, coach, legal)));
 
-  const addPointBody = el('div', {
-    className: 'menu-acc__body',
-    attrs: { 'data-testid': 'menu-add-point-section' },
-  });
-  addPointBody.appendChild(
-    el('p', {
-      className: 'menu-acc__meta',
-      text: 'Opens the translucent + Point dialogue on the plan (sticky baseline, layer, object, geometry). Tap a measured point to inspect/edit in the same dialogue.',
-    }),
-  );
-  addPointBody.appendChild(
-    el('button', {
-      className: 'btn btn--suggested btn--thumb',
-      text: '+ Point',
-      attrs: {
-        type: 'button',
-        'data-cmd': 'open-point-dialog',
-        'data-testid': 'menu-open-add-point-acc',
-        'aria-label': 'Open + Point dialogue',
-      },
-    }),
-  );
-  panel.appendChild(menuAccordion('add-point', '+ Point', addPointBody, addPointSectionStatus(doc)));
+  // + Point is NOT a concertina — quick / Mode / Tools open the on-plan dialogue and dismiss the menu.
 
   const coachBody = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'coach-panel' } });
   for (const line of coach.body) {
@@ -2121,7 +2088,8 @@ function buildMenuDrawer(
   glossaryBody.appendChild(dl);
   panel.appendChild(menuAccordion('glossary', 'Glossary', glossaryBody));
 
-  // Close lives bottom-right (thumb zone, near ☰) — not only top-right.
+  // Close is last in document flow (end of concertina list) — not a sticky overlay.
+  // Backdrop click already closes; this is the thumb-reachable explicit control.
   const foot = el('div', {
     className: 'menu-drawer__foot',
     attrs: { 'data-testid': 'menu-drawer-foot' },
@@ -2438,6 +2406,12 @@ function onModeAction(action: ModeAction): void {
     return;
   }
 
+  // + Point always dismisses the hamburger and opens the on-plan dialog.
+  if (action === 'add_point') {
+    startAddPointDialog();
+    return;
+  }
+
   const { doc: next, result } = applyTransition(doc, action);
   if (!result.ok) {
     surfaceFail(result.reason ?? 'Illegal transition.', 'mode');
@@ -2445,19 +2419,11 @@ function onModeAction(action: ModeAction): void {
     return;
   }
   setDoc(next, null);
-  if (action === 'add_point') {
-    setState({
-      menuOpen: false,
-      pointDialog: 'add',
-      openErrorLog: false,
-    });
-  } else {
-    setState({
-      menuOpen: true,
-      menuFocus: menuFocusAfterMode(next.session.mode),
-      openErrorLog: false,
-    });
-  }
+  setState({
+    menuOpen: true,
+    menuFocus: menuFocusAfterMode(next.session.mode),
+    openErrorLog: false,
+  });
   const coach = buildCoach(next);
   speakCoachLine(coach.body[0] ?? '', next.session.speakSteps);
 }
