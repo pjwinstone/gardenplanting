@@ -460,6 +460,30 @@ body {
   border-radius: 2px;
 }
 
+.error-log__item--error {
+  color: var(--refuse);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.error-log__item--error .error-log__meta,
+.error-log__item--error .error-log__msg,
+.error-log__item--error .error-log__stack {
+  color: var(--refuse);
+}
+
+.error-log__item--error:active {
+  background: #f8ece8;
+}
+
+.error-log__item--info {
+  color: var(--ink);
+}
+
+.error-log__item--info .error-log__msg {
+  color: var(--ink);
+}
+
 .error-log__meta {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.72rem;

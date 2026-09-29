@@ -156,7 +156,7 @@ function openMenuSection(section: MenuSection): void {
     openErrorLog: section === 'error-log',
     refuseMessage: state.refuseMessage,
   });
-  if (section === 'error-log') markErrorsSeen();
+  // Error log: do not auto-acknowledge — tap a red error line (or Mark seen).
 }
 
 function openPointDialog(mode: 'add' | 'inspect'): void {
@@ -581,7 +581,6 @@ function onShellClick(e: Event): void {
       menuFocus: next,
       openErrorLog: next === 'error-log',
     });
-    if (next === 'error-log') markErrorsSeen();
     return;
   }
   if (cmd === 'open-menu-section') {
@@ -630,6 +629,11 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'mark-errors-seen') {
+    markErrorsSeen();
+    return;
+  }
+  if (cmd === 'acknowledge-error') {
+    // Tap a red error line → clear ☰ / concertina red warning; keep entries.
     markErrorsSeen();
     return;
   }
@@ -1511,6 +1515,17 @@ function baselineSectionStatus(
   return { tone: 'warn', inline: 'not set' };
 }
 
+function errorLogSectionStatus(): {
+  tone: 'ok' | 'warn' | 'error' | 'idle';
+  inline?: string;
+} {
+  if (hasUnseenErrors()) {
+    const n = unseenErrorCount();
+    return { tone: 'error', inline: n > 1 ? `${n} new` : 'new' };
+  }
+  return { tone: 'idle' };
+}
+
 /** Unified translucent + Point / inspect dialogue (same fields both modes). */
 function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLElement {
   const inspectingId = mode === 'inspect' ? doc.session.inspectingPointId : undefined;
@@ -2069,7 +2084,22 @@ function buildMenuDrawer(
   } else {
     const list = el('ul', { className: 'error-log__list' });
     for (const entry of entries) {
-      const item = el('li', { className: 'error-log__item' });
+      const isError = (entry.severity ?? 'error') === 'error';
+      const item = el('li', {
+        className:
+          'error-log__item' +
+          (isError ? ' error-log__item--error' : ' error-log__item--info'),
+        attrs: isError
+          ? {
+              'data-cmd': 'acknowledge-error',
+              'data-testid': 'error-log-entry',
+              role: 'button',
+              tabindex: '0',
+              title: 'Tap to clear menu warning',
+              'aria-label': 'Acknowledge error and clear menu warning',
+            }
+          : { 'data-testid': 'error-log-entry-info' },
+      });
       const when = new Date(entry.at).toLocaleString();
       item.appendChild(
         el('div', {
@@ -2085,7 +2115,12 @@ function buildMenuDrawer(
     }
     errBody.appendChild(list);
   }
-  const errAcc = menuAccordion('error-log', 'Error log', errBody);
+  const errAcc = menuAccordion(
+    'error-log',
+    'Error log',
+    errBody,
+    errorLogSectionStatus(),
+  );
   panel.appendChild(errAcc);
 
   // —— Glossary ——
