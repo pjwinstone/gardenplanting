@@ -59,8 +59,13 @@ import {
   workflowAddPoint,
 } from './workflows';
 import {
+  appendPhotoToPoint,
   baselinesByTrust,
+  createLayer,
   createObject,
+  deleteLayerMeasurement,
+  deleteObjectMeasurement,
+  deletePointMeasurement,
   objectsOnLayer,
   preferredBaseline,
   setBaselineTrust,
@@ -108,6 +113,8 @@ export interface UiState {
   menuFocus: MenuSection;
   /** On-plan + Point / inspect dialogue (null = closed). */
   pointDialog: PointDialogMode;
+  /** Pending camera capture for + Point (not yet attached to a Photo). */
+  pendingPointThumb: string | null;
 }
 
 type Listener = () => void;
@@ -147,6 +154,7 @@ let state: UiState = {
   openErrorLog: false,
   menuFocus: 'recommend',
   pointDialog: null,
+  pendingPointThumb: null,
 };
 
 function openMenuSection(section: MenuSection): void {
@@ -180,6 +188,7 @@ function closePointDialog(): void {
       },
     },
     pointDialog: null,
+    pendingPointThumb: null,
     refuseMessage: null,
   });
 }
@@ -684,7 +693,9 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'add-photo') {
-    const result = workflowAddPoint(state.doc);
+    const result = workflowAddPoint(state.doc, {
+      thumbnailDataUrl: state.pendingPointThumb ?? undefined,
+    });
     if (!result.ok) {
       surfaceFail(result.reason, 'add-point');
       setDoc(result.doc, result.reason);
@@ -692,8 +703,79 @@ function onShellClick(e: Event): void {
       return;
     }
     setDoc(result.doc, null);
-    setState({ pointDialog: 'add', menuOpen: false, openErrorLog: false });
+    setState({
+      pointDialog: 'add',
+      menuOpen: false,
+      openErrorLog: false,
+      pendingPointThumb: null,
+    });
     speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
+    return;
+  }
+  if (cmd === 'delete-point') {
+    const pointId = state.doc.session.inspectingPointId;
+    if (!pointId || state.pointDialog !== 'inspect') return;
+    if (!window.confirm(`Delete point ${pointId}? This cannot be undone.`)) return;
+    const result = deletePointMeasurement(state.doc, pointId);
+    if (result.reason) {
+      surfaceFail(result.reason, 'delete-point');
+      setDoc(result.doc, result.reason);
+      return;
+    }
+    setDoc(result.doc, null);
+    setState({ pointDialog: null, pendingPointThumb: null, menuOpen: false });
+    speakCoachLine(result.doc.session.lastAction ?? `Deleted ${pointId}.`, result.doc.session.speakSteps);
+    return;
+  }
+  if (cmd === 'create-layer') {
+    const name = window.prompt('Layer name', `Layer ${(state.doc.layers?.length ?? 0) + 1}`);
+    if (name == null) return;
+    const { doc } = createLayer(state.doc, { name: name.trim() || undefined });
+    setDoc(doc, null);
+    return;
+  }
+  if (cmd === 'delete-layer') {
+    const layer = stickyLayer(state.doc);
+    const itemCount = objectsOnLayer(state.doc, layer.id).length;
+    const msg =
+      itemCount > 0
+        ? `Delete layer “${layer.name}” and its ${itemCount} item${itemCount === 1 ? '' : 's'}?`
+        : `Delete layer “${layer.name}”?`;
+    if (!window.confirm(msg)) return;
+    const result = deleteLayerMeasurement(state.doc, layer.id);
+    if (result.reason) {
+      surfaceFail(result.reason, 'delete-layer');
+      setDoc(result.doc, result.reason);
+      return;
+    }
+    setDoc(result.doc, null);
+    if (state.pointDialog === 'inspect') {
+      setState({ pointDialog: null, pendingPointThumb: null });
+    }
+    return;
+  }
+  if (cmd === 'delete-item') {
+    const obj = stickyObject(state.doc);
+    if (!obj) {
+      surfaceFail('Select an item to delete.', 'delete-item');
+      return;
+    }
+    const n = obj.measuredPointIds.length;
+    const msg =
+      n > 0
+        ? `Delete item “${obj.name}” and its ${n} point${n === 1 ? '' : 's'}?`
+        : `Delete item “${obj.name}”?`;
+    if (!window.confirm(msg)) return;
+    const result = deleteObjectMeasurement(state.doc, obj.id);
+    if (result.reason) {
+      surfaceFail(result.reason, 'delete-item');
+      setDoc(result.doc, result.reason);
+      return;
+    }
+    setDoc(result.doc, null);
+    if (state.pointDialog === 'inspect') {
+      setState({ pointDialog: null, pendingPointThumb: null });
+    }
     return;
   }
   if (cmd === 'inspect-point') {
@@ -779,12 +861,12 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'save-object') {
-    // Rename / update sticky fields for the selected existing object.
+    // Rename / update sticky fields for the selected existing item.
     const panel = target.closest('.point-dialog') ?? target.closest('.add-point-panel');
     if (!panel) return;
     const objectId = (panel.querySelector('[data-field=object]') as HTMLSelectElement | null)?.value;
     if (!objectId || objectId === '__new__') {
-      surfaceFail('Select an existing object to rename, or use + Object.', 'object');
+      surfaceFail('Select an existing item to rename, or use + Item.', 'item');
       return;
     }
     const objectName =
@@ -813,6 +895,7 @@ function onShellClick(e: Event): void {
           stickyObjectName: objectName || state.doc.session.stickyObjectName,
           stickyLayerId: layerId || state.doc.session.stickyLayerId,
           stickyGeometryType: geometryType || state.doc.session.stickyGeometryType,
+          lastAction: `Saved item “${objectName || objectId}”`,
         },
       },
       null,
@@ -1526,7 +1609,57 @@ function errorLogSectionStatus(): {
   return { tone: 'idle' };
 }
 
-/** Unified translucent + Point / inspect dialogue (same fields both modes). */
+/** Downscale a camera/gallery image to a JPEG data URL for Photo.thumbnailDataUrl. */
+async function fileToThumbnailDataUrl(file: File, maxEdge = 480): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Canvas unavailable');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    return canvas.toDataURL('image/jpeg', 0.82);
+  } finally {
+    bitmap.close();
+  }
+}
+
+function hierOps(plusCmd: string, minusCmd: string, opts: { plusTitle: string; minusTitle: string; minusDisabled?: boolean }): HTMLElement {
+  const ops = el('div', { className: 'hier-row__ops' });
+  ops.appendChild(
+    el('button', {
+      className: 'btn btn--hier',
+      text: '+',
+      attrs: {
+        type: 'button',
+        'data-cmd': plusCmd,
+        'aria-label': opts.plusTitle,
+        title: opts.plusTitle,
+      },
+    }),
+  );
+  const minusAttrs: Record<string, string | undefined> = {
+    type: 'button',
+    'data-cmd': minusCmd,
+    'aria-label': opts.minusTitle,
+    title: opts.minusTitle,
+  };
+  if (opts.minusDisabled) minusAttrs.disabled = 'true';
+  ops.appendChild(
+    el('button', {
+      className: 'btn btn--hier btn--danger',
+      text: '−',
+      attrs: minusAttrs,
+    }),
+  );
+  return ops;
+}
+
+/** Unified translucent + Point / inspect dialogue — Garden → Layer → Item → Point. */
 function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLElement {
   const inspectingId = mode === 'inspect' ? doc.session.inspectingPointId : undefined;
   const pt = inspectingId ? doc.points.find((p) => p.id === inspectingId) : undefined;
@@ -1576,20 +1709,125 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   );
   dialog.appendChild(head);
 
-  const grid = el('div', { className: 'point-dialog__grid' });
+  const stack = el('div', {
+    className: 'point-dialog__stack',
+    attrs: { 'data-testid': 'point-hierarchy' },
+  });
 
-  // Baseline — named only via the select (optgroup / first option), not repeated above.
-  const blWrap = el('label', { className: 'field' });
+  // —— Garden (single-garden context label; no multi-garden UI) ——
+  const gardenRow = el('div', { className: 'hier-row hier-row--garden' });
+  gardenRow.appendChild(el('span', { className: 'hier-row__label', text: 'Garden' }));
+  gardenRow.appendChild(
+    el('span', {
+      className: 'hier-row__value',
+      text: doc.name || 'Untitled garden',
+      attrs: { 'data-testid': 'hier-garden-name' },
+    }),
+  );
+  stack.appendChild(gardenRow);
+
+  // —— Layer ——
+  const layerRow = el('div', { className: 'hier-row' });
+  const layerMain = el('label', { className: 'hier-row__main' });
+  layerMain.appendChild(el('span', { className: 'hier-row__label', text: 'Layer' }));
+  const layerSel = el('select', {
+    attrs: { 'data-field': 'layer', 'data-cmd': 'sticky-layer', 'aria-label': 'Layer' },
+  }) as HTMLSelectElement;
+  const layers = doc.layers?.length ? doc.layers : [{ id: 'walkway', name: 'Walkway' }];
+  const stickyL = stickyLayer(doc).id;
+  for (const l of layers) {
+    const opt = document.createElement('option');
+    opt.value = l.id;
+    opt.textContent = l.name;
+    if (l.id === stickyL) opt.selected = true;
+    layerSel.appendChild(opt);
+  }
+  layerMain.appendChild(layerSel);
+  layerRow.appendChild(layerMain);
+  layerRow.appendChild(
+    hierOps('create-layer', 'delete-layer', {
+      plusTitle: '+ Layer',
+      minusTitle: '− Layer',
+      minusDisabled: layers.length <= 1,
+    }),
+  );
+  stack.appendChild(layerRow);
+
+  // —— Item (model: object) ——
+  const itemRow = el('div', { className: 'hier-row' });
+  const itemMain = el('label', { className: 'hier-row__main' });
+  itemMain.appendChild(el('span', { className: 'hier-row__label', text: 'Item' }));
+  const objSel = el('select', {
+    attrs: { 'data-field': 'object', 'data-cmd': 'sticky-object', 'aria-label': 'Item' },
+  }) as HTMLSelectElement;
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '+ Item';
+  objSel.appendChild(newOpt);
+  for (const o of objectsOnLayer(doc, stickyL)) {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.name;
+    if (o.id === doc.session.stickyObjectId) opt.selected = true;
+    objSel.appendChild(opt);
+  }
+  if (!doc.session.stickyObjectId) newOpt.selected = true;
+  itemMain.appendChild(objSel);
+  itemRow.appendChild(itemMain);
+  itemRow.appendChild(
+    hierOps('create-object', 'delete-item', {
+      plusTitle: '+ Item',
+      minusTitle: '− Item',
+      minusDisabled: !doc.session.stickyObjectId,
+    }),
+  );
+  stack.appendChild(itemRow);
+
+  const nameRow = el('label', { className: 'hier-row hier-row--field' });
+  nameRow.appendChild(el('span', { className: 'hier-row__label', text: 'Name' }));
+  nameRow.appendChild(
+    el('input', {
+      attrs: {
+        type: 'text',
+        'data-field': 'object-name',
+        'data-cmd': 'sticky-object-name',
+        value: doc.session.stickyObjectName ?? stickyObject(doc)?.name ?? '',
+        placeholder: 'Item name…',
+        'aria-label': 'Item name',
+      },
+    }),
+  );
+  stack.appendChild(nameRow);
+
+  const geoRow = el('label', { className: 'hier-row hier-row--field' });
+  geoRow.appendChild(el('span', { className: 'hier-row__label', text: 'Geometry' }));
+  const geoSel = el('select', {
+    attrs: { 'data-field': 'geometry', 'data-cmd': 'sticky-geometry', 'aria-label': 'Geometry' },
+  }) as HTMLSelectElement;
+  const geo = stickyGeometry(doc);
+  for (const g of GEOMETRY_CHOICES) {
+    const opt = document.createElement('option');
+    opt.value = g.id;
+    opt.textContent = g.label;
+    if (g.id === geo) opt.selected = true;
+    geoSel.appendChild(opt);
+  }
+  geoRow.appendChild(geoSel);
+  stack.appendChild(geoRow);
+
+  // Baseline (measurement control — not a hierarchy level)
+  const blRow = el('label', { className: 'hier-row hier-row--field' });
+  blRow.appendChild(el('span', { className: 'hier-row__label', text: 'Baseline' }));
   const blSel = el('select', {
     attrs: { 'data-field': 'baseline', 'data-cmd': 'sticky-baseline', 'aria-label': 'Baseline' },
   }) as HTMLSelectElement;
   const ranked = baselinesByTrust(doc);
-  const blHeader = document.createElement('option');
-  blHeader.value = '';
-  blHeader.disabled = true;
-  blHeader.textContent = 'Baseline…';
-  if (!ranked.length) blHeader.selected = true;
-  blSel.appendChild(blHeader);
+  if (!ranked.length) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.textContent = 'None — establish first';
+    blSel.appendChild(empty);
+  }
   for (const b of ranked) {
     const opt = document.createElement('option');
     opt.value = b.id;
@@ -1598,13 +1836,14 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
     if (b.id === (doc.session.currentBaselineId ?? ranked[0]?.id)) opt.selected = true;
     blSel.appendChild(opt);
   }
-  blWrap.appendChild(blSel);
-  grid.appendChild(blWrap);
+  blRow.appendChild(blSel);
+  stack.appendChild(blRow);
 
   const curBl = ranked.find((b) => b.id === doc.session.currentBaselineId) ?? ranked[0];
   if (curBl) {
-    const trustWrap = el('label', { className: 'field field--trust' });
-    trustWrap.appendChild(
+    const trustRow = el('label', { className: 'hier-row hier-row--trust' });
+    trustRow.appendChild(el('span', { className: 'hier-row__label', text: 'Trust' }));
+    trustRow.appendChild(
       el('input', {
         attrs: {
           type: 'range',
@@ -1618,132 +1857,117 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
         },
       }),
     );
-    grid.appendChild(trustWrap);
+    stack.appendChild(trustRow);
   }
 
-  const layerWrap = el('label', { className: 'field' });
-  const layerSel = el('select', {
-    attrs: { 'data-field': 'layer', 'data-cmd': 'sticky-layer', 'aria-label': 'Layer' },
-  }) as HTMLSelectElement;
-  const layerHeader = document.createElement('option');
-  layerHeader.value = '';
-  layerHeader.disabled = true;
-  layerHeader.textContent = 'Layer…';
-  layerSel.appendChild(layerHeader);
-  const layers = doc.layers?.length ? doc.layers : [{ id: 'walkway', name: 'Walkway' }];
-  const stickyL = stickyLayer(doc).id;
-  for (const l of layers) {
-    const opt = document.createElement('option');
-    opt.value = l.id;
-    opt.textContent = l.name;
-    if (l.id === stickyL) opt.selected = true;
-    layerSel.appendChild(opt);
-  }
-  layerWrap.appendChild(layerSel);
-  grid.appendChild(layerWrap);
-
-  const objWrap = el('label', { className: 'field' });
-  const objSel = el('select', {
-    attrs: { 'data-field': 'object', 'data-cmd': 'sticky-object', 'aria-label': 'Object' },
-  }) as HTMLSelectElement;
-  const objHeader = document.createElement('option');
-  objHeader.value = '';
-  objHeader.disabled = true;
-  objHeader.textContent = 'Object…';
-  objSel.appendChild(objHeader);
-  const newOpt = document.createElement('option');
-  newOpt.value = '__new__';
-  newOpt.textContent = '+ Object';
-  objSel.appendChild(newOpt);
-  for (const o of objectsOnLayer(doc, stickyL)) {
-    const opt = document.createElement('option');
-    opt.value = o.id;
-    opt.textContent = o.name;
-    if (o.id === doc.session.stickyObjectId) opt.selected = true;
-    objSel.appendChild(opt);
-  }
-  if (!doc.session.stickyObjectId) newOpt.selected = true;
-  objWrap.appendChild(objSel);
-  grid.appendChild(objWrap);
-
-  const nameWrap = el('label', { className: 'field' });
-  nameWrap.appendChild(
-    el('input', {
-      attrs: {
-        type: 'text',
-        'data-field': 'object-name',
-        'data-cmd': 'sticky-object-name',
-        value: doc.session.stickyObjectName ?? stickyObject(doc)?.name ?? '',
-        placeholder: 'Object name…',
-        'aria-label': 'Object name',
-      },
+  // —— Point ——
+  const pointRow = el('div', { className: 'hier-row' });
+  const pointMain = el('div', { className: 'hier-row__main' });
+  pointMain.appendChild(el('span', { className: 'hier-row__label', text: 'Point' }));
+  pointMain.appendChild(
+    el('span', {
+      className: 'hier-row__value',
+      text: pt ? pt.id : 'new',
+      attrs: { 'data-testid': 'hier-point-id' },
     }),
   );
-  grid.appendChild(nameWrap);
-
-  const geoWrap = el('label', { className: 'field' });
-  const geoSel = el('select', {
-    attrs: { 'data-field': 'geometry', 'data-cmd': 'sticky-geometry', 'aria-label': 'Geometry' },
-  }) as HTMLSelectElement;
-  const geoHeader = document.createElement('option');
-  geoHeader.value = '';
-  geoHeader.disabled = true;
-  geoHeader.textContent = 'Geometry…';
-  geoSel.appendChild(geoHeader);
-  const geo = stickyGeometry(doc);
-  for (const g of GEOMETRY_CHOICES) {
-    const opt = document.createElement('option');
-    opt.value = g.id;
-    opt.textContent = g.label;
-    if (g.id === geo) opt.selected = true;
-    geoSel.appendChild(opt);
+  pointRow.appendChild(pointMain);
+  const pointOps = el('div', { className: 'hier-row__ops' });
+  if (mode === 'add') {
+    pointOps.appendChild(
+      el('button', {
+        className: 'btn btn--hier btn--suggested',
+        text: '+',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'add-photo',
+          'data-testid': 'add-photo',
+          'aria-label': '+ Point',
+          title: '+ Point',
+        },
+      }),
+    );
+  } else {
+    pointOps.appendChild(
+      el('button', {
+        className: 'btn btn--hier btn--suggested',
+        text: '+',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'open-point-dialog',
+          'data-testid': 'inspect-plus-point',
+          'aria-label': '+ Point',
+          title: '+ Point',
+        },
+      }),
+    );
+    pointOps.appendChild(
+      el('button', {
+        className: 'btn btn--hier btn--danger',
+        text: '−',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'delete-point',
+          'data-testid': 'delete-point',
+          'aria-label': 'Delete point',
+          title: '− Point',
+        },
+      }),
+    );
   }
-  geoWrap.appendChild(geoSel);
-  grid.appendChild(geoWrap);
+  pointRow.appendChild(pointOps);
+  stack.appendChild(pointRow);
 
-  dialog.appendChild(grid);
+  dialog.appendChild(stack);
 
-  // Photos list only when there is something to show (no duplicate instructional prose).
-  if (pt) {
-    const photos = (pt.photoIds ?? [])
-      .map((id) => doc.photos.find((p) => p.id === id))
-      .filter(Boolean);
-    if (photos.length) {
-      const photosSection = el('div', { className: 'point-dialog__photos' });
-      const list = el('ul', { className: 'point-dialog__photo-list' });
-      for (const ph of photos) {
-        list.appendChild(el('li', { text: `${ph!.id}${ph!.note ? ` — ${ph!.note}` : ''}` }));
+  // Photo capture + thumb strip
+  const photosSection = el('div', {
+    className: 'point-dialog__photos',
+    attrs: { 'data-testid': 'point-photos' },
+  });
+  const captureRow = el('div', { className: 'point-dialog__capture' });
+  const captureLabel = el('label', {
+    className: 'btn btn--util point-dialog__capture-btn',
+    text: 'Photo',
+    attrs: { 'data-testid': 'capture-photo', title: 'Take or choose photo' },
+  });
+  const fileInput = el('input', {
+    attrs: {
+      type: 'file',
+      accept: 'image/*',
+      capture: 'environment',
+      hidden: 'true',
+      'aria-label': 'Capture photo',
+    },
+  }) as HTMLInputElement;
+  fileInput.addEventListener('change', () => {
+    void (async () => {
+      const file = fileInput.files?.[0];
+      fileInput.value = '';
+      if (!file) return;
+      try {
+        const thumb = await fileToThumbnailDataUrl(file);
+        if (mode === 'inspect' && inspectingId) {
+          const result = appendPhotoToPoint(state.doc, inspectingId, { thumbnailDataUrl: thumb });
+          if (result.reason) {
+            surfaceFail(result.reason, 'photo');
+            return;
+          }
+          setDoc(result.doc, null);
+          setState({ pointDialog: 'inspect', pendingPointThumb: null });
+          return;
+        }
+        setState({ pendingPointThumb: thumb });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Could not read photo.';
+        surfaceFail(msg, 'photo');
       }
-      photosSection.appendChild(list);
-      dialog.appendChild(photosSection);
-    }
-    const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
-    if (obj?.residualMm != null) {
-      dialog.appendChild(
-        el('p', {
-          className: 'point-dialog__residual',
-          text: `~${obj.residualMm.toFixed(0)} mm`,
-        }),
-      );
-    }
-  }
-
-  const actionsRow = el('div', { className: 'point-dialog__actions' });
-  actionsRow.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: '+ Object',
-      attrs: {
-        type: 'button',
-        'data-cmd': 'create-object',
-        'data-testid': 'plus-object',
-        'aria-label': 'Create new object',
-      },
-    }),
-  );
-  // Save renames/updates the selected existing object (name + layer + geometry).
+    })();
+  });
+  captureLabel.appendChild(fileInput);
+  captureRow.appendChild(captureLabel);
   if (mode === 'inspect' || doc.session.stickyObjectId) {
-    actionsRow.appendChild(
+    captureRow.appendChild(
       el('button', {
         className: 'btn btn--util',
         text: 'Save',
@@ -1751,26 +1975,12 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
           type: 'button',
           'data-cmd': mode === 'inspect' ? 'apply-inspector' : 'save-object',
           'data-testid': 'point-dialog-save',
-          'aria-label': 'Save object changes',
+          'aria-label': 'Save item changes',
         },
       }),
     );
   }
-  if (mode === 'add') {
-    actionsRow.appendChild(
-      el('button', {
-        className: 'btn btn--suggested',
-        text: '+ Point',
-        attrs: {
-          type: 'button',
-          'data-cmd': 'add-photo',
-          'data-testid': 'add-photo',
-          'aria-label': 'Add measurement point',
-        },
-      }),
-    );
-  }
-  actionsRow.appendChild(
+  captureRow.appendChild(
     el('button', {
       className: 'btn btn--util point-dialog__close-footer',
       text: 'Close',
@@ -1782,7 +1992,50 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
       },
     }),
   );
-  dialog.appendChild(actionsRow);
+  photosSection.appendChild(captureRow);
+
+  const strip = el('ul', { className: 'point-dialog__photo-strip' });
+  let hasThumb = false;
+  if (state.pendingPointThumb) {
+    hasThumb = true;
+    const li = el('li', { className: 'point-dialog__thumb point-dialog__thumb--pending' });
+    const img = document.createElement('img');
+    img.src = state.pendingPointThumb;
+    img.alt = 'Pending photo';
+    li.appendChild(img);
+    strip.appendChild(li);
+  }
+  if (pt) {
+    const photos = (pt.photoIds ?? [])
+      .map((id) => doc.photos.find((p) => p.id === id))
+      .filter(Boolean);
+    for (const ph of photos) {
+      if (!ph?.thumbnailDataUrl) continue;
+      hasThumb = true;
+      const li = el('li', { className: 'point-dialog__thumb' });
+      const img = document.createElement('img');
+      img.src = ph.thumbnailDataUrl;
+      img.alt = ph.id;
+      img.title = ph.note ?? ph.id;
+      li.appendChild(img);
+      strip.appendChild(li);
+    }
+  }
+  if (hasThumb) photosSection.appendChild(strip);
+
+  if (pt) {
+    const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
+    if (obj?.residualMm != null) {
+      photosSection.appendChild(
+        el('p', {
+          className: 'point-dialog__residual',
+          text: `~${obj.residualMm.toFixed(0)} mm`,
+        }),
+      );
+    }
+  }
+
+  dialog.appendChild(photosSection);
   return dialog;
 }
 
@@ -2129,12 +2382,16 @@ function buildMenuDrawer(
     attrs: { 'data-testid': 'glossary' },
   });
   const glossary: Array<[string, string]> = [
-    ['+ Point', 'New measurement on the current object.'],
-    ['+ Object', 'New named thing on the current layer.'],
+    ['+ Point', 'New measurement on the current item.'],
+    ['+ Item', 'New named thing on the current layer.'],
+    ['+ Layer', 'New grouping plane in this garden.'],
+    ['− Point / Item / Layer', 'Delete that level (confirm when destructive).'],
     ['Baseline', 'Control segment used for measurements.'],
-    ['Layer', 'Grouping plane for objects (e.g. walkway, bed).'],
-    ['Object', 'Named thing you measure points on.'],
-    ['Geometry', 'Shape hint for the object (square, circle, …).'],
+    ['Garden', 'This survey document (single garden for now).'],
+    ['Layer', 'Grouping plane for items (e.g. walkway, bed).'],
+    ['Item', 'Named thing you measure points on.'],
+    ['Geometry', 'Shape hint for the item (square, circle, …).'],
+    ['Photo', 'Rear-camera capture stored on the point (marks later).'],
     ['Menu', 'Idle mode when no workflow dialog is open.'],
   ];
   const dl = el('dl', { className: 'glossary__list' });

@@ -130,10 +130,36 @@ export function createObject(
       stickyObjectId: id,
       stickyObjectName: object.name,
       stickyGeometryType: opts.geometryType,
-      lastAction: `Object “${object.name}” on ${opts.layerId}`,
+      lastAction: `Item “${object.name}” on ${opts.layerId}`,
     },
   };
   return { doc: next, object };
+}
+
+/** Create a user layer (UI: + Layer). */
+export function createLayer(
+  doc: GardenDocument,
+  opts: { name?: string; colour?: string } = {},
+): { doc: GardenDocument; layer: LayerDef } {
+  const withLayers = ensureDefaultLayers(doc);
+  const id = `layer-${Date.now().toString(36)}`;
+  const layer: LayerDef = {
+    id,
+    name: opts.name?.trim() || `Layer ${withLayers.layers.length + 1}`,
+    colour: opts.colour ?? '#6b8f71',
+  };
+  const next: GardenDocument = {
+    ...withLayers,
+    layers: [...withLayers.layers, layer],
+    session: {
+      ...withLayers.session,
+      stickyLayerId: id,
+      stickyObjectId: undefined,
+      stickyObjectName: undefined,
+      lastAction: `Layer “${layer.name}”`,
+    },
+  };
+  return { doc: next, layer };
 }
 
 /** Active baseline ends (plan-picked). Falls back to preferred baseline. */
@@ -199,7 +225,7 @@ export function pickActiveBaselineEnd(doc: GardenDocument, pointId: string): Gar
  */
 export function addPhotoMeasurement(
   doc: GardenDocument,
-  opts: { label?: string } = {},
+  opts: { label?: string; thumbnailDataUrl?: string } = {},
 ): { doc: GardenDocument; point: Point; reason?: string } {
   let next = ensureDefaultLayers(doc);
   const layerId = next.session.stickyLayerId ?? DEFAULT_LAYER_ID;
@@ -271,6 +297,7 @@ export function addPhotoMeasurement(
     photoIds: [photoId],
   };
 
+  const hasRealThumb = Boolean(opts.thumbnailDataUrl?.startsWith('data:image/'));
   const photo = {
     id: photoId,
     setupId,
@@ -278,8 +305,10 @@ export function addPhotoMeasurement(
     width: 1200,
     height: 900,
     clicks: [],
-    thumbnailDataUrl: placeholderThumb('#1a5f7a'),
-    note: `Add photo for ${id} via ${bl ? `${bl.a}–${bl.b}` : 'active ends'}`,
+    thumbnailDataUrl: hasRealThumb ? opts.thumbnailDataUrl! : placeholderThumb('#1a5f7a'),
+    note: hasRealThumb
+      ? `Photo for ${id} via ${bl ? `${bl.a}–${bl.b}` : 'active ends'}`
+      : `Placeholder photo for ${id} via ${bl ? `${bl.a}–${bl.b}` : 'active ends'}`,
   };
 
   const objects = (next.objects ?? []).map((o) => {
@@ -319,7 +348,7 @@ export function addPhotoMeasurement(
       stickyGeometryType: geometryType,
       currentAddPointId: id,
       currentBaselineId: bl?.id ?? next.session.currentBaselineId,
-      lastAction: `Add photo → ${id} on ${layerId}/${objectName} (${geometryType})`,
+      lastAction: `+ Point → ${id} on ${layerId}/${objectName} (${geometryType})`,
       geometryOk: true,
       lastResidualMm: objects.find((o) => o.id === obj!.id)?.residualMm,
       inspectingPointId: undefined,
@@ -331,9 +360,202 @@ export function addPhotoMeasurement(
 /** @deprecated alias — prefer addPhotoMeasurement */
 export function appendAddPoint(
   doc: GardenDocument,
-  opts: { label?: string } = {},
+  opts: { label?: string; thumbnailDataUrl?: string } = {},
 ): { doc: GardenDocument; point: Point; reason?: string } {
   return addPhotoMeasurement(doc, opts);
+}
+
+/**
+ * Remove a measured point and its photos from the garden.
+ * Refuses if the point is a baseline end (would orphan control).
+ */
+export function deletePointMeasurement(
+  doc: GardenDocument,
+  pointId: string,
+): { doc: GardenDocument; reason?: string } {
+  let next = ensureDefaultLayers(doc);
+  const point = next.points.find((p) => p.id === pointId);
+  if (!point) {
+    return { doc: next, reason: `Point ${pointId} is not in the garden.` };
+  }
+
+  const usedAsBaselineEnd = next.baselines.some((b) => b.a === pointId || b.b === pointId);
+  if (usedAsBaselineEnd) {
+    return {
+      doc: next,
+      reason: `Cannot delete ${pointId} — it is a baseline end. Change the baseline first.`,
+    };
+  }
+
+  const active = next.session.activeBaselineEnds;
+  if (active?.a === pointId || active?.b === pointId) {
+    return {
+      doc: next,
+      reason: `Cannot delete ${pointId} — it is an active baseline end.`,
+    };
+  }
+
+  const photoIdSet = new Set(point.photoIds ?? []);
+  const remainingPoints = next.points.filter((p) => p.id !== pointId);
+  const remainingPhotos = next.photos.filter(
+    (ph) => !photoIdSet.has(ph.id) && ph.addPointId !== pointId,
+  );
+  const remainingObs = next.observations.filter(
+    (o) => o.photoId == null || !photoIdSet.has(o.photoId),
+  ).filter((o) => !(o.pointIds ?? []).includes(pointId));
+
+  const objects = (next.objects ?? []).map((o) => {
+    if (!o.measuredPointIds.includes(pointId) && !o.selectedPointIds.includes(pointId)) {
+      return o;
+    }
+    const updated = {
+      ...o,
+      measuredPointIds: o.measuredPointIds.filter((id) => id !== pointId),
+      selectedPointIds: o.selectedPointIds.filter((id) => id !== pointId),
+    };
+    return refitObject(next, updated, remainingPoints);
+  });
+
+  next = {
+    ...next,
+    points: remainingPoints,
+    photos: remainingPhotos,
+    observations: remainingObs,
+    objects,
+    session: {
+      ...next.session,
+      inspectingPointId: undefined,
+      currentAddPointId:
+        next.session.currentAddPointId === pointId ? undefined : next.session.currentAddPointId,
+      lastAction: `Deleted point ${pointId}`,
+      mode: 'MENU',
+    },
+  };
+  return { doc: next };
+}
+
+/** Attach a real photo thumbnail to an existing measured point (inspect path). */
+export function appendPhotoToPoint(
+  doc: GardenDocument,
+  pointId: string,
+  opts: { thumbnailDataUrl: string },
+): { doc: GardenDocument; reason?: string } {
+  let next = ensureDefaultLayers(doc);
+  const point = next.points.find((p) => p.id === pointId);
+  if (!point) {
+    return { doc: next, reason: `Point ${pointId} is not in the garden.` };
+  }
+  if (!opts.thumbnailDataUrl.startsWith('data:image/')) {
+    return { doc: next, reason: 'Photo capture did not produce an image.' };
+  }
+
+  const photoId = `ph-${Date.now().toString(36)}`;
+  const setupId = next.session.currentSetupId ?? next.setups[0]?.id ?? 'setup-1';
+  const photo = {
+    id: photoId,
+    setupId,
+    addPointId: pointId,
+    width: 1200,
+    height: 900,
+    clicks: [],
+    thumbnailDataUrl: opts.thumbnailDataUrl,
+    note: `Photo for ${pointId}`,
+  };
+
+  next = {
+    ...next,
+    photos: [...next.photos, photo],
+    points: next.points.map((p) =>
+      p.id === pointId
+        ? { ...p, photoIds: [...(p.photoIds ?? []), photoId] }
+        : p,
+    ),
+    session: {
+      ...next.session,
+      inspectingPointId: pointId,
+      lastAction: `Photo added to ${pointId}`,
+    },
+  };
+  return { doc: next };
+}
+
+/**
+ * Delete an item (GardenObject) and cascade its measured points/photos.
+ * Model still uses `objects` internally; UI calls this “Item”.
+ */
+export function deleteObjectMeasurement(
+  doc: GardenDocument,
+  objectId: string,
+): { doc: GardenDocument; reason?: string } {
+  let next = ensureDefaultLayers(doc);
+  const obj = (next.objects ?? []).find((o) => o.id === objectId);
+  if (!obj) {
+    return { doc: next, reason: 'Item is not in the garden.' };
+  }
+
+  for (const pid of [...obj.measuredPointIds]) {
+    const result = deletePointMeasurement(next, pid);
+    if (result.reason && next.points.some((p) => p.id === pid)) {
+      return { doc: next, reason: result.reason };
+    }
+    next = result.doc;
+  }
+
+  const wasSticky = next.session.stickyObjectId === objectId;
+  next = {
+    ...next,
+    objects: (next.objects ?? []).filter((o) => o.id !== objectId),
+    session: {
+      ...next.session,
+      stickyObjectId: wasSticky ? undefined : next.session.stickyObjectId,
+      stickyObjectName: wasSticky ? undefined : next.session.stickyObjectName,
+      inspectingPointId: undefined,
+      lastAction: `Deleted item “${obj.name}”`,
+      mode: 'MENU',
+    },
+  };
+  return { doc: next };
+}
+
+/** Delete a layer and cascade its items (and their points). Keep ≥1 layer. */
+export function deleteLayerMeasurement(
+  doc: GardenDocument,
+  layerId: string,
+): { doc: GardenDocument; reason?: string } {
+  let next = ensureDefaultLayers(doc);
+  if (next.layers.length <= 1) {
+    return { doc: next, reason: 'Keep at least one layer.' };
+  }
+  if (!next.layers.some((l) => l.id === layerId)) {
+    return { doc: next, reason: 'Layer is not in the garden.' };
+  }
+
+  const items = objectsOnLayer(next, layerId);
+  for (const item of items) {
+    const result = deleteObjectMeasurement(next, item.id);
+    if (result.reason) {
+      return { doc: next, reason: result.reason };
+    }
+    next = result.doc;
+  }
+
+  const remaining = next.layers.filter((l) => l.id !== layerId);
+  const fallback = remaining[0]!;
+  const wasSticky = next.session.stickyLayerId === layerId;
+  next = {
+    ...next,
+    layers: remaining,
+    session: {
+      ...next.session,
+      stickyLayerId: wasSticky ? fallback.id : next.session.stickyLayerId,
+      stickyObjectId: wasSticky ? undefined : next.session.stickyObjectId,
+      stickyObjectName: wasSticky ? undefined : next.session.stickyObjectName,
+      inspectingPointId: undefined,
+      lastAction: `Deleted layer ${layerId}`,
+      mode: 'MENU',
+    },
+  };
+  return { doc: next };
 }
 
 function estimateNextPointCoords(

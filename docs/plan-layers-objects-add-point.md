@@ -1,4 +1,6 @@
-# Plan — Layers, objects, and simplified “Add point”
+# Plan — Layers, items, and simplified “Add point”
+
+> **UI (0.7.16+):** user-facing word is **Item** (was Object). Model JSON still uses `objects` / `GardenObject` / `stickyObjectId` — rename later if needed. Dialog stack: **Garden → Layer → Item → Point** with +/−.
 
 **Status:** **approved** (with refinements below) — implementing.
 
