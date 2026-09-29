@@ -14,6 +14,7 @@ Hamburger **concertina** rows show state at a glance via a **small status icon t
 - **Sign in** row: collapsed label **Sign in**; inline **garden loaded** + green when signed in and garden present; orange when not signed in / no garden; red only for real errors
 - **Baseline** row: collapsed **Baseline** + point ids (`A — B`) + green/orange icon (never red for “not set”)
 - Align with red **☰** badge for unseen errors (global attention); per-row colour is section-local status
+- **Error log**: error lines in red; tap a red line to acknowledge and clear the ☰ warning (entries stay). Info lines use default text colour and do not keep ☰ red.
 
 ## Don’t
 - Put long OneDrive / Microsoft wording in the collapsed title
