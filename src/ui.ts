@@ -250,7 +250,7 @@ function displayedChromeMode(): string {
 /** Picker entries — real session modes + Menu idle chrome. */
 const MODE_PICKER: { value: string; label: string }[] = [
   { value: 'MENU', label: 'Menu' },
-  { value: 'BASELINE', label: 'Establish baseline' },
+  { value: 'BASELINE', label: 'Baseline' },
   { value: 'PHOTO_TIE_BASELINE', label: 'Baseline photo tie' },
   { value: 'HOUSE_EDGES', label: 'Measure house edges' },
   { value: 'ADD_POINT', label: '+ Point' },
@@ -261,17 +261,18 @@ const MODE_PICKER: { value: string; label: string }[] = [
   { value: 'REVIEW', label: 'Review' },
 ];
 
-function buildModePicker(doc: GardenDocument): HTMLElement {
+function modeSectionStatus(): { tone: 'idle'; inline: string } {
+  const current = displayedChromeMode();
+  return {
+    tone: 'idle',
+    // Closed: Mode  Menu / Mode  + Point …
+    inline: MODE_PICKER.find((m) => m.value === current)?.label ?? current,
+  };
+}
+
+function buildModePicker(_doc: GardenDocument): HTMLElement {
   const body = el('div', { className: 'menu-acc__body', attrs: { 'data-testid': 'mode-panel' } });
   const current = displayedChromeMode();
-  const label = MODE_PICKER.find((m) => m.value === current)?.label ?? current;
-  body.appendChild(
-    el('p', {
-      className: 'menu-acc__meta',
-      text: `Current: ${label}`,
-      attrs: { 'data-testid': 'menu-mode-label' },
-    }),
-  );
   const sel = el('select', {
     className: 'menu-mode-select',
     attrs: {
@@ -1861,7 +1862,7 @@ function buildMenuDrawer(
   panel.appendChild(quick);
 
   // —— Top: Mode + Version (near top of concertina) ——
-  panel.appendChild(menuAccordion('mode', 'Mode', buildModePicker(doc)));
+  panel.appendChild(menuAccordion('mode', 'Mode', buildModePicker(doc), modeSectionStatus()));
 
   const versionBody = el('div', {
     className: 'menu-acc__body',
