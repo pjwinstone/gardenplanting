@@ -536,16 +536,34 @@ body {
   padding: 0;
   background: #d8d0c0;
   min-height: 100vh;
+  min-height: 100dvh;
   border: none;
+  position: relative;
+  overflow: hidden;
+  /* Plan gestures live here — do not cascade transform to fixed chrome. */
+  touch-action: none;
+  overscroll-behavior: none;
 }
 
 .plan--backdrop h2 {
   display: none;
 }
 
+.plan__viewport {
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
 .plan__svg--full {
   width: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
+  border: none;
+  background: transparent;
 }
 
 .plan__svg--full svg {
@@ -553,6 +571,8 @@ body {
   width: 100%;
   height: auto;
   min-height: 100vh;
+  min-height: 100dvh;
+  pointer-events: auto;
 }
 
 .survey-below {
@@ -814,6 +834,13 @@ body {
   min-height: 2.5rem;
   padding: 0.45rem 0.85rem;
   touch-action: manipulation;
+}
+
+.point-dialog__capture-btn.btn--suggested {
+  background: var(--moss);
+  color: #f6f1e6;
+  border-color: var(--moss);
+  box-shadow: 0 0 0 2px #c5d9c8;
 }
 
 .point-dialog__photo-strip {

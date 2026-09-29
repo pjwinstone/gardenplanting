@@ -123,27 +123,33 @@ export function renderPlanSvg(doc: GardenDocument, width = 720, height = 560): s
 
   const pointEls = pts
     .map((p) => {
+      const isScatter = p.kind === 'OCC' || p.kind === 'BED';
       const colour =
         p.kind === 'HSE'
           ? '#3d3428'
           : p.kind === 'ROD'
             ? '#8b1e1e'
-            : p.kind === 'OCC' || p.kind === 'BED'
+            : isScatter
               ? '#1a5f7a'
               : '#5a5348';
       const isActiveEnd = p.id === ends.a || p.id === ends.b;
       const isInspect = p.id === inspecting;
-      const r = isInspect ? 7 : isActiveEnd ? 6 : p.kind === 'ROD' ? 5 : 4;
+      const r = isInspect ? 8 : isActiveEnd ? 7 : isScatter ? 6 : p.kind === 'ROD' ? 5 : 4;
       const ring = isInspect
-        ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 4}" fill="none" stroke="#c45c26" stroke-width="2"/>`
+        ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 5}" fill="none" stroke="#c45c26" stroke-width="2.5"/>`
         : isActiveEnd
           ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 3}" fill="none" stroke="#c45c26" stroke-width="1.5"/>`
-          : '';
-      return `<g class="plan-point" data-point-id="${escapeXml(p.id)}" data-cmd="inspect-point" style="cursor:pointer">
+          : isScatter
+            ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 2}" fill="none" stroke="#fffdf8" stroke-width="1.5" opacity="0.95"/>`
+            : '';
+      const label = isScatter
+        ? `<text x="${tx(p.x!) + 9}" y="${ty(p.y!) - 9}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" font-weight="600" fill="#1a5f7a">${escapeXml(p.id)}</text>`
+        : `<text x="${tx(p.x!) + 8}" y="${ty(p.y!) - 8}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="#2a241c">${escapeXml(p.id)}</text>`;
+      return `<g class="plan-point${isScatter ? ' plan-point--scatter' : ''}" data-point-id="${escapeXml(p.id)}" data-cmd="inspect-point" style="cursor:pointer">
         ${ring}
-        <circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 8}" fill="transparent"/>
-        <circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r}" fill="${colour}"/>
-        <text x="${tx(p.x!) + 8}" y="${ty(p.y!) - 8}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="#2a241c">${escapeXml(p.id)}</text>
+        <circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 10}" fill="transparent"/>
+        <circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r}" fill="${colour}" stroke="${isScatter ? '#0d3a4a' : 'none'}" stroke-width="${isScatter ? 1 : 0}"/>
+        ${label}
       </g>`;
     })
     .join('\n');

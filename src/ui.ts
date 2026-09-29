@@ -123,6 +123,11 @@ type Listener = () => void;
  *  Default keeps clear of the bottom-right hamburger. */
 let pointDialogPos = { x: 12, y: 56 };
 
+/** Plan canvas pan/zoom — applied only to `.plan__viewport`, never to fixed chrome. */
+let planView = { scale: 1, x: 0, y: 0 };
+const PLAN_SCALE_MIN = 0.55;
+const PLAN_SCALE_MAX = 6;
+
 const SEEN_BUILD_KEY = 'garden-survey-seen-build';
 
 function currentBuildKey(): string {
@@ -1142,15 +1147,26 @@ function buildSurveyView(): HTMLElement {
 
   const plan = el('section', {
     className: 'plan plan--backdrop',
-    attrs: { 'aria-label': 'Garden plan' },
+    attrs: {
+      'aria-label': 'Garden plan',
+      'data-testid': 'plan-canvas',
+    },
   });
+  // Transform target is the viewport only — hamburger / dialogs stay position:fixed siblings.
+  const viewport = el('div', {
+    className: 'plan__viewport',
+    attrs: { 'data-testid': 'plan-viewport' },
+  });
+  applyPlanTransform(viewport);
   const planHost = el('div', {
     className: 'plan__svg plan__svg--full',
     attrs: { 'data-testid': 'plan-svg' },
   });
   planHost.innerHTML = renderPlanSvg(doc, 960, 720);
-  plan.appendChild(planHost);
+  viewport.appendChild(planHost);
+  plan.appendChild(viewport);
   wrap.appendChild(plan);
+  attachPlanGestures(plan, viewport);
 
   // Plan chrome: bottom-right hamburger only (+ translucent point dialogue when open).
   wrap.appendChild(buildHamburgerButton());
@@ -1176,6 +1192,144 @@ function buildSurveyView(): HTMLElement {
   }
 
   return wrap;
+}
+
+function applyPlanTransform(viewport: HTMLElement): void {
+  viewport.style.transform = `translate(${planView.x}px, ${planView.y}px) scale(${planView.scale})`;
+}
+
+/** Pinch / wheel zoom + one-finger pan on the plan canvas only. */
+function attachPlanGestures(surface: HTMLElement, viewport: HTMLElement): void {
+  let pointers = new Map<number, { x: number; y: number }>();
+  let panOrigin: { x: number; y: number; viewX: number; viewY: number } | null = null;
+  let pinchOrigin:
+    | { dist: number; scale: number; midX: number; midY: number; viewX: number; viewY: number }
+    | null = null;
+  let moved = false;
+
+  const pointOf = (ev: PointerEvent) => ({ x: ev.clientX, y: ev.clientY });
+
+  const onPointerDown = (ev: PointerEvent) => {
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    // Leave dialog / menu / hamburger alone — they are not under this surface.
+    pointers.set(ev.pointerId, pointOf(ev));
+    surface.setPointerCapture(ev.pointerId);
+    moved = false;
+    if (pointers.size === 1) {
+      const p = pointers.values().next().value!;
+      panOrigin = { x: p.x, y: p.y, viewX: planView.x, viewY: planView.y };
+      pinchOrigin = null;
+    } else if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      pinchOrigin = {
+        dist,
+        scale: planView.scale,
+        midX: (a.x + b.x) / 2,
+        midY: (a.y + b.y) / 2,
+        viewX: planView.x,
+        viewY: planView.y,
+      };
+      panOrigin = null;
+    }
+  };
+
+  const onPointerMove = (ev: PointerEvent) => {
+    if (!pointers.has(ev.pointerId)) return;
+    pointers.set(ev.pointerId, pointOf(ev));
+    if (pointers.size === 2 && pinchOrigin) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      const midX = (a.x + b.x) / 2;
+      const midY = (a.y + b.y) / 2;
+      const nextScale = clampPlanScale(pinchOrigin.scale * (dist / pinchOrigin.dist));
+      // Keep the pinch midpoint stable in screen space.
+      const ratio = nextScale / pinchOrigin.scale;
+      planView = {
+        scale: nextScale,
+        x: midX - (pinchOrigin.midX - pinchOrigin.viewX) * ratio,
+        y: midY - (pinchOrigin.midY - pinchOrigin.viewY) * ratio,
+      };
+      applyPlanTransform(viewport);
+      moved = true;
+      ev.preventDefault();
+      return;
+    }
+    if (pointers.size === 1 && panOrigin) {
+      const p = pointers.values().next().value!;
+      const dx = p.x - panOrigin.x;
+      const dy = p.y - panOrigin.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      if (moved) {
+        planView = { ...planView, x: panOrigin.viewX + dx, y: panOrigin.viewY + dy };
+        applyPlanTransform(viewport);
+        ev.preventDefault();
+      }
+    }
+  };
+
+  const onPointerUp = (ev: PointerEvent) => {
+    pointers.delete(ev.pointerId);
+    try {
+      surface.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* already released */
+    }
+    if (pointers.size === 0) {
+      panOrigin = null;
+      pinchOrigin = null;
+    } else if (pointers.size === 1) {
+      const p = pointers.values().next().value!;
+      panOrigin = { x: p.x, y: p.y, viewX: planView.x, viewY: planView.y };
+      pinchOrigin = null;
+    }
+  };
+
+  const onWheel = (ev: WheelEvent) => {
+    ev.preventDefault();
+    const rect = surface.getBoundingClientRect();
+    const mx = ev.clientX - rect.left;
+    const my = ev.clientY - rect.top;
+    const factor = ev.deltaY < 0 ? 1.08 : 1 / 1.08;
+    const nextScale = clampPlanScale(planView.scale * factor);
+    const ratio = nextScale / planView.scale;
+    planView = {
+      scale: nextScale,
+      x: mx - (mx - planView.x) * ratio,
+      y: my - (my - planView.y) * ratio,
+    };
+    applyPlanTransform(viewport);
+  };
+
+  surface.addEventListener('pointerdown', onPointerDown);
+  surface.addEventListener('pointermove', onPointerMove);
+  surface.addEventListener('pointerup', onPointerUp);
+  surface.addEventListener('pointercancel', onPointerUp);
+  surface.addEventListener('wheel', onWheel, { passive: false });
+
+  // Double-click resets pan/zoom (dialogs/hamburger are outside this surface).
+  surface.addEventListener('dblclick', (ev) => {
+    planView = { scale: 1, x: 0, y: 0 };
+    applyPlanTransform(viewport);
+    ev.preventDefault();
+  });
+
+  // Suppress click-through after a pan/pinch so inspect-point doesn't fire accidentally.
+  surface.addEventListener(
+    'click',
+    (ev) => {
+      if (moved) {
+        ev.stopPropagation();
+        ev.preventDefault();
+        moved = false;
+      }
+    },
+    true,
+  );
+}
+
+function clampPlanScale(s: number): number {
+  return Math.min(PLAN_SCALE_MAX, Math.max(PLAN_SCALE_MIN, s));
 }
 
 /** Floating hamburger — red while unseen errors remain. */
@@ -1920,16 +2074,19 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
 
   dialog.appendChild(stack);
 
-  // Photo capture + thumb strip
+  // Photo capture + thumb strip — capture immediately adds/attaches (autosave via setDoc).
   const photosSection = el('div', {
     className: 'point-dialog__photos',
     attrs: { 'data-testid': 'point-photos' },
   });
   const captureRow = el('div', { className: 'point-dialog__capture' });
   const captureLabel = el('label', {
-    className: 'btn btn--util point-dialog__capture-btn',
+    className: 'btn btn--suggested point-dialog__capture-btn',
     text: 'Photo',
-    attrs: { 'data-testid': 'capture-photo', title: 'Take or choose photo' },
+    attrs: {
+      'data-testid': 'capture-photo',
+      title: mode === 'inspect' ? 'Add photo to this point' : 'Take photo → add point',
+    },
   });
   const fileInput = el('input', {
     attrs: {
@@ -1955,9 +2112,31 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
           }
           setDoc(result.doc, null);
           setState({ pointDialog: 'inspect', pendingPointThumb: null });
+          speakCoachLine(
+            result.doc.session.lastAction ?? 'Photo added.',
+            result.doc.session.speakSteps,
+          );
           return;
         }
-        setState({ pendingPointThumb: thumb });
+        // Add mode: capture immediately creates the point (no second confirm).
+        const result = workflowAddPoint(state.doc, { thumbnailDataUrl: thumb });
+        if (!result.ok) {
+          surfaceFail(result.reason, 'add-point');
+          setDoc(result.doc, result.reason);
+          setState({ pointDialog: 'add', menuOpen: false, pendingPointThumb: null });
+          return;
+        }
+        setDoc(result.doc, null);
+        setState({
+          pointDialog: 'add',
+          menuOpen: false,
+          openErrorLog: false,
+          pendingPointThumb: null,
+        });
+        speakCoachLine(
+          result.doc.session.lastAction ?? 'Point added.',
+          result.doc.session.speakSteps,
+        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Could not read photo.';
         surfaceFail(msg, 'photo');
@@ -1996,17 +2175,14 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
 
   const strip = el('ul', { className: 'point-dialog__photo-strip' });
   let hasThumb = false;
-  if (state.pendingPointThumb) {
-    hasThumb = true;
-    const li = el('li', { className: 'point-dialog__thumb point-dialog__thumb--pending' });
-    const img = document.createElement('img');
-    img.src = state.pendingPointThumb;
-    img.alt = 'Pending photo';
-    li.appendChild(img);
-    strip.appendChild(li);
-  }
-  if (pt) {
-    const photos = (pt.photoIds ?? [])
+  // In add mode, show thumbs from the most recently placed point (currentAddPointId).
+  const thumbPoint =
+    pt ??
+    (doc.session.currentAddPointId
+      ? doc.points.find((p) => p.id === doc.session.currentAddPointId)
+      : undefined);
+  if (thumbPoint) {
+    const photos = (thumbPoint.photoIds ?? [])
       .map((id) => doc.photos.find((p) => p.id === id))
       .filter(Boolean);
     for (const ph of photos) {
@@ -2391,7 +2567,8 @@ function buildMenuDrawer(
     ['Layer', 'Grouping plane for items (e.g. walkway, bed).'],
     ['Item', 'Named thing you measure points on.'],
     ['Geometry', 'Shape hint for the item (square, circle, …).'],
-    ['Photo', 'Rear-camera capture stored on the point (marks later).'],
+    ['Photo', 'Rear camera — capture immediately adds the point (or attaches in inspect).'],
+    ['Pinch / pan', 'Zooms and pans the garden plan only; dialogs and ☰ stay fixed.'],
     ['Menu', 'Idle mode when no workflow dialog is open.'],
   ];
   const dl = el('dl', { className: 'glossary__list' });
