@@ -434,11 +434,11 @@ export function deletePointMeasurement(
   return { doc: next };
 }
 
-/** Attach a real photo thumbnail to an existing measured point (inspect path). */
+/** Attach a real photo thumbnail to an existing measured point (inspect / + Photo path). */
 export function appendPhotoToPoint(
   doc: GardenDocument,
   pointId: string,
-  opts: { thumbnailDataUrl: string },
+  opts: { thumbnailDataUrl: string; yawOnly?: boolean },
 ): { doc: GardenDocument; reason?: string } {
   let next = ensureDefaultLayers(doc);
   const point = next.points.find((p) => p.id === pointId);
@@ -451,15 +451,17 @@ export function appendPhotoToPoint(
 
   const photoId = `ph-${Date.now().toString(36)}`;
   const setupId = next.session.currentSetupId ?? next.setups[0]?.id ?? 'setup-1';
+  const yawOnly = Boolean(opts.yawOnly);
   const photo = {
     id: photoId,
     setupId,
     addPointId: pointId,
+    yawOnly,
     width: 1200,
     height: 900,
     clicks: [],
     thumbnailDataUrl: opts.thumbnailDataUrl,
-    note: `Photo for ${pointId}`,
+    note: yawOnly ? `+ Photo (yaw) for ${pointId}` : `Photo for ${pointId}`,
   };
 
   next = {
@@ -473,7 +475,9 @@ export function appendPhotoToPoint(
     session: {
       ...next.session,
       inspectingPointId: pointId,
-      lastAction: `Photo added to ${pointId}`,
+      currentAddPointId: pointId,
+      mode: yawOnly ? 'ADD_POINT_EXTRA_YAW' : next.session.mode,
+      lastAction: yawOnly ? `+ Photo (yaw) → ${pointId}` : `Photo added to ${pointId}`,
     },
   };
   return { doc: next };

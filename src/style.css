@@ -863,8 +863,8 @@ body {
   background: rgba(255, 253, 248, 0.55);
 }
 
-.point-dialog__thumb--pending {
-  outline: 2px solid var(--moss);
+.point-dialog__thumb--yaw {
+  outline: 1px dashed var(--clay);
   outline-offset: 1px;
 }
 

@@ -128,6 +128,118 @@ let planView = { scale: 1, x: 0, y: 0 };
 const PLAN_SCALE_MIN = 0.55;
 const PLAN_SCALE_MAX = 6;
 
+/** Persistent file inputs — must .click() inside the same user gesture (iPhone). */
+let newPointFileInput: HTMLInputElement | null = null;
+let againPhotoFileInput: HTMLInputElement | null = null;
+
+function ensureHiddenCaptureInput(
+  existing: HTMLInputElement | null,
+  onFile: (file: File) => void,
+): HTMLInputElement {
+  if (existing && existing.isConnected) return existing;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.setAttribute('capture', 'environment');
+  input.hidden = true;
+  input.setAttribute('aria-hidden', 'true');
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) onFile(file);
+  });
+  document.body.appendChild(input);
+  return input;
+}
+
+function launchNewPointCamera(): void {
+  newPointFileInput = ensureHiddenCaptureInput(newPointFileInput, (file) => {
+    void handleNewPointCapture(file);
+  });
+  newPointFileInput.click();
+}
+
+function launchAgainPhotoCamera(pointId: string): void {
+  againPhotoFileInput = ensureHiddenCaptureInput(againPhotoFileInput, (file) => {
+    void handleAgainPhotoCapture(pointId, file);
+  });
+  againPhotoFileInput.click();
+}
+
+async function handleNewPointCapture(file: File): Promise<void> {
+  try {
+    const thumb = await fileToThumbnailDataUrl(file);
+    // Ensure + Point dialog / ADD_POINT mode is active before placing.
+    if (state.pointDialog !== 'add') {
+      // Soft-open add chrome without a second camera launch.
+      const base =
+        state.doc.session.inspectingPointId != null
+          ? {
+              ...state.doc,
+              session: { ...state.doc.session, inspectingPointId: undefined },
+            }
+          : state.doc;
+      const doc =
+        base.session.mode === 'ADD_POINT' || base.session.mode === 'ADD_POINT_EXTRA_YAW'
+          ? base
+          : { ...base, session: { ...base.session, mode: 'ADD_POINT' as const } };
+      setState({
+        doc,
+        pointDialog: 'add',
+        menuOpen: false,
+        openErrorLog: false,
+        refuseMessage: null,
+        pendingPointThumb: null,
+      });
+    }
+    const result = workflowAddPoint(state.doc, { thumbnailDataUrl: thumb });
+    if (!result.ok) {
+      surfaceFail(result.reason, 'add-point');
+      setDoc(result.doc, result.reason);
+      setState({ pointDialog: 'add', menuOpen: false, pendingPointThumb: null });
+      return;
+    }
+    setDoc(result.doc, null);
+    setState({
+      pointDialog: 'add',
+      menuOpen: false,
+      openErrorLog: false,
+      pendingPointThumb: null,
+    });
+    speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Could not read photo.';
+    surfaceFail(msg, 'photo');
+  }
+}
+
+async function handleAgainPhotoCapture(pointId: string, file: File): Promise<void> {
+  try {
+    const thumb = await fileToThumbnailDataUrl(file);
+    const result = appendPhotoToPoint(state.doc, pointId, {
+      thumbnailDataUrl: thumb,
+      yawOnly: true,
+    });
+    if (result.reason) {
+      surfaceFail(result.reason, 'photo');
+      return;
+    }
+    setDoc(result.doc, null);
+    setState({
+      pointDialog: 'inspect',
+      pendingPointThumb: null,
+      menuOpen: false,
+    });
+    speakCoachLine(
+      result.doc.session.lastAction ?? `+ Photo on ${pointId}.`,
+      result.doc.session.speakSteps,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Could not read photo.';
+    surfaceFail(msg, 'photo');
+  }
+}
+
 const SEEN_BUILD_KEY = 'garden-survey-seen-build';
 
 function currentBuildKey(): string {
@@ -198,8 +310,10 @@ function closePointDialog(): void {
   });
 }
 
-/** Enter ADD_POINT when legal, then open the on-plan dialogue with sticky defaults. */
-function startAddPointDialog(): void {
+/** Enter ADD_POINT when legal, then open the on-plan dialogue with sticky defaults.
+ *  `launchCamera` (default true) opens the rear camera in the same user gesture. */
+function startAddPointDialog(opts: { launchCamera?: boolean } = {}): void {
+  const launchCamera = opts.launchCamera !== false;
   const legal = new Set(legalActions(state.doc));
   if (
     legal.has('add_point') &&
@@ -220,8 +334,10 @@ function startAddPointDialog(): void {
           menuOpen: false,
           pointDialog: 'add',
           openErrorLog: false,
+          pendingPointThumb: null,
         });
         speakCoachLine(buildCoach(cleared).body[0] ?? '', cleared.session.speakSteps);
+        if (launchCamera) launchNewPointCamera();
         return;
       }
     }
@@ -244,7 +360,9 @@ function startAddPointDialog(): void {
     menuOpen: false,
     openErrorLog: false,
     refuseMessage: null,
+    pendingPointThumb: null,
   });
+  if (launchCamera) launchNewPointCamera();
 }
 
 /** Mode shown in the Mode picker — Menu when no workflow dialog is active. */
@@ -698,23 +816,29 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'add-photo') {
-    const result = workflowAddPoint(state.doc, {
-      thumbnailDataUrl: state.pendingPointThumb ?? undefined,
-    });
-    if (!result.ok) {
-      surfaceFail(result.reason, 'add-point');
-      setDoc(result.doc, result.reason);
-      setState({ pointDialog: 'add', menuOpen: false });
+    // Hierarchy Point + / legacy testid: always a **new** point → camera immediately.
+    startAddPointDialog({ launchCamera: true });
+    return;
+  }
+  if (cmd === 'again-photo') {
+    const pointId =
+      state.doc.session.inspectingPointId ?? state.doc.session.currentAddPointId;
+    if (!pointId) {
+      surfaceFail('Select a point first, then + Photo for another shot here.', 'photo');
       return;
     }
-    setDoc(result.doc, null);
-    setState({
-      pointDialog: 'add',
-      menuOpen: false,
-      openErrorLog: false,
-      pendingPointThumb: null,
-    });
-    speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
+    // Keep inspect open on this point; camera attaches yaw/same-station photo.
+    if (state.pointDialog !== 'inspect' || state.doc.session.inspectingPointId !== pointId) {
+      setState({
+        doc: {
+          ...state.doc,
+          session: { ...state.doc.session, inspectingPointId: pointId },
+        },
+        pointDialog: 'inspect',
+        menuOpen: false,
+      });
+    }
+    launchAgainPhotoCamera(pointId);
     return;
   }
   if (cmd === 'delete-point') {
@@ -2027,34 +2151,21 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   );
   pointRow.appendChild(pointMain);
   const pointOps = el('div', { className: 'hier-row__ops' });
-  if (mode === 'add') {
-    pointOps.appendChild(
-      el('button', {
-        className: 'btn btn--hier btn--suggested',
-        text: '+',
-        attrs: {
-          type: 'button',
-          'data-cmd': 'add-photo',
-          'data-testid': 'add-photo',
-          'aria-label': '+ Point',
-          title: '+ Point',
-        },
-      }),
-    );
-  } else {
-    pointOps.appendChild(
-      el('button', {
-        className: 'btn btn--hier btn--suggested',
-        text: '+',
-        attrs: {
-          type: 'button',
-          'data-cmd': 'open-point-dialog',
-          'data-testid': 'inspect-plus-point',
-          'aria-label': '+ Point',
-          title: '+ Point',
-        },
-      }),
-    );
+  // + always means a **new** point (opens camera).
+  pointOps.appendChild(
+    el('button', {
+      className: 'btn btn--hier btn--suggested',
+      text: '+',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'add-photo',
+        'data-testid': 'add-photo',
+        'aria-label': '+ Point — new point',
+        title: '+ Point',
+      },
+    }),
+  );
+  if (mode === 'inspect' && pt) {
     pointOps.appendChild(
       el('button', {
         className: 'btn btn--hier btn--danger',
@@ -2074,77 +2185,28 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
 
   dialog.appendChild(stack);
 
-  // Photo capture + thumb strip — capture immediately adds/attaches (autosave via setDoc).
+  // Photos: + Photo = same-station / yaw (inspect or after a point exists). Thumbs strip.
   const photosSection = el('div', {
     className: 'point-dialog__photos',
     attrs: { 'data-testid': 'point-photos' },
   });
   const captureRow = el('div', { className: 'point-dialog__capture' });
-  const captureLabel = el('label', {
-    className: 'btn btn--suggested point-dialog__capture-btn',
-    text: 'Photo',
-    attrs: {
-      'data-testid': 'capture-photo',
-      title: mode === 'inspect' ? 'Add photo to this point' : 'Take photo → add point',
-    },
-  });
-  const fileInput = el('input', {
-    attrs: {
-      type: 'file',
-      accept: 'image/*',
-      capture: 'environment',
-      hidden: 'true',
-      'aria-label': 'Capture photo',
-    },
-  }) as HTMLInputElement;
-  fileInput.addEventListener('change', () => {
-    void (async () => {
-      const file = fileInput.files?.[0];
-      fileInput.value = '';
-      if (!file) return;
-      try {
-        const thumb = await fileToThumbnailDataUrl(file);
-        if (mode === 'inspect' && inspectingId) {
-          const result = appendPhotoToPoint(state.doc, inspectingId, { thumbnailDataUrl: thumb });
-          if (result.reason) {
-            surfaceFail(result.reason, 'photo');
-            return;
-          }
-          setDoc(result.doc, null);
-          setState({ pointDialog: 'inspect', pendingPointThumb: null });
-          speakCoachLine(
-            result.doc.session.lastAction ?? 'Photo added.',
-            result.doc.session.speakSteps,
-          );
-          return;
-        }
-        // Add mode: capture immediately creates the point (no second confirm).
-        const result = workflowAddPoint(state.doc, { thumbnailDataUrl: thumb });
-        if (!result.ok) {
-          surfaceFail(result.reason, 'add-point');
-          setDoc(result.doc, result.reason);
-          setState({ pointDialog: 'add', menuOpen: false, pendingPointThumb: null });
-          return;
-        }
-        setDoc(result.doc, null);
-        setState({
-          pointDialog: 'add',
-          menuOpen: false,
-          openErrorLog: false,
-          pendingPointThumb: null,
-        });
-        speakCoachLine(
-          result.doc.session.lastAction ?? 'Point added.',
-          result.doc.session.speakSteps,
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Could not read photo.';
-        surfaceFail(msg, 'photo');
-      }
-    })();
-  });
-  captureLabel.appendChild(fileInput);
-  captureRow.appendChild(captureLabel);
+  const againPointId = pt?.id ?? doc.session.currentAddPointId;
+  if (againPointId) {
+    captureRow.appendChild(
+      el('button', {
+        className: 'btn btn--util point-dialog__capture-btn',
+        text: '+ Photo',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'again-photo',
+          'data-testid': 'again-photo',
+          'aria-label': 'Another photo on this point',
+          title: 'Again — same station, yaw only',
+        },
+      }),
+    );
+  }
   if (mode === 'inspect' || doc.session.stickyObjectId) {
     captureRow.appendChild(
       el('button', {
@@ -2175,7 +2237,6 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
 
   const strip = el('ul', { className: 'point-dialog__photo-strip' });
   let hasThumb = false;
-  // In add mode, show thumbs from the most recently placed point (currentAddPointId).
   const thumbPoint =
     pt ??
     (doc.session.currentAddPointId
@@ -2188,11 +2249,14 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
     for (const ph of photos) {
       if (!ph?.thumbnailDataUrl) continue;
       hasThumb = true;
-      const li = el('li', { className: 'point-dialog__thumb' });
+      const li = el('li', {
+        className:
+          'point-dialog__thumb' + (ph!.yawOnly ? ' point-dialog__thumb--yaw' : ''),
+      });
       const img = document.createElement('img');
-      img.src = ph.thumbnailDataUrl;
-      img.alt = ph.id;
-      img.title = ph.note ?? ph.id;
+      img.src = ph!.thumbnailDataUrl;
+      img.alt = ph!.id;
+      img.title = ph!.note ?? ph!.id;
       li.appendChild(img);
       strip.appendChild(li);
     }
@@ -2558,16 +2622,17 @@ function buildMenuDrawer(
     attrs: { 'data-testid': 'glossary' },
   });
   const glossary: Array<[string, string]> = [
-    ['+ Point', 'New measurement on the current item.'],
+    ['+ Point', 'New measurement — opens the camera; photo places the point.'],
     ['+ Item', 'New named thing on the current layer.'],
     ['+ Layer', 'New grouping plane in this garden.'],
+    ['+ Photo', 'Another photo on the **current** point (yaw / same station).'],
     ['− Point / Item / Layer', 'Delete that level (confirm when destructive).'],
     ['Baseline', 'Control segment used for measurements.'],
     ['Garden', 'This survey document (single garden for now).'],
     ['Layer', 'Grouping plane for items (e.g. walkway, bed).'],
     ['Item', 'Named thing you measure points on.'],
     ['Geometry', 'Shape hint for the item (square, circle, …).'],
-    ['Photo', 'Rear camera — capture immediately adds the point (or attaches in inspect).'],
+    ['Photo', 'Rear camera on + Point places a new point; + Photo repeats here.'],
     ['Pinch / pan', 'Zooms and pans the garden plan only; dialogs and ☰ stay fixed.'],
     ['Menu', 'Idle mode when no workflow dialog is open.'],
   ];
@@ -2897,9 +2962,43 @@ function onModeAction(action: ModeAction): void {
     return;
   }
 
-  // + Point always dismisses the hamburger and opens the on-plan dialog.
+  // + Point always dismisses the hamburger, opens the on-plan dialog, and launches camera.
   if (action === 'add_point') {
-    startAddPointDialog();
+    startAddPointDialog({ launchCamera: true });
+    return;
+  }
+
+  // Same-station extra photo — camera attaches to current point (not a new point).
+  if (action === 'another_photo_yaw') {
+    const pointId =
+      state.doc.session.currentAddPointId ?? state.doc.session.inspectingPointId;
+    if (!pointId) {
+      surfaceFail(
+        'No current point yet. + Point first, then + Photo for another shot here.',
+        'photo',
+      );
+      return;
+    }
+    const probe = canTransition(doc, action);
+    if (!probe.ok) {
+      surfaceFail(probe.reason ?? 'Illegal transition.', 'mode');
+      speakCoachLine(probe.reason ?? '', doc.session.speakSteps);
+      return;
+    }
+    const { doc: next, result } = applyTransition(doc, action);
+    if (!result.ok) {
+      surfaceFail(result.reason ?? 'Illegal transition.', 'mode');
+      return;
+    }
+    setDoc(
+      {
+        ...next,
+        session: { ...next.session, inspectingPointId: pointId },
+      },
+      null,
+    );
+    setState({ pointDialog: 'inspect', menuOpen: false, openErrorLog: false });
+    launchAgainPhotoCamera(pointId);
     return;
   }
 

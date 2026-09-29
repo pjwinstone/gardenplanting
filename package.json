@@ -1,12 +1,13 @@
 {
   "name": "garden-survey",
   "private": true,
-  "version": "0.7.17",
+  "version": "0.7.18",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:field-circle": "node scripts/check-field-circle-baseline.mjs"
   },
   "devDependencies": {
     "puppeteer": "^24.15.0",

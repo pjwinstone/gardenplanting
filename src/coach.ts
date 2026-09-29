@@ -48,7 +48,7 @@ const MODE_COACH: Record<string, string> = {
   HOUSE_EDGES:
     'Grow the house polygon — tape the next reachable edge, photo-tie another corner, or leapfrog for the far side. Close house when you have enough corners.',
   ADD_POINT:
-    'Observe this item. Pick baseline, layer, name, geometry — then + Point.',
+    'Spike the station. + Point opens the camera — the photo places the point. Use + Photo for another shot without stepping.',
   ADD_POINT_EXTRA_YAW:
     'Same point — only yaw. Do not step.',
   LEAPFROG:
