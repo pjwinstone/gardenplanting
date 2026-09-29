@@ -11,7 +11,12 @@ export function appBuild(): string {
   return raw.slice(0, 7);
 }
 
-/** e.g. `Build 0.2.0 · abc1234` */
+/** Collapsed menu concertina title — version only, no SHA. */
+export function buildMenuTitle(): string {
+  return `Build ${appVersion()}`;
+}
+
+/** Opened body — full stamp with git SHA (once). */
 export function buildStamp(): string {
-  return `Build ${appVersion()} · ${appBuild()}`;
+  return `${buildMenuTitle()} · ${appBuild()}`;
 }

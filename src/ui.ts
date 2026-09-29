@@ -22,7 +22,7 @@ import {
   setLastSaveIso,
   subscribeCloud,
 } from './cloudStatus';
-import { appBuild, appVersion, buildStamp } from './buildInfo';
+import { appBuild, appVersion, buildMenuTitle, buildStamp } from './buildInfo';
 import { STAGE2_FIELD_STEPS } from './stage2Checklist';
 import {
   clearErrorLog,
@@ -1861,13 +1861,7 @@ function buildMenuDrawer(
       attrs: { 'data-testid': 'build-stamp' },
     }),
   );
-  versionBody.appendChild(
-    el('p', {
-      className: 'menu-acc__meta',
-      text: `Version ${appVersion()} · build ${appBuild()}`,
-    }),
-  );
-  panel.appendChild(menuAccordion('version', 'Build / version', versionBody));
+  panel.appendChild(menuAccordion('version', buildMenuTitle(), versionBody));
 
   // —— Workflows ——
   panel.appendChild(menuAccordion('recommend', 'Recommended next', buildRecommendBody(doc, coach, legal)));
