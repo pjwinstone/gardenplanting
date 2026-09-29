@@ -1402,7 +1402,7 @@ function menuAccordion(
   id: MenuSection,
   title: string,
   body: HTMLElement,
-  status?: { tone: 'ok' | 'warn' | 'error' | 'idle'; text?: string },
+  status?: { tone: 'ok' | 'warn' | 'error' | 'idle'; text?: string; inline?: string },
 ): HTMLElement {
   const tone = status?.tone ?? 'idle';
   const details = el('details', {
@@ -1422,6 +1422,15 @@ function menuAccordion(
     },
   });
   summary.appendChild(el('span', { className: 'menu-acc__label', text: title }));
+  if (status?.inline) {
+    summary.appendChild(
+      el('span', {
+        className: 'menu-acc__inline',
+        text: status.inline,
+        attrs: { 'data-testid': id ? `menu-inline-${id}` : undefined },
+      }),
+    );
+  }
   if (tone !== 'idle') {
     const iconLabel =
       tone === 'ok' ? 'Ready' : tone === 'warn' ? 'Not ready' : 'Problem';
@@ -1430,7 +1439,7 @@ function menuAccordion(
         className: `menu-acc__status-icon menu-acc__status-icon--${tone}`,
         attrs: {
           'aria-hidden': 'true',
-          title: status?.text ?? iconLabel,
+          title: status?.text ?? status?.inline ?? iconLabel,
         },
       }),
     );
@@ -1442,6 +1451,7 @@ function menuAccordion(
       }),
     );
   }
+  // Optional multi-line subtitle (e.g. OneDrive detail) — not used for compact Baseline header.
   if (status?.text) {
     summary.appendChild(
       el('span', {
@@ -1460,41 +1470,43 @@ function menuAccordion(
   return details;
 }
 
-/** Concertina status for Sign in / OneDrive (see docs/design-philosophy-status-colours.md). */
-function cloudSectionStatus(doc: GardenDocument): { tone: 'ok' | 'warn' | 'error' | 'idle'; text: string } {
+/** Concertina status for Sign in (see docs/design-philosophy-status-colours.md). */
+function cloudSectionStatus(
+  doc: GardenDocument,
+): { tone: 'ok' | 'warn' | 'error' | 'idle'; inline?: string; text?: string } {
   const cloud = getCloudStatus();
   if (!cloud.configured) {
-    return { tone: 'error', text: 'Not configured' };
+    return { tone: 'error', inline: 'not configured' };
   }
   if (cloud.message && /could not|error|problem|fail|denied|missing/i.test(cloud.message)) {
-    const short = cloud.message.length > 42 ? `${cloud.message.slice(0, 40)}…` : cloud.message;
-    return { tone: 'error', text: short };
+    return { tone: 'error', inline: 'error' };
   }
   if (!cloud.signedIn) {
-    return { tone: 'warn', text: 'Not signed in' };
+    return { tone: 'warn', inline: 'not signed in' };
   }
   const gardenLoaded =
     doc.baselines.length > 0 ||
     doc.points.some((p) => p.x != null && p.y != null) ||
     Boolean(cloud.lastSaveIso);
   if (gardenLoaded) {
-    return {
-      tone: 'ok',
-      text: cloud.accountLabel ? `Signed in · garden ready` : 'Signed in · garden ready',
-    };
+    // Collapsed: Sign in  garden loaded  ●green
+    return { tone: 'ok', inline: 'garden loaded' };
   }
-  return { tone: 'warn', text: 'Signed in · no garden yet' };
+  return { tone: 'warn', inline: 'no garden' };
 }
 
-function baselineSectionStatus(doc: GardenDocument): { tone: 'ok' | 'warn' | 'error' | 'idle'; text?: string } {
+function baselineSectionStatus(
+  doc: GardenDocument,
+): { tone: 'ok' | 'warn' | 'error' | 'idle'; inline?: string } {
   if (baselineReady(doc)) {
     const bl = preferredBaseline(doc) ?? currentBaseline(doc);
     return {
       tone: 'ok',
-      text: bl ? `${bl.a}–${bl.b}` : 'Set',
+      // One-line closed header: Baseline  A — B  ●
+      inline: bl ? `${bl.a} — ${bl.b}` : undefined,
     };
   }
-  return { tone: 'warn', text: 'Not set' };
+  return { tone: 'warn', inline: 'not set' };
 }
 
 /** Unified translucent + Point / inspect dialogue (same fields both modes). */
@@ -1891,7 +1903,7 @@ function buildMenuDrawer(
   const cloudBody = el('div', { className: 'menu-acc__body' });
   cloudBody.appendChild(buildCloudPanel());
   panel.appendChild(
-    menuAccordion('cloud', 'Sign in / OneDrive', cloudBody, cloudSectionStatus(doc)),
+    menuAccordion('cloud', 'Sign in', cloudBody, cloudSectionStatus(doc)),
   );
 
   // —— Tools ——

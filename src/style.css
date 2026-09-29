@@ -201,13 +201,24 @@ body {
   min-width: 0;
 }
 
+.menu-acc__inline {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 55%;
+}
+
 .menu-acc__status {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 0.68rem;
   color: var(--muted);
-  width: 100%;
+  flex-basis: 100%;
   order: 3;
-  padding-left: 1.05rem;
+  padding-left: 0;
 }
 
 .menu-acc__summary::after {
