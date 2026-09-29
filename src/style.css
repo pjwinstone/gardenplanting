@@ -172,10 +172,12 @@ body {
 }
 
 .menu-acc__dot--idle {
-  margin-left: 0.15rem;
+  /* Same footprint as status icon so titles share a left column. */
+  width: 0.62rem;
+  height: 0.62rem;
 }
 
-/* Status icon after section label — colour carries row state (see design-philosophy-status-colours.md). */
+/* Status icon — left of title (see design-philosophy-status-colours.md). */
 .menu-acc__status-icon {
   width: 0.62rem;
   height: 0.62rem;

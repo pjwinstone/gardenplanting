@@ -1421,16 +1421,6 @@ function menuAccordion(
       'data-section': id ?? undefined,
     },
   });
-  summary.appendChild(el('span', { className: 'menu-acc__label', text: title }));
-  if (status?.inline) {
-    summary.appendChild(
-      el('span', {
-        className: 'menu-acc__inline',
-        text: status.inline,
-        attrs: { 'data-testid': id ? `menu-inline-${id}` : undefined },
-      }),
-    );
-  }
   if (tone !== 'idle') {
     const iconLabel =
       tone === 'ok' ? 'Ready' : tone === 'warn' ? 'Not ready' : 'Problem';
@@ -1444,6 +1434,7 @@ function menuAccordion(
       }),
     );
   } else {
+    // Neutral spacer/dot on the left so titles align with status-bearing rows.
     summary.appendChild(
       el('span', {
         className: 'menu-acc__dot menu-acc__dot--idle',
@@ -1451,7 +1442,17 @@ function menuAccordion(
       }),
     );
   }
-  // Optional multi-line subtitle (e.g. OneDrive detail) — not used for compact Baseline header.
+  summary.appendChild(el('span', { className: 'menu-acc__label', text: title }));
+  if (status?.inline) {
+    summary.appendChild(
+      el('span', {
+        className: 'menu-acc__inline',
+        text: status.inline,
+        attrs: { 'data-testid': id ? `menu-inline-${id}` : undefined },
+      }),
+    );
+  }
+  // Optional multi-line subtitle — kept for rare long detail; compact rows use inline.
   if (status?.text) {
     summary.appendChild(
       el('span', {

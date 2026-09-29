@@ -1,6 +1,6 @@
 # Design philosophy — concertina status colours
 
-Hamburger **concertina** rows show state at a glance via a **small status icon** after the section label (green / orange / red). The title stays short and neutral; optional **inline** text on the same line (e.g. point ids, “garden loaded”) carries compact detail. Fuller copy lives in the expanded body.
+Hamburger **concertina** rows show state at a glance via a **small status icon to the left of the section label** (green / orange / red). Titles stay short and neutral; optional **inline** text after the title (e.g. point ids, “garden loaded”) carries compact detail. Fuller copy lives in the expanded body.
 
 ## Status colours (default)
 | Colour | Meaning |
