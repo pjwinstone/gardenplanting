@@ -17,7 +17,16 @@ export type CloudSaveResult =
   | { ok: false; error: string; missing?: boolean };
 
 export type CloudLoadResult =
-  | { ok: true; doc: GardenDocument; loadedAt: string; fileName: string; usedLegacy?: boolean }
+  | {
+      ok: true;
+      doc: GardenDocument;
+      loadedAt: string;
+      fileName: string;
+      /** Opened legacy `garden.json` because the preferred file was missing. */
+      usedLegacy?: boolean;
+      /** Preferred name that was missing when a fallback file was opened. */
+      fallbackFrom?: string;
+    }
   | { ok: false; error: string; missing?: boolean };
 
 export type GardenCloudFile = { name: string; lastModified?: string };
@@ -129,8 +138,9 @@ async function loadNamedFile(
 }
 
 /**
- * Load the chosen (or current) garden file. If missing and not legacy,
- * fall back to `garden.json` when present.
+ * Load the last-loaded / chosen garden file.
+ * If missing: try other garden*.json from the folder (newest first), then legacy
+ * `garden.json`, else report empty (caller keeps local cache).
  */
 export async function loadGardenFromOneDrive(
   fileName = getGardenCloudFileName(),
@@ -141,30 +151,52 @@ export async function loadGardenFromOneDrive(
   const primary = await loadNamedFile(auth.token, fileName);
   if (primary.ok || !primary.missing) return primary;
 
-  if (fileName !== ONEDRIVE_FILE) {
-    const legacy = await loadNamedFile(auth.token, ONEDRIVE_FILE);
-    if (legacy.ok) {
-      return { ...legacy, usedLegacy: true };
+  const tried = new Set<string>([fileName]);
+  const listed = await listGardenFilesWithToken(auth.token);
+  const candidates: string[] = [];
+
+  if (listed.ok) {
+    const gardenish = listed.files
+      .filter((f) => /^garden/i.test(f.name) && !tried.has(f.name))
+      .sort((a, b) => {
+        const at = a.lastModified ? Date.parse(a.lastModified) : 0;
+        const bt = b.lastModified ? Date.parse(b.lastModified) : 0;
+        return bt - at;
+      });
+    for (const f of gardenish) candidates.push(f.name);
+  }
+
+  if (!tried.has(ONEDRIVE_FILE) && !candidates.includes(ONEDRIVE_FILE)) {
+    candidates.push(ONEDRIVE_FILE);
+  }
+
+  for (const alt of candidates) {
+    if (tried.has(alt)) continue;
+    tried.add(alt);
+    const next = await loadNamedFile(auth.token, alt);
+    if (next.ok) {
+      return {
+        ...next,
+        usedLegacy: alt === ONEDRIVE_FILE,
+        fallbackFrom: fileName,
+      };
     }
+    if (!next.missing) return next;
   }
 
   return {
     ok: false,
     missing: true,
-    error: `No garden file on OneDrive yet (tried ${fileName}${fileName !== ONEDRIVE_FILE ? ` and ${ONEDRIVE_FILE}` : ''}). Save once from this device first.`,
+    error: `No garden file on OneDrive yet (tried ${[...tried].join(', ')}). Save once from this device first.`,
   };
 }
 
-/** List JSON garden files in /Garden Survey (garden*.json preferred, all .json included). */
-export async function listGardenFilesOnOneDrive(): Promise<
-  { ok: true; files: GardenCloudFile[] } | { ok: false; error: string }
-> {
-  const auth = await withToken();
-  if (!auth.ok) return { ok: false, error: auth.error };
-
+async function listGardenFilesWithToken(
+  token: string,
+): Promise<{ ok: true; files: GardenCloudFile[] } | { ok: false; error: string }> {
   const res = await fetch(folderChildrenUrl(), {
     method: 'GET',
-    headers: { Authorization: `Bearer ${auth.token}` },
+    headers: { Authorization: `Bearer ${token}` },
   });
 
   if (res.status === 404) {
@@ -195,6 +227,15 @@ export async function listGardenFilesOnOneDrive(): Promise<
   } catch {
     return { ok: false, error: 'Could not list OneDrive garden files.' };
   }
+}
+
+/** List JSON garden files in /Garden Survey (garden*.json preferred, all .json included). */
+export async function listGardenFilesOnOneDrive(): Promise<
+  { ok: true; files: GardenCloudFile[] } | { ok: false; error: string }
+> {
+  const auth = await withToken();
+  if (!auth.ok) return { ok: false, error: auth.error };
+  return listGardenFilesWithToken(auth.token);
 }
 
 async function readGraphError(res: Response): Promise<string> {

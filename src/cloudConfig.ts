@@ -6,6 +6,7 @@ export const ONEDRIVE_FILE = 'garden.json';
 /** @deprecated prefer getGardenCloudFileName() — kept for older imports. */
 export const ONEDRIVE_PATH = `${ONEDRIVE_FOLDER}/${ONEDRIVE_FILE}`;
 
+/** Last successfully loaded/chosen garden filename under /Garden Survey/. */
 const GARDEN_FILE_KEY = 'garden-survey:onedrive-garden-file';
 const DEFAULT_VERSION = '1';
 
@@ -66,6 +67,21 @@ export function onedrivePathFor(fileName: string): string {
   return `${ONEDRIVE_FOLDER}/${fileName}`;
 }
 
+/** True when the user (or a successful Load) has stored a garden filename. */
+export function hasStoredGardenCloudFile(): boolean {
+  try {
+    const stored = localStorage.getItem(GARDEN_FILE_KEY)?.trim();
+    return Boolean(stored && isGardenJsonName(stored));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Last-loaded / chosen garden filename for Save and startup auto-load.
+ * Defaults to `garden-v1.json` only when nothing has been remembered yet —
+ * never forces legacy `garden.json` unless that was last used.
+ */
 export function getGardenCloudFileName(): string {
   try {
     const stored = localStorage.getItem(GARDEN_FILE_KEY)?.trim();
@@ -76,6 +92,7 @@ export function getGardenCloudFileName(): string {
   return gardenFileNameFromVersion(DEFAULT_VERSION);
 }
 
+/** Remember the garden file last loaded or chosen (version field / Load picker). */
 export function setGardenCloudFileName(name: string): void {
   const safe = isGardenJsonName(name) ? name : gardenFileNameFromVersion(DEFAULT_VERSION);
   try {

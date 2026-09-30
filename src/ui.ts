@@ -843,8 +843,8 @@ export function mount(root: HTMLElement): void {
 }
 
 /**
- * After MSAL init: show real errors, welcome signed-in users, and try OneDrive load
- * when returning from a Microsoft redirect.
+ * After MSAL init: show real errors, welcome signed-in users, and auto-load the
+ * last-loaded garden file from OneDrive (redirect or restored session).
  */
 export function applyAuthReady(init: AuthInitResult): void {
   if (!init.configured) return;
@@ -862,26 +862,27 @@ export function applyAuthReady(init: AuthInitResult): void {
   }
 
   const who = init.accountLabel ? ` as ${init.accountLabel}` : '';
-  if (init.fromRedirect) {
-    setCloudMessage(`Signed in${who}. Loading garden from OneDrive…`);
-    void restoreFromOneDriveAfterSignIn();
-  } else {
-    setCloudMessage(`Signed in${who}. Session restored on this device.`);
-    void refreshGardenFileList();
-  }
+  const last = getGardenCloudFileName();
+  setCloudMessage(
+    init.fromRedirect
+      ? `Signed in${who}. Loading ${last} from OneDrive…`
+      : `Signed in${who}. Loading last garden (${last})…`,
+  );
+  void restoreFromOneDriveAfterSignIn();
 }
 
 async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   if (!isSignedIn()) return;
+  const preferred = getGardenCloudFileName();
   setCloudBusy(true);
-  const result = await loadGardenCloud();
+  const result = await loadGardenCloud(preferred);
   setCloudBusy(false);
   void refreshGardenFileList();
   if (!result.ok) {
-    // Missing file is normal on first save — still signed in.
+    // Missing file is normal on first save — keep local cache / empty.
     if (result.missing) {
       setCloudMessage(
-        `Signed in. No garden file on OneDrive yet — set Version and Save when ready.`,
+        `Signed in. No garden file on OneDrive yet (wanted ${preferred}) — set Version and Save when ready.`,
       );
       return;
     }
@@ -890,17 +891,17 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
     setCloudMessage(msg);
     return;
   }
-  if (result.usedLegacy) {
-    setGardenCloudFileName(result.fileName);
-    notifyCloudPrefsChanged();
-  } else {
-    setGardenCloudFileName(result.fileName);
-    notifyCloudPrefsChanged();
-  }
+  // Remember what was actually opened so the next startup auto-loads it.
+  setGardenCloudFileName(result.fileName);
+  notifyCloudPrefsChanged();
   setDoc(result.doc, null);
-  setCloudMessage(
-    `Signed in. Loaded ${result.fileName}${result.usedLegacy ? ' (legacy)' : ''} (${getCloudStatus().pathHint}).`,
-  );
+  const via =
+    result.fallbackFrom && result.fallbackFrom !== result.fileName
+      ? result.usedLegacy
+        ? ` (fallback legacy; ${result.fallbackFrom} missing)`
+        : ` (fallback; ${result.fallbackFrom} missing)`
+      : '';
+  setCloudMessage(`Signed in. Loaded ${result.fileName}${via}.`);
 }
 
 function onShellClick(e: Event): void {
@@ -1538,9 +1539,13 @@ async function onOneDriveLoad(fileName?: string): Promise<void> {
   setGardenCloudFileName(result.fileName);
   notifyCloudPrefsChanged();
   setDoc(result.doc, null);
-  setCloudMessage(
-    `Loaded ${result.fileName}${result.usedLegacy ? ' (legacy garden.json)' : ''} from OneDrive. Browser cache updated.`,
-  );
+  const via =
+    result.fallbackFrom && result.fallbackFrom !== result.fileName
+      ? result.usedLegacy
+        ? ` (fallback legacy; ${result.fallbackFrom} missing)`
+        : ` (fallback; ${result.fallbackFrom} missing)`
+      : '';
+  setCloudMessage(`Loaded ${result.fileName}${via} from OneDrive. Browser cache updated.`);
 }
 
 function onShellChange(e: Event): void {
