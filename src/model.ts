@@ -157,6 +157,11 @@ export interface Photo {
   note?: string;
   /** Estimated camera pose after adjust (metres, radians). */
   pose?: { x: number; y: number; yawRad: number };
+  /**
+   * Per-photo contribution to the add-point station (metres).
+   * Combined point (x,y) is the average of these estimates when present.
+   */
+  estimate?: { x: number; y: number };
 }
 
 export interface Setup {
@@ -188,6 +193,8 @@ export interface SessionState {
   activeBaselineEnds?: { a?: string; b?: string };
   /** Point open in the measurement inspector (click on plan). */
   inspectingPointId?: string;
+  /** Photo selected in the + Point / inspect dialog (for − Photo). */
+  selectedPhotoId?: string;
 }
 
 export interface GardenDocument {

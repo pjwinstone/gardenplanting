@@ -1,7 +1,12 @@
 /** SVG plan renderer — points, fuzzy shapes, trust-ordered baselines. */
 
 import type { GardenDocument } from './model';
-import { activeBaselineEnds, baselinesByTrust, preferredBaseline } from './layers';
+import {
+  activeBaselineEnds,
+  baselinesByTrust,
+  photoEstimateAt,
+  preferredBaseline,
+} from './layers';
 
 export function renderPlanSvg(doc: GardenDocument, width = 720, height = 560): string {
   const pts = doc.points.filter((p) => p.x != null && p.y != null);
@@ -143,12 +148,33 @@ export function renderPlanSvg(doc: GardenDocument, width = 720, height = 560): s
             ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 2}" fill="none" stroke="#fffdf8" stroke-width="1.5" opacity="0.95"/>`
             : '';
       const label = isScatter
-        ? `<text x="${tx(p.x!) + 9}" y="${ty(p.y!) - 9}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" font-weight="600" fill="#1a5f7a">${escapeXml(p.id)}</text>`
+        ? `<text x="${tx(p.x!) + 9}" y="${ty(p.y!) - 9}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" font-weight="700" fill="#1a5f7a">${escapeXml(p.id)}</text>`
         : `<text x="${tx(p.x!) + 8}" y="${ty(p.y!) - 8}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" fill="#2a241c">${escapeXml(p.id)}</text>`;
-      return `<g class="plan-point${isScatter ? ' plan-point--scatter' : ''}" data-point-id="${escapeXml(p.id)}" data-cmd="inspect-point" style="cursor:pointer">
+
+      // Per-photo contributions (grey) when this point has multiple photos — outliers readable.
+      const photoIds = p.photoIds ?? [];
+      let photoScatter = '';
+      if (photoIds.length > 1) {
+        const showStrong = isInspect;
+        photoScatter = photoIds
+          .map((id, i) => {
+            const ph = doc.photos.find((x) => x.id === id);
+            if (!ph) return '';
+            const est = photoEstimateAt(ph, p, i);
+            const opacity = showStrong ? 0.85 : 0.45;
+            const pr = showStrong ? 4 : 3;
+            const selected = showStrong && doc.session.selectedPhotoId === id;
+            return `<circle class="plan-photo-est" cx="${tx(est.x)}" cy="${ty(est.y)}" r="${selected ? pr + 1.5 : pr}" fill="#9a958c" fill-opacity="${opacity}" stroke="${selected ? '#5a5348' : 'none'}" stroke-width="1.5" data-photo-id="${escapeXml(id)}"/>`;
+          })
+          .join('\n');
+      }
+
+      // Combined / average point is bold (darker stroke, full opacity).
+      return `<g class="plan-point${isScatter ? ' plan-point--scatter' : ''}${isInspect ? ' plan-point--inspect' : ''}" data-point-id="${escapeXml(p.id)}" data-cmd="inspect-point" style="cursor:pointer">
+        ${photoScatter}
         ${ring}
         <circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 10}" fill="transparent"/>
-        <circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r}" fill="${colour}" stroke="${isScatter ? '#0d3a4a' : 'none'}" stroke-width="${isScatter ? 1 : 0}"/>
+        <circle class="plan-point__avg" cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r}" fill="${colour}" stroke="${isScatter ? '#0d3a4a' : '#2a241c'}" stroke-width="${isInspect || isScatter ? 2 : 1}"/>
         ${label}
       </g>`;
     })

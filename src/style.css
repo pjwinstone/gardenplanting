@@ -581,16 +581,20 @@ body {
   padding: 0.85rem 1.1rem 10rem;
 }
 
-/* Unified translucent + Point / inspect dialogue — on the plan, not in the menu */
+/* Unified translucent + Point / inspect dialogue — dense, scalable via --point-ui-scale */
 .point-dialog {
+  --point-ui-scale: 1;
   position: fixed;
-  left: max(0.5rem, env(safe-area-inset-left));
-  top: max(0.5rem, env(safe-area-inset-top));
+  left: max(0.4rem, env(safe-area-inset-left));
+  top: max(0.4rem, env(safe-area-inset-top));
   z-index: 35;
-  width: min(22rem, calc(100vw - 1.25rem));
-  max-height: min(78vh, 36rem);
+  width: min(20.5rem, calc(100vw - 0.9rem));
+  max-height: min(72vh, 32rem);
   overflow: auto;
-  padding: 0.65rem 0.75rem 0.85rem;
+  padding: calc(0.4rem * var(--point-ui-scale)) calc(0.5rem * var(--point-ui-scale))
+    calc(0.5rem * var(--point-ui-scale));
+  font-size: calc(0.86rem * var(--point-ui-scale));
+  line-height: 1.25;
   background: rgba(246, 241, 230, 0.52);
   backdrop-filter: blur(10px) saturate(1.05);
   -webkit-backdrop-filter: blur(10px) saturate(1.05);
@@ -610,16 +614,16 @@ body {
 .point-dialog__head {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  margin: -0.15rem 0 0.35rem;
-  padding-bottom: 0.35rem;
+  gap: 0.25em;
+  margin: 0 0 0.3em;
+  padding-bottom: 0.25em;
   border-bottom: 1px solid rgba(42, 36, 28, 0.12);
 }
 
 .point-dialog__drag {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.25em;
   flex: 1;
   min-width: 0;
   cursor: grab;
@@ -632,7 +636,7 @@ body {
 
 .point-dialog__title {
   font-family: 'Fraunces', Georgia, serif;
-  font-size: 1.1rem;
+  font-size: 1.05em;
   margin: 0;
   flex: 1;
   color: var(--moss);
@@ -640,19 +644,37 @@ body {
 }
 
 .point-dialog__grip {
-  font-size: 1rem;
+  font-size: 0.95em;
   color: var(--muted);
   letter-spacing: -0.05em;
   pointer-events: none;
 }
 
+.point-dialog__type-scale {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.15em;
+}
+
+.point-dialog__type-btn {
+  min-width: 2em;
+  min-height: 2em;
+  padding: 0 0.2em;
+  font-size: 0.78em;
+  font-weight: 700;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  touch-action: manipulation;
+}
+
 .point-dialog__close {
   flex-shrink: 0;
   cursor: pointer;
-  min-width: 2.5rem;
-  min-height: 2.5rem;
+  min-width: 2em;
+  min-height: 2em;
   padding: 0;
-  font-size: 1.15rem;
+  font-size: 1.05em;
   line-height: 1;
   display: grid;
   place-items: center;
@@ -660,9 +682,9 @@ body {
 }
 
 .point-dialog__close-footer {
-  min-height: 2.75rem;
-  padding-left: 1rem;
-  padding-right: 1rem;
+  min-height: 2.15em;
+  padding-left: 0.75em;
+  padding-right: 0.75em;
   touch-action: manipulation;
 }
 
@@ -671,22 +693,22 @@ body {
 .point-dialog__residual,
 .point-dialog__empty {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.72rem;
-  margin: 0 0 0.4rem;
+  font-size: 0.78em;
+  margin: 0.2em 0 0;
   color: var(--muted);
 }
 
 .point-dialog__grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.4rem 0.55rem;
+  gap: 0.3em 0.4em;
 }
 
 .point-dialog__grid .field {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  font-size: 0.78rem;
+  gap: 0.1em;
+  font-size: 0.85em;
   margin: 0;
 }
 
@@ -697,8 +719,8 @@ body {
 .point-dialog__grid .field input,
 .point-dialog__grid .field select {
   font: inherit;
-  padding: 0.45rem 0.5rem;
-  min-height: 2.6rem;
+  padding: 0.25em 0.35em;
+  min-height: 2.05em;
   border: 1px solid rgba(42, 36, 28, 0.2);
   border-radius: 2px;
   background: rgba(255, 253, 248, 0.88);
@@ -709,39 +731,40 @@ body {
 }
 
 .point-dialog__grid .field--trust input[type='range'] {
-  min-height: 2rem;
-  padding: 0.35rem 0;
+  min-height: 1.5em;
+  padding: 0.15em 0;
   background: transparent;
   border: none;
 }
 
 .point-dialog__photos {
-  margin-top: 0.55rem;
+  margin-top: 0.35em;
 }
 
 .point-dialog__stack {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.2em;
 }
 
 .hier-row {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  min-height: 2.4rem;
+  gap: 0.25em;
+  min-height: 2em;
 }
 
 .hier-row--garden {
-  padding-bottom: 0.2rem;
+  padding-bottom: 0.1em;
   border-bottom: 1px solid rgba(42, 36, 28, 0.1);
-  margin-bottom: 0.1rem;
+  margin-bottom: 0.05em;
+  min-height: 1.45em;
 }
 
 .hier-row__main {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.25em;
   flex: 1;
   min-width: 0;
 }
@@ -749,12 +772,12 @@ body {
 .hier-row--field {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.25em;
 }
 
 .hier-row__label {
-  flex: 0 0 4.2rem;
-  font-size: 0.72rem;
+  flex: 0 0 3.55em;
+  font-size: 0.72em;
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -764,7 +787,7 @@ body {
 .hier-row__value {
   flex: 1;
   min-width: 0;
-  font-size: 0.95rem;
+  font-size: 0.95em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -775,9 +798,10 @@ body {
 .hier-row--field input[type='text'] {
   flex: 1;
   min-width: 0;
-  min-height: 2.35rem;
+  min-height: 2em;
   font: inherit;
-  padding: 0.35rem 0.45rem;
+  font-size: 0.95em;
+  padding: 0.18em 0.32em;
   border: 1px solid rgba(42, 36, 28, 0.22);
   border-radius: 2px;
   background: rgba(255, 253, 248, 0.72);
@@ -786,8 +810,8 @@ body {
 
 .hier-row--trust input[type='range'] {
   flex: 1;
-  min-height: 2rem;
-  padding: 0.35rem 0;
+  min-height: 1.45em;
+  padding: 0.12em 0;
   background: transparent;
   border: none;
 }
@@ -795,14 +819,14 @@ body {
 .hier-row__ops {
   display: flex;
   flex-shrink: 0;
-  gap: 0.25rem;
+  gap: 0.15em;
 }
 
 .btn--hier {
-  min-width: 2.5rem;
-  min-height: 2.5rem;
+  min-width: 2em;
+  min-height: 2em;
   padding: 0;
-  font-size: 1.25rem;
+  font-size: 1.1em;
   line-height: 1;
   display: grid;
   place-items: center;
@@ -822,17 +846,18 @@ body {
 .point-dialog__capture {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.3em;
   align-items: center;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.25em;
 }
 
 .point-dialog__capture-btn {
   display: inline-grid;
   place-items: center;
   cursor: pointer;
-  min-height: 2.5rem;
-  padding: 0.45rem 0.85rem;
+  min-height: 2.1em;
+  padding: 0.28em 0.65em;
+  font-size: 0.95em;
   touch-action: manipulation;
 }
 
@@ -846,7 +871,7 @@ body {
 .point-dialog__photo-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.3em;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -855,8 +880,8 @@ body {
 .point-dialog__thumb {
   margin: 0;
   padding: 0;
-  width: 4.6rem;
-  height: 3.45rem;
+  width: 3.5em;
+  height: 2.6em;
   border: 1px solid rgba(42, 36, 28, 0.18);
   border-radius: 2px;
   overflow: hidden;
@@ -877,22 +902,22 @@ body {
 
 .point-dialog__photo-list {
   margin: 0;
-  padding-left: 1.1rem;
-  font-size: 0.8rem;
+  padding-left: 1em;
+  font-size: 0.85em;
 }
 
 .point-dialog__residual {
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.72rem;
-  margin: 0.35rem 0 0;
+  font-size: 0.78em;
+  margin: 0.2em 0 0;
   color: var(--muted);
 }
 
 .point-dialog__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.65rem;
+  gap: 0.3em;
+  margin-top: 0.35em;
 }
 
 /* Legacy class names kept for print hide rules */
@@ -1356,4 +1381,126 @@ body {
   .actions .btn {
     flex: 1 1 calc(50% - 0.5rem);
   }
+}
+
+/* In-app camera — getUserMedia preview; shutter skips iOS Retake/Use Photo */
+.camera-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: #0a0a0a;
+  display: flex;
+  flex-direction: column;
+}
+
+.camera-overlay__video {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+.camera-overlay__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem max(1rem, env(safe-area-inset-right))
+    max(1.25rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
+}
+
+.camera-overlay__cancel {
+  min-height: 2.75rem;
+  color: #f6f1e6 !important;
+  border-color: rgba(246, 241, 230, 0.45) !important;
+  background: rgba(26, 36, 28, 0.45) !important;
+}
+
+.camera-overlay__shutter {
+  width: 4.25rem;
+  height: 4.25rem;
+  border-radius: 50%;
+  border: 3px solid #f6f1e6;
+  background: #f6f1e6;
+  box-shadow: 0 0 0 3px rgba(26, 58, 42, 0.55);
+  cursor: pointer;
+  touch-action: manipulation;
+  margin-left: auto;
+  margin-right: auto;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(1.1rem, env(safe-area-inset-bottom));
+}
+
+.camera-overlay__shutter:active {
+  background: #dfe8d8;
+}
+
+.camera-fallback {
+  position: fixed;
+  left: 50%;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 80;
+  width: min(22rem, calc(100vw - 1.5rem));
+  padding: 0.85rem 1rem;
+  background: rgba(246, 241, 230, 0.96);
+  border: 1px solid rgba(42, 36, 28, 0.2);
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(26, 36, 28, 0.25);
+}
+
+.camera-fallback__msg {
+  margin: 0 0 0.65rem;
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.camera-fallback__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.point-dialog__thumb--selected {
+  outline: 2px solid var(--moss);
+  outline-offset: 1px;
+}
+
+.point-dialog__thumb-btn {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.point-dialog__photo-offsets {
+  margin: 0.25em 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72em;
+  color: var(--muted);
+}
+
+.point-dialog__photo-offset {
+  padding: 0.15em 0.2em;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.point-dialog__photo-offset--selected {
+  color: var(--ink);
+  background: rgba(26, 58, 42, 0.08);
+  font-weight: 600;
 }

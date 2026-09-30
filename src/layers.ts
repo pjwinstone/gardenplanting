@@ -305,6 +305,7 @@ export function addPhotoMeasurement(
     width: 1200,
     height: 900,
     clicks: [],
+    estimate: { x: coords.x, y: coords.y },
     thumbnailDataUrl: hasRealThumb ? opts.thumbnailDataUrl! : placeholderThumb('#1a5f7a'),
     note: hasRealThumb
       ? `Photo for ${id} via ${bl ? `${bl.a}–${bl.b}` : 'active ends'}`
@@ -352,6 +353,7 @@ export function addPhotoMeasurement(
       geometryOk: true,
       lastResidualMm: objects.find((o) => o.id === obj!.id)?.residualMm,
       inspectingPointId: undefined,
+      selectedPhotoId: photoId,
     },
   };
   return { doc: next, point };
@@ -452,6 +454,8 @@ export function appendPhotoToPoint(
   const photoId = `ph-${Date.now().toString(36)}`;
   const setupId = next.session.currentSetupId ?? next.setups[0]?.id ?? 'setup-1';
   const yawOnly = Boolean(opts.yawOnly);
+  const priorIds = point.photoIds ?? [];
+  const estimate = estimatePhotoContribution(point, priorIds.length);
   const photo = {
     id: photoId,
     setupId,
@@ -460,27 +464,121 @@ export function appendPhotoToPoint(
     width: 1200,
     height: 900,
     clicks: [],
+    estimate,
     thumbnailDataUrl: opts.thumbnailDataUrl,
     note: yawOnly ? `+ Photo (yaw) for ${pointId}` : `Photo for ${pointId}`,
   };
 
+  const photoIds = [...priorIds, photoId];
+  const photos = [...next.photos, photo];
+  const avg = averageEstimateFromPhotos(photos, photoIds, point);
+
   next = {
     ...next,
-    photos: [...next.photos, photo],
+    photos,
     points: next.points.map((p) =>
       p.id === pointId
-        ? { ...p, photoIds: [...(p.photoIds ?? []), photoId] }
+        ? { ...p, photoIds, x: avg.x, y: avg.y }
         : p,
     ),
     session: {
       ...next.session,
       inspectingPointId: pointId,
       currentAddPointId: pointId,
+      selectedPhotoId: photoId,
       mode: yawOnly ? 'ADD_POINT_EXTRA_YAW' : next.session.mode,
       lastAction: yawOnly ? `+ Photo (yaw) → ${pointId}` : `Photo added to ${pointId}`,
     },
   };
   return { doc: next };
+}
+
+/** Remove one photo from a point; re-average remaining estimates onto the point. */
+export function deletePhotoFromPoint(
+  doc: GardenDocument,
+  pointId: string,
+  photoId: string,
+): { doc: GardenDocument; reason?: string } {
+  let next = ensureDefaultLayers(doc);
+  const point = next.points.find((p) => p.id === pointId);
+  if (!point) {
+    return { doc: next, reason: `Point ${pointId} is not in the garden.` };
+  }
+  const photoIds = (point.photoIds ?? []).filter((id) => id !== photoId);
+  if (photoIds.length === (point.photoIds ?? []).length) {
+    return { doc: next, reason: 'Photo is not on this point.' };
+  }
+  if (!photoIds.length) {
+    return {
+      doc: next,
+      reason: 'Keep at least one photo, or delete the point.',
+    };
+  }
+
+  const photos = next.photos.filter((ph) => ph.id !== photoId);
+  const avg = averageEstimateFromPhotos(photos, photoIds, point);
+  const nextSelected =
+    next.session.selectedPhotoId === photoId
+      ? photoIds[photoIds.length - 1]
+      : next.session.selectedPhotoId;
+
+  next = {
+    ...next,
+    photos,
+    points: next.points.map((p) =>
+      p.id === pointId ? { ...p, photoIds, x: avg.x, y: avg.y } : p,
+    ),
+    session: {
+      ...next.session,
+      inspectingPointId: pointId,
+      selectedPhotoId: nextSelected,
+      lastAction: `Deleted photo ${photoId} from ${pointId}`,
+    },
+  };
+  return { doc: next };
+}
+
+/** Small per-photo scatter until real resection writes clicks (metres). */
+export function estimatePhotoContribution(
+  point: Point,
+  index: number,
+): { x: number; y: number } {
+  const baseX = point.x ?? 0;
+  const baseY = point.y ?? 0;
+  if (index <= 0) return { x: baseX, y: baseY };
+  const angle = index * 1.75;
+  const r = 0.06 + index * 0.035;
+  return { x: baseX + r * Math.cos(angle), y: baseY + r * Math.sin(angle) };
+}
+
+export function photoEstimateAt(
+  photo: { estimate?: { x: number; y: number }; id: string },
+  point: Point,
+  index: number,
+): { x: number; y: number } {
+  if (photo.estimate && Number.isFinite(photo.estimate.x) && Number.isFinite(photo.estimate.y)) {
+    return photo.estimate;
+  }
+  return estimatePhotoContribution(point, index);
+}
+
+export function averageEstimateFromPhotos(
+  photos: { id: string; estimate?: { x: number; y: number } }[],
+  photoIds: string[],
+  point: Point,
+): { x: number; y: number } {
+  const estimates = photoIds
+    .map((id, i) => {
+      const ph = photos.find((p) => p.id === id);
+      return ph ? photoEstimateAt(ph, point, i) : null;
+    })
+    .filter((e): e is { x: number; y: number } => !!e);
+  if (!estimates.length) {
+    return { x: point.x ?? 0, y: point.y ?? 0 };
+  }
+  const x = estimates.reduce((s, e) => s + e.x, 0) / estimates.length;
+  const y = estimates.reduce((s, e) => s + e.y, 0) / estimates.length;
+  return { x, y };
 }
 
 /**
@@ -514,8 +612,14 @@ export function deleteObjectMeasurement(
       stickyObjectId: wasSticky ? undefined : next.session.stickyObjectId,
       stickyObjectName: wasSticky ? undefined : next.session.stickyObjectName,
       inspectingPointId: undefined,
+      currentAddPointId:
+        next.session.currentAddPointId &&
+        !(obj.measuredPointIds.includes(next.session.currentAddPointId))
+          ? next.session.currentAddPointId
+          : undefined,
       lastAction: `Deleted item “${obj.name}”`,
-      mode: 'MENU',
+      // Leave ADD_POINT so the floating dialog can stay open in a neutral add state.
+      mode: 'ADD_POINT',
     },
   };
   return { doc: next };
@@ -555,8 +659,9 @@ export function deleteLayerMeasurement(
       stickyObjectId: wasSticky ? undefined : next.session.stickyObjectId,
       stickyObjectName: wasSticky ? undefined : next.session.stickyObjectName,
       inspectingPointId: undefined,
-      lastAction: `Deleted layer ${layerId}`,
-      mode: 'MENU',
+      currentAddPointId: wasSticky ? undefined : next.session.currentAddPointId,
+      lastAction: `Deleted layer “${layerId}”`,
+      mode: 'ADD_POINT',
     },
   };
   return { doc: next };

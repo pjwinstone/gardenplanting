@@ -65,8 +65,10 @@ import {
   createObject,
   deleteLayerMeasurement,
   deleteObjectMeasurement,
+  deletePhotoFromPoint,
   deletePointMeasurement,
   objectsOnLayer,
+  photoEstimateAt,
   preferredBaseline,
   setBaselineTrust,
   setStickyPanel,
@@ -128,9 +130,46 @@ let planView = { scale: 1, x: 0, y: 0 };
 const PLAN_SCALE_MIN = 0.55;
 const PLAN_SCALE_MAX = 6;
 
-/** Persistent file inputs — must .click() inside the same user gesture (iPhone). */
+/** Floating + Point dialog UI scale (font + controls). Persisted. */
+const POINT_UI_SCALE_KEY = 'garden-survey-point-ui-scale';
+const POINT_UI_SCALE_MIN = 0.85;
+const POINT_UI_SCALE_MAX = 1.25;
+const POINT_UI_SCALE_STEP = 0.05;
+
+function loadPointUiScale(): number {
+  try {
+    const v = Number(localStorage.getItem(POINT_UI_SCALE_KEY));
+    if (Number.isFinite(v)) {
+      return Math.min(POINT_UI_SCALE_MAX, Math.max(POINT_UI_SCALE_MIN, v));
+    }
+  } catch {
+    /* ignore */
+  }
+  return 1;
+}
+
+let pointUiScale = loadPointUiScale();
+
+function persistPointUiScale(scale: number): void {
+  pointUiScale = Math.min(POINT_UI_SCALE_MAX, Math.max(POINT_UI_SCALE_MIN, scale));
+  try {
+    localStorage.setItem(POINT_UI_SCALE_KEY, String(pointUiScale));
+  } catch {
+    /* ignore */
+  }
+  const live = document.querySelector('.point-dialog') as HTMLElement | null;
+  if (live) live.style.setProperty('--point-ui-scale', String(pointUiScale));
+}
+
+function bumpPointUiScale(delta: number): void {
+  persistPointUiScale(Math.round((pointUiScale + delta) * 100) / 100);
+}
+
+/** Persistent file inputs — fallback when getUserMedia unavailable (iPhone Retake UI). */
 let newPointFileInput: HTMLInputElement | null = null;
 let againPhotoFileInput: HTMLInputElement | null = null;
+let cameraOverlay: HTMLElement | null = null;
+let cameraStream: MediaStream | null = null;
 
 function ensureHiddenCaptureInput(
   existing: HTMLInputElement | null,
@@ -152,26 +191,203 @@ function ensureHiddenCaptureInput(
   return input;
 }
 
-function launchNewPointCamera(): void {
-  newPointFileInput = ensureHiddenCaptureInput(newPointFileInput, (file) => {
-    void handleNewPointCapture(file);
+function stopInAppCamera(): void {
+  if (cameraStream) {
+    for (const track of cameraStream.getTracks()) track.stop();
+    cameraStream = null;
+  }
+  cameraOverlay?.remove();
+  cameraOverlay = null;
+}
+
+function videoToThumbnailDataUrl(video: HTMLVideoElement, maxEdge = 960): string {
+  const vw = video.videoWidth || 1280;
+  const vh = video.videoHeight || 960;
+  const scale = Math.min(1, maxEdge / Math.max(vw, vh));
+  const w = Math.max(1, Math.round(vw * scale));
+  const h = Math.max(1, Math.round(vh * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas unavailable');
+  ctx.drawImage(video, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+/**
+ * In-app rear camera (getUserMedia) — shutter grabs a frame with no iOS Retake/Use Photo.
+ * Falls back to `<input capture>` only when media devices are missing or permission fails.
+ */
+async function openInAppCamera(
+  onCapture: (dataUrl: string) => void,
+  onFallbackFile: () => void,
+): Promise<void> {
+  stopInAppCamera();
+  if (!navigator.mediaDevices?.getUserMedia) {
+    onFallbackFile();
+    return;
+  }
+
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1440 },
+      },
+    });
+  } catch {
+    // Permission denied / no camera — offer file capture via a fresh tap (gesture restored).
+    showCameraFallbackSheet(onFallbackFile);
+    return;
+  }
+
+  cameraStream = stream;
+  const overlay = document.createElement('div');
+  overlay.className = 'camera-overlay';
+  overlay.setAttribute('data-testid', 'camera-overlay');
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-label', 'Camera');
+
+  const video = document.createElement('video');
+  video.className = 'camera-overlay__video';
+  video.setAttribute('playsinline', 'true');
+  video.setAttribute('webkit-playsinline', 'true');
+  video.muted = true;
+  video.autoplay = true;
+  video.srcObject = stream;
+
+  const bar = document.createElement('div');
+  bar.className = 'camera-overlay__bar';
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn--util camera-overlay__cancel';
+  cancel.textContent = 'Cancel';
+  cancel.setAttribute('data-testid', 'camera-cancel');
+  cancel.addEventListener('click', () => {
+    stopInAppCamera();
   });
-  newPointFileInput.click();
+
+  const shutter = document.createElement('button');
+  shutter.type = 'button';
+  shutter.className = 'camera-overlay__shutter';
+  shutter.setAttribute('aria-label', 'Take photo');
+  shutter.setAttribute('data-testid', 'camera-shutter');
+  shutter.addEventListener('click', () => {
+    try {
+      if (!video.videoWidth) {
+        surfaceFail('Camera not ready yet — try again.', 'photo');
+        return;
+      }
+      const dataUrl = videoToThumbnailDataUrl(video);
+      stopInAppCamera();
+      onCapture(dataUrl);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not capture frame.';
+      surfaceFail(msg, 'photo');
+      stopInAppCamera();
+    }
+  });
+
+  bar.appendChild(cancel);
+  bar.appendChild(shutter);
+  overlay.appendChild(video);
+  overlay.appendChild(bar);
+  document.body.appendChild(overlay);
+  cameraOverlay = overlay;
+
+  try {
+    await video.play();
+  } catch {
+    /* autoplay with playsinline usually OK once stream is attached */
+  }
+}
+
+function showCameraFallbackSheet(onFallbackFile: () => void): void {
+  stopInAppCamera();
+  const sheet = document.createElement('div');
+  sheet.className = 'camera-fallback';
+  sheet.setAttribute('data-testid', 'camera-fallback');
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-label', 'Camera unavailable');
+
+  const msg = document.createElement('p');
+  msg.className = 'camera-fallback__msg';
+  msg.textContent = 'Camera unavailable — use the system photo picker instead.';
+
+  const row = document.createElement('div');
+  row.className = 'camera-fallback__row';
+
+  const pick = document.createElement('button');
+  pick.type = 'button';
+  pick.className = 'btn btn--suggested';
+  pick.textContent = 'Photo';
+  pick.setAttribute('data-testid', 'camera-fallback-photo');
+  pick.addEventListener('click', () => {
+    sheet.remove();
+    onFallbackFile();
+  });
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn btn--util';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => sheet.remove());
+
+  row.appendChild(pick);
+  row.appendChild(cancel);
+  sheet.appendChild(msg);
+  sheet.appendChild(row);
+  document.body.appendChild(sheet);
+  cameraOverlay = sheet;
+}
+
+function launchNewPointCamera(): void {
+  void openInAppCamera(
+    (thumb) => {
+      void applyNewPointThumb(thumb);
+    },
+    () => {
+      newPointFileInput = ensureHiddenCaptureInput(newPointFileInput, (file) => {
+        void handleNewPointCapture(file);
+      });
+      newPointFileInput.click();
+    },
+  );
 }
 
 function launchAgainPhotoCamera(pointId: string): void {
-  againPhotoFileInput = ensureHiddenCaptureInput(againPhotoFileInput, (file) => {
-    void handleAgainPhotoCapture(pointId, file);
-  });
-  againPhotoFileInput.click();
+  void openInAppCamera(
+    (thumb) => {
+      void applyAgainPhotoThumb(pointId, thumb);
+    },
+    () => {
+      againPhotoFileInput = ensureHiddenCaptureInput(againPhotoFileInput, (file) => {
+        void handleAgainPhotoCapture(pointId, file);
+      });
+      againPhotoFileInput.click();
+    },
+  );
 }
 
 async function handleNewPointCapture(file: File): Promise<void> {
   try {
     const thumb = await fileToThumbnailDataUrl(file);
+    await applyNewPointThumb(thumb);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Could not read photo.';
+    surfaceFail(msg, 'photo');
+  }
+}
+
+async function applyNewPointThumb(thumb: string): Promise<void> {
+  try {
     // Ensure + Point dialog / ADD_POINT mode is active before placing.
     if (state.pointDialog !== 'add') {
-      // Soft-open add chrome without a second camera launch.
       const base =
         state.doc.session.inspectingPointId != null
           ? {
@@ -208,7 +424,7 @@ async function handleNewPointCapture(file: File): Promise<void> {
     });
     speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Could not read photo.';
+    const msg = err instanceof Error ? err.message : 'Could not use photo.';
     surfaceFail(msg, 'photo');
   }
 }
@@ -216,6 +432,15 @@ async function handleNewPointCapture(file: File): Promise<void> {
 async function handleAgainPhotoCapture(pointId: string, file: File): Promise<void> {
   try {
     const thumb = await fileToThumbnailDataUrl(file);
+    await applyAgainPhotoThumb(pointId, thumb);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Could not read photo.';
+    surfaceFail(msg, 'photo');
+  }
+}
+
+async function applyAgainPhotoThumb(pointId: string, thumb: string): Promise<void> {
+  try {
     const result = appendPhotoToPoint(state.doc, pointId, {
       thumbnailDataUrl: thumb,
       yawOnly: true,
@@ -235,7 +460,7 @@ async function handleAgainPhotoCapture(pointId: string, file: File): Promise<voi
       result.doc.session.speakSteps,
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Could not read photo.';
+    const msg = err instanceof Error ? err.message : 'Could not use photo.';
     surfaceFail(msg, 'photo');
   }
 }
@@ -302,6 +527,7 @@ function closePointDialog(): void {
         ...state.doc.session,
         mode: 'MENU',
         inspectingPointId: undefined,
+        selectedPhotoId: undefined,
       },
     },
     pointDialog: null,
@@ -841,6 +1067,45 @@ function onShellClick(e: Event): void {
     launchAgainPhotoCamera(pointId);
     return;
   }
+  if (cmd === 'select-photo') {
+    const photoId = target.getAttribute('data-photo-id');
+    if (!photoId) return;
+    setDoc(
+      {
+        ...state.doc,
+        session: { ...state.doc.session, selectedPhotoId: photoId },
+      },
+      null,
+    );
+    return;
+  }
+  if (cmd === 'delete-photo') {
+    const pointId =
+      state.doc.session.inspectingPointId ?? state.doc.session.currentAddPointId;
+    const photoId = state.doc.session.selectedPhotoId;
+    if (!pointId || !photoId) {
+      surfaceFail('Select a photo to delete.', 'photo');
+      return;
+    }
+    if (!window.confirm('Delete this photo from the point?')) return;
+    const result = deletePhotoFromPoint(state.doc, pointId, photoId);
+    if (result.reason) {
+      surfaceFail(result.reason, 'delete-photo');
+      setDoc(result.doc, result.reason);
+      return;
+    }
+    setDoc(result.doc, null);
+    setState({
+      pointDialog: state.pointDialog === 'inspect' ? 'inspect' : 'add',
+      pendingPointThumb: null,
+      menuOpen: false,
+    });
+    speakCoachLine(
+      result.doc.session.lastAction ?? 'Photo deleted.',
+      result.doc.session.speakSteps,
+    );
+    return;
+  }
   if (cmd === 'delete-point') {
     const pointId = state.doc.session.inspectingPointId;
     if (!pointId || state.pointDialog !== 'inspect') return;
@@ -877,10 +1142,26 @@ function onShellClick(e: Event): void {
       setDoc(result.doc, result.reason);
       return;
     }
-    setDoc(result.doc, null);
-    if (state.pointDialog === 'inspect') {
-      setState({ pointDialog: null, pendingPointThumb: null });
-    }
+    // Keep + Point dialog open — neutral reset (fallback layer, no sticky item/point).
+    const doc = {
+      ...result.doc,
+      session: {
+        ...result.doc.session,
+        mode: 'ADD_POINT' as const,
+        inspectingPointId: undefined,
+        stickyObjectId: undefined,
+        stickyObjectName: undefined,
+        currentAddPointId: undefined,
+        selectedPhotoId: undefined,
+      },
+    };
+    setDoc(doc, null);
+    setState({
+      pointDialog: 'add',
+      pendingPointThumb: null,
+      menuOpen: false,
+    });
+    speakCoachLine(doc.session.lastAction ?? 'Layer deleted.', doc.session.speakSteps);
     return;
   }
   if (cmd === 'delete-item') {
@@ -901,10 +1182,26 @@ function onShellClick(e: Event): void {
       setDoc(result.doc, result.reason);
       return;
     }
-    setDoc(result.doc, null);
-    if (state.pointDialog === 'inspect') {
-      setState({ pointDialog: null, pendingPointThumb: null });
-    }
+    // Keep + Point dialog open — ready for + Item / pick another item.
+    const doc = {
+      ...result.doc,
+      session: {
+        ...result.doc.session,
+        mode: 'ADD_POINT' as const,
+        inspectingPointId: undefined,
+        stickyObjectId: undefined,
+        stickyObjectName: undefined,
+        currentAddPointId: undefined,
+        selectedPhotoId: undefined,
+      },
+    };
+    setDoc(doc, null);
+    setState({
+      pointDialog: 'add',
+      pendingPointThumb: null,
+      menuOpen: false,
+    });
+    speakCoachLine(doc.session.lastAction ?? 'Item deleted.', doc.session.speakSteps);
     return;
   }
   if (cmd === 'inspect-point') {
@@ -913,11 +1210,17 @@ function onShellClick(e: Event): void {
     const pt = state.doc.points.find((p) => p.id === pointId);
     if (!pt) return;
     // Seed sticky panel from this point's measurement history
+    const seedPhoto =
+      state.doc.session.selectedPhotoId &&
+      (pt.photoIds ?? []).includes(state.doc.session.selectedPhotoId)
+        ? state.doc.session.selectedPhotoId
+        : pt.photoIds?.[pt.photoIds.length - 1];
     let doc = {
       ...state.doc,
       session: {
         ...state.doc.session,
         inspectingPointId: pointId,
+        selectedPhotoId: seedPhoto,
         stickyLayerId: pt.layerId ?? state.doc.session.stickyLayerId,
         stickyObjectId: pt.objectId ?? state.doc.session.stickyObjectId,
         stickyObjectName:
@@ -942,6 +1245,14 @@ function onShellClick(e: Event): void {
   }
   if (cmd === 'close-inspector' || cmd === 'close-point-dialog') {
     closePointDialog();
+    return;
+  }
+  if (cmd === 'point-ui-smaller') {
+    bumpPointUiScale(-POINT_UI_SCALE_STEP);
+    return;
+  }
+  if (cmd === 'point-ui-larger') {
+    bumpPointUiScale(POINT_UI_SCALE_STEP);
     return;
   }
   if (cmd === 'apply-inspector') {
@@ -1906,18 +2217,29 @@ async function fileToThumbnailDataUrl(file: File, maxEdge = 480): Promise<string
   }
 }
 
-function hierOps(plusCmd: string, minusCmd: string, opts: { plusTitle: string; minusTitle: string; minusDisabled?: boolean }): HTMLElement {
+function hierOps(
+  plusCmd: string,
+  minusCmd: string,
+  opts: {
+    plusTitle: string;
+    minusTitle: string;
+    minusDisabled?: boolean;
+    plusDisabled?: boolean;
+  },
+): HTMLElement {
   const ops = el('div', { className: 'hier-row__ops' });
+  const plusAttrs: Record<string, string | undefined> = {
+    type: 'button',
+    'data-cmd': plusCmd,
+    'aria-label': opts.plusTitle,
+    title: opts.plusTitle,
+  };
+  if (opts.plusDisabled) plusAttrs.disabled = 'true';
   ops.appendChild(
     el('button', {
       className: 'btn btn--hier',
       text: '+',
-      attrs: {
-        type: 'button',
-        'data-cmd': plusCmd,
-        'aria-label': opts.plusTitle,
-        title: opts.plusTitle,
-      },
+      attrs: plusAttrs,
     }),
   );
   const minusAttrs: Record<string, string | undefined> = {
@@ -1948,7 +2270,7 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
       'data-testid': 'point-dialog',
       role: 'dialog',
       'aria-label': mode === 'inspect' ? 'Point inspector' : '+ Point',
-      style: `transform: translate(${pointDialogPos.x}px, ${pointDialogPos.y}px)`,
+      style: `transform: translate(${pointDialogPos.x}px, ${pointDialogPos.y}px); --point-ui-scale: ${pointUiScale}`,
     },
   });
 
@@ -1972,6 +2294,37 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
     }),
   );
   head.appendChild(drag);
+  const typeScale = el('div', {
+    className: 'point-dialog__type-scale',
+    attrs: { 'data-testid': 'point-ui-scale' },
+  });
+  typeScale.appendChild(
+    el('button', {
+      className: 'btn btn--util point-dialog__type-btn',
+      text: 'A−',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'point-ui-smaller',
+        'data-testid': 'point-ui-smaller',
+        'aria-label': 'Smaller point dialog text',
+        title: 'Smaller',
+      },
+    }),
+  );
+  typeScale.appendChild(
+    el('button', {
+      className: 'btn btn--util point-dialog__type-btn',
+      text: 'A+',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'point-ui-larger',
+        'data-testid': 'point-ui-larger',
+        'aria-label': 'Larger point dialog text',
+        title: 'Larger',
+      },
+    }),
+  );
+  head.appendChild(typeScale);
   head.appendChild(
     el('button', {
       className: 'btn btn--util point-dialog__close',
@@ -2185,28 +2538,49 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
 
   dialog.appendChild(stack);
 
-  // Photos: + Photo = same-station / yaw (inspect or after a point exists). Thumbs strip.
+  // Photos: hierarchy +/− (+ = + Photo, − = delete selected); thumbs + offset list.
   const photosSection = el('div', {
     className: 'point-dialog__photos',
     attrs: { 'data-testid': 'point-photos' },
   });
+  const thumbPoint =
+    pt ??
+    (doc.session.currentAddPointId
+      ? doc.points.find((p) => p.id === doc.session.currentAddPointId)
+      : undefined);
+  const pointPhotos = (thumbPoint?.photoIds ?? [])
+    .map((id) => doc.photos.find((p) => p.id === id))
+    .filter(Boolean);
+  const selectedPhotoId =
+    (doc.session.selectedPhotoId &&
+    pointPhotos.some((p) => p!.id === doc.session.selectedPhotoId)
+      ? doc.session.selectedPhotoId
+      : pointPhotos[pointPhotos.length - 1]?.id) ?? undefined;
+
+  const photoRow = el('div', { className: 'hier-row' });
+  const photoMain = el('div', { className: 'hier-row__main' });
+  photoMain.appendChild(el('span', { className: 'hier-row__label', text: 'Photo' }));
+  photoMain.appendChild(
+    el('span', {
+      className: 'hier-row__value',
+      text: selectedPhotoId
+        ? `${selectedPhotoId}${pointPhotos.length > 1 ? ` · ${pointPhotos.length}` : ''}`
+        : 'none',
+      attrs: { 'data-testid': 'hier-photo-id' },
+    }),
+  );
+  photoRow.appendChild(photoMain);
+  photoRow.appendChild(
+    hierOps('again-photo', 'delete-photo', {
+      plusTitle: '+ Photo',
+      minusTitle: '− Photo',
+      plusDisabled: !thumbPoint,
+      minusDisabled: !selectedPhotoId || pointPhotos.length <= 1,
+    }),
+  );
+  photosSection.appendChild(photoRow);
+
   const captureRow = el('div', { className: 'point-dialog__capture' });
-  const againPointId = pt?.id ?? doc.session.currentAddPointId;
-  if (againPointId) {
-    captureRow.appendChild(
-      el('button', {
-        className: 'btn btn--util point-dialog__capture-btn',
-        text: '+ Photo',
-        attrs: {
-          type: 'button',
-          'data-cmd': 'again-photo',
-          'data-testid': 'again-photo',
-          'aria-label': 'Another photo on this point',
-          title: 'Again — same station, yaw only',
-        },
-      }),
-    );
-  }
   if (mode === 'inspect' || doc.session.stickyObjectId) {
     captureRow.appendChild(
       el('button', {
@@ -2235,33 +2609,65 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
   );
   photosSection.appendChild(captureRow);
 
-  const strip = el('ul', { className: 'point-dialog__photo-strip' });
-  let hasThumb = false;
-  const thumbPoint =
-    pt ??
-    (doc.session.currentAddPointId
-      ? doc.points.find((p) => p.id === doc.session.currentAddPointId)
-      : undefined);
-  if (thumbPoint) {
-    const photos = (thumbPoint.photoIds ?? [])
-      .map((id) => doc.photos.find((p) => p.id === id))
-      .filter(Boolean);
-    for (const ph of photos) {
+  if (pointPhotos.length && thumbPoint) {
+    const strip = el('ul', { className: 'point-dialog__photo-strip' });
+    for (const ph of pointPhotos) {
       if (!ph?.thumbnailDataUrl) continue;
-      hasThumb = true;
+      const selected = ph.id === selectedPhotoId;
       const li = el('li', {
         className:
-          'point-dialog__thumb' + (ph!.yawOnly ? ' point-dialog__thumb--yaw' : ''),
+          'point-dialog__thumb' +
+          (ph.yawOnly ? ' point-dialog__thumb--yaw' : '') +
+          (selected ? ' point-dialog__thumb--selected' : ''),
+      });
+      const btn = el('button', {
+        className: 'point-dialog__thumb-btn',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'select-photo',
+          'data-photo-id': ph.id,
+          'aria-label': `Select ${ph.id}`,
+          title: ph.note ?? ph.id,
+        },
       });
       const img = document.createElement('img');
-      img.src = ph!.thumbnailDataUrl;
-      img.alt = ph!.id;
-      img.title = ph!.note ?? ph!.id;
-      li.appendChild(img);
+      img.src = ph.thumbnailDataUrl;
+      img.alt = ph.id;
+      btn.appendChild(img);
+      li.appendChild(btn);
       strip.appendChild(li);
     }
+    photosSection.appendChild(strip);
+
+    // Compact per-photo offsets from the combined (average) point — outliers readable.
+    if (pointPhotos.length > 1 && thumbPoint.x != null && thumbPoint.y != null) {
+      const list = el('ul', {
+        className: 'point-dialog__photo-offsets',
+        attrs: { 'data-testid': 'photo-offsets' },
+      });
+      pointPhotos.forEach((ph, i) => {
+        if (!ph) return;
+        const est = photoEstimateAt(ph, thumbPoint, i);
+        const dxMm = (est.x - thumbPoint.x!) * 1000;
+        const dyMm = (est.y - thumbPoint.y!) * 1000;
+        const e = Math.hypot(dxMm, dyMm);
+        const selected = ph.id === selectedPhotoId;
+        list.appendChild(
+          el('li', {
+            className:
+              'point-dialog__photo-offset' +
+              (selected ? ' point-dialog__photo-offset--selected' : ''),
+            text: `${ph.id}${ph.yawOnly ? ' yaw' : ''} · Δ${e.toFixed(0)} mm (E ${dxMm >= 0 ? '+' : ''}${dxMm.toFixed(0)}, N ${dyMm >= 0 ? '+' : ''}${dyMm.toFixed(0)})`,
+            attrs: {
+              'data-cmd': 'select-photo',
+              'data-photo-id': ph.id,
+            },
+          }),
+        );
+      });
+      photosSection.appendChild(list);
+    }
   }
-  if (hasThumb) photosSection.appendChild(strip);
 
   if (pt) {
     const obj = pt.objectId ? doc.objects?.find((o) => o.id === pt.objectId) : undefined;
@@ -2626,13 +3032,14 @@ function buildMenuDrawer(
     ['+ Item', 'New named thing on the current layer.'],
     ['+ Layer', 'New grouping plane in this garden.'],
     ['+ Photo', 'Another photo on the **current** point (yaw / same station).'],
+    ['− Photo', 'Remove the selected photo (keep ≥1, or delete the point).'],
     ['− Point / Item / Layer', 'Delete that level (confirm when destructive).'],
     ['Baseline', 'Control segment used for measurements.'],
     ['Garden', 'This survey document (single garden for now).'],
     ['Layer', 'Grouping plane for items (e.g. walkway, bed).'],
     ['Item', 'Named thing you measure points on.'],
     ['Geometry', 'Shape hint for the item (square, circle, …).'],
-    ['Photo', 'Rear camera on + Point places a new point; + Photo repeats here.'],
+    ['Photo', 'In-app shutter (or system picker fallback); + Point places a new point; + Photo repeats here.'],
     ['Pinch / pan', 'Zooms and pans the garden plan only; dialogs and ☰ stay fixed.'],
     ['Menu', 'Idle mode when no workflow dialog is open.'],
   ];
