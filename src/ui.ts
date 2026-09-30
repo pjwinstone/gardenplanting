@@ -17,11 +17,19 @@ import { renderTagsPrintHtml, triggerPrint } from './tagsPrint';
 import { isSignedIn, signIn, signOut, subscribeAuth, type AuthInitResult } from './msalAuth';
 import {
   getCloudStatus,
+  notifyCloudPrefsChanged,
+  refreshGardenFileList,
   setCloudBusy,
   setCloudMessage,
   setLastSaveIso,
   subscribeCloud,
 } from './cloudStatus';
+import {
+  getGardenCloudFileName,
+  getGardenCloudVersion,
+  setGardenCloudFileName,
+  setGardenCloudVersion,
+} from './cloudConfig';
 import { appBuild, appVersion, buildMenuTitle, buildStamp } from './buildInfo';
 import { STAGE2_FIELD_STEPS } from './stage2Checklist';
 import {
@@ -808,7 +816,7 @@ async function quietCloudSave(doc: GardenDocument): Promise<void> {
   const result = await saveGardenCloud(doc);
   if (result.ok) {
     setLastSaveIso(result.savedAt);
-    setCloudMessage(`Saved to OneDrive (${getCloudStatus().pathHint}).`);
+    setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
   } else {
     setCloudMessage(`Could not auto-save to OneDrive: ${result.error}`);
   }
@@ -855,10 +863,11 @@ export function applyAuthReady(init: AuthInitResult): void {
 
   const who = init.accountLabel ? ` as ${init.accountLabel}` : '';
   if (init.fromRedirect) {
-    setCloudMessage(`Signed in${who}. Loading garden.json from OneDrive…`);
+    setCloudMessage(`Signed in${who}. Loading garden from OneDrive…`);
     void restoreFromOneDriveAfterSignIn();
   } else {
     setCloudMessage(`Signed in${who}. Session restored on this device.`);
+    void refreshGardenFileList();
   }
 }
 
@@ -867,11 +876,12 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   setCloudBusy(true);
   const result = await loadGardenCloud();
   setCloudBusy(false);
+  void refreshGardenFileList();
   if (!result.ok) {
     // Missing file is normal on first save — still signed in.
     if (result.missing) {
       setCloudMessage(
-        `Signed in. No garden.json on OneDrive yet — use Save to OneDrive when ready.`,
+        `Signed in. No garden file on OneDrive yet — set Version and Save when ready.`,
       );
       return;
     }
@@ -880,8 +890,17 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
     setCloudMessage(msg);
     return;
   }
+  if (result.usedLegacy) {
+    setGardenCloudFileName(result.fileName);
+    notifyCloudPrefsChanged();
+  } else {
+    setGardenCloudFileName(result.fileName);
+    notifyCloudPrefsChanged();
+  }
   setDoc(result.doc, null);
-  setCloudMessage(`Signed in. Loaded from OneDrive (${getCloudStatus().pathHint}).`);
+  setCloudMessage(
+    `Signed in. Loaded ${result.fileName}${result.usedLegacy ? ' (legacy)' : ''} (${getCloudStatus().pathHint}).`,
+  );
 }
 
 function onShellClick(e: Event): void {
@@ -1445,11 +1464,20 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'onedrive-save') {
+    const panel = target.closest('.cloud-status');
+    const ver = panel?.querySelector('[data-cmd=garden-version]') as HTMLInputElement | null;
+    if (ver) {
+      setGardenCloudVersion(ver.value);
+      notifyCloudPrefsChanged();
+    }
     void onOneDriveSave();
     return;
   }
   if (cmd === 'onedrive-load') {
-    void onOneDriveLoad();
+    const panel = target.closest('.cloud-status');
+    const pick = panel?.querySelector('[data-field=onedrive-file]') as HTMLSelectElement | null;
+    const chosen = pick?.value?.trim();
+    void onOneDriveLoad(chosen || undefined);
     return;
   }
 }
@@ -1480,31 +1508,39 @@ async function onSignOut(): Promise<void> {
 }
 
 async function onOneDriveSave(): Promise<void> {
+  const fileName = getGardenCloudFileName();
   setCloudBusy(true);
-  setCloudMessage('Saving garden.json to OneDrive…');
-  const result = await saveGardenCloud(state.doc);
+  setCloudMessage(`Saving ${fileName} to OneDrive…`);
+  const result = await saveGardenCloud(state.doc, fileName);
   setCloudBusy(false);
   if (result.ok) {
     setLastSaveIso(result.savedAt);
-    setCloudMessage(`Saved to OneDrive (${getCloudStatus().pathHint}).`);
+    setCloudMessage(`Saved ${result.fileName} to OneDrive (${getCloudStatus().pathHint}).`);
+    void refreshGardenFileList();
   } else {
     logError(result.error, { source: 'onedrive' });
     setCloudMessage(result.error);
   }
 }
 
-async function onOneDriveLoad(): Promise<void> {
+async function onOneDriveLoad(fileName?: string): Promise<void> {
+  const target = fileName || getGardenCloudFileName();
   setCloudBusy(true);
-  setCloudMessage('Loading garden.json from OneDrive…');
-  const result = await loadGardenCloud();
+  setCloudMessage(`Loading ${target} from OneDrive…`);
+  const result = await loadGardenCloud(target);
   setCloudBusy(false);
+  void refreshGardenFileList();
   if (!result.ok) {
     logError(result.error, { source: 'onedrive' });
     setCloudMessage(result.error);
     return;
   }
+  setGardenCloudFileName(result.fileName);
+  notifyCloudPrefsChanged();
   setDoc(result.doc, null);
-  setCloudMessage(`Loaded from OneDrive (${getCloudStatus().pathHint}). Browser cache updated.`);
+  setCloudMessage(
+    `Loaded ${result.fileName}${result.usedLegacy ? ' (legacy garden.json)' : ''} from OneDrive. Browser cache updated.`,
+  );
 }
 
 function onShellChange(e: Event): void {
@@ -1559,6 +1595,18 @@ function onShellChange(e: Event): void {
     const id = t.getAttribute('data-baseline-id');
     if (!id) return;
     setDoc(setBaselineTrust(state.doc, id, Number(t.value)), null);
+    return;
+  }
+  if (cmd === 'garden-version') {
+    setGardenCloudVersion((t as HTMLInputElement).value);
+    notifyCloudPrefsChanged();
+    return;
+  }
+  if (cmd === 'onedrive-pick-file') {
+    const name = (t as HTMLSelectElement).value?.trim();
+    if (!name) return;
+    setGardenCloudFileName(name);
+    notifyCloudPrefsChanged();
     return;
   }
 }
@@ -3127,12 +3175,94 @@ function buildCloudPanel(): HTMLElement {
       text: cloud.lastSaveLabel,
     }),
   );
+
+  // Version + filename — always visible so prefs can be set before/after sign-in.
+  const verRow = el('div', { className: 'cloud-status__row' });
+  verRow.appendChild(
+    el('label', {
+      className: 'cloud-status__label',
+      text: 'Version',
+      attrs: { for: 'garden-cloud-version' },
+    }),
+  );
+  const verInput = el('input', {
+    className: 'cloud-status__version',
+    attrs: {
+      id: 'garden-cloud-version',
+      type: 'text',
+      inputmode: 'decimal',
+      autocomplete: 'off',
+      spellcheck: 'false',
+      maxlength: '24',
+      value: getGardenCloudVersion(),
+      'data-cmd': 'garden-version',
+      'data-testid': 'garden-version',
+      'aria-label': 'Garden file version',
+      placeholder: '1',
+      disabled: cloud.busy ? 'true' : undefined,
+    },
+  }) as HTMLInputElement;
+  verRow.appendChild(verInput);
+  panel.appendChild(verRow);
+
   panel.appendChild(
     el('p', {
       className: 'cloud-status__line cloud-status__meta',
-      text: `OneDrive path: ${cloud.pathHint}`,
+      text: cloud.pathHint,
+      attrs: { 'data-testid': 'onedrive-path' },
     }),
   );
+
+  if (cloud.signedIn) {
+    if (cloud.gardenFiles === null) {
+      void refreshGardenFileList();
+    }
+    const fileRow = el('div', { className: 'cloud-status__row' });
+    fileRow.appendChild(
+      el('label', {
+        className: 'cloud-status__label',
+        text: 'Load',
+        attrs: { for: 'onedrive-file-pick' },
+      }),
+    );
+    const sel = el('select', {
+      className: 'cloud-status__file',
+      attrs: {
+        id: 'onedrive-file-pick',
+        'data-field': 'onedrive-file',
+        'data-cmd': 'onedrive-pick-file',
+        'data-testid': 'onedrive-file',
+        'aria-label': 'Garden file on OneDrive',
+        disabled: cloud.busy ? 'true' : undefined,
+      },
+    }) as HTMLSelectElement;
+    const names = new Set<string>();
+    names.add(cloud.fileName);
+    for (const f of cloud.gardenFiles ?? []) names.add(f.name);
+    const sorted = [...names].sort((a, b) => {
+      const ag = /^garden/i.test(a) ? 0 : 1;
+      const bg = /^garden/i.test(b) ? 0 : 1;
+      if (ag !== bg) return ag - bg;
+      return a.localeCompare(b);
+    });
+    if (!sorted.length) {
+      const empty = document.createElement('option');
+      empty.value = cloud.fileName;
+      empty.textContent = cloud.gardenFiles === null ? 'Listing…' : cloud.fileName;
+      empty.selected = true;
+      sel.appendChild(empty);
+    } else {
+      for (const name of sorted) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        if (name === cloud.fileName) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+    fileRow.appendChild(sel);
+    panel.appendChild(fileRow);
+  }
 
   if (cloud.message) {
     panel.appendChild(
@@ -3168,22 +3298,24 @@ function buildCloudPanel(): HTMLElement {
     row.appendChild(
       el('button', {
         className: 'btn btn--util',
-        text: 'Save to OneDrive',
+        text: 'Save',
         attrs: {
           type: 'button',
           'data-cmd': 'onedrive-save',
           disabled: cloud.busy ? 'true' : undefined,
+          title: `Save ${cloud.fileName}`,
         },
       }),
     );
     row.appendChild(
       el('button', {
         className: 'btn btn--util',
-        text: 'Load from OneDrive',
+        text: 'Load',
         attrs: {
           type: 'button',
           'data-cmd': 'onedrive-load',
           disabled: cloud.busy ? 'true' : undefined,
+          title: `Load selected file`,
         },
       }),
     );

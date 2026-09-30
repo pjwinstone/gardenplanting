@@ -19,4 +19,4 @@ export {
   type ModeAction,
   type TransitionResult,
 } from './mode';
-export { saveGardenCloud, loadGardenCloud, type CloudLoadResult, type CloudSaveResult } from './cloud';
+export { saveGardenCloud, loadGardenCloud, listGardenCloudFiles, type CloudLoadResult, type CloudSaveResult, type GardenCloudFile } from './cloud';

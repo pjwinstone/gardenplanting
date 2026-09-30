@@ -1069,8 +1069,67 @@ body {
 .cloud-status__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.65rem;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.cloud-status__row {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+  margin: 0.35rem 0;
+}
+
+.cloud-status__label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0;
+}
+
+.cloud-status__version,
+.cloud-status__file {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.cloud-status__version:focus,
+.cloud-status__file:focus {
+  outline: 2px solid var(--moss);
+  outline-offset: 1px;
+}
+
+@media (max-width: 420px) {
+  .cloud-status {
+    padding: 0.65rem 0.75rem;
+  }
+
+  .cloud-status__line {
+    font-size: 0.9rem;
+  }
+
+  .cloud-status__meta {
+    font-size: 0.74rem;
+    word-break: break-all;
+  }
+
+  .cloud-status__actions .btn {
+    flex: 1 1 auto;
+    min-width: 4.5rem;
+    padding: 0.45rem 0.55rem;
+    font-size: 0.88rem;
+  }
 }
 
 .actions {

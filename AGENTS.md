@@ -82,7 +82,7 @@ JSON document: points (with optional `offsetMm`), lines, polygons, **baselines**
 
 Architecture: `docs/architecture-toolbox-workflows.md`. Method plan: `docs/plan-baseline-then-house.md`. Layers/objects plan: `docs/plan-layers-objects-add-point.md`.
 
-localStorage + export/import garden.json. OneDrive via Microsoft Graph (`/Garden Survey/garden.json`) when MSAL env is set — see `docs/entra-onedrive-setup.md`.
+localStorage + export/import garden.json. OneDrive via Microsoft Graph (`/Garden Survey/garden-v{version}.json`, legacy `garden.json` still loadable) when MSAL env is set — see `docs/entra-onedrive-setup.md`. Version/name remembered in local prefs (Sign in accordion).
 
 ## First milestone (historical) + Stage 2
 1. Minimal coach chrome + hamburger drawer + legal transitions.

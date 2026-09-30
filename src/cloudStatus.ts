@@ -1,8 +1,13 @@
 /** Coach-visible Microsoft / OneDrive sync status. */
 
-import { ONEDRIVE_PATH } from './cloudConfig';
-import { msalConfigured } from './cloudConfig';
+import {
+  getGardenCloudFileName,
+  msalConfigured,
+  onedrivePathFor,
+} from './cloudConfig';
 import { displayName, isSignedIn } from './msalAuth';
+import type { GardenCloudFile } from './onedrive';
+import { listGardenFilesOnOneDrive } from './onedrive';
 
 const LAST_SAVE_KEY = 'garden-survey:onedrive-last-save';
 
@@ -17,6 +22,10 @@ export interface CloudStatus {
   message: string | null;
   busy: boolean;
   pathHint: string;
+  /** Current garden filename under /Garden Survey/. */
+  fileName: string;
+  /** Cached listing for Load picker (null = not fetched yet). */
+  gardenFiles: GardenCloudFile[] | null;
 }
 
 type Listener = () => void;
@@ -24,6 +33,8 @@ const listeners: Listener[] = [];
 
 let message: string | null = null;
 let busy = false;
+let gardenFiles: GardenCloudFile[] | null = null;
+let listInFlight = false;
 
 export function subscribeCloud(fn: Listener): () => void {
   listeners.push(fn);
@@ -64,6 +75,25 @@ export function setCloudBusy(value: boolean): void {
   notify();
 }
 
+export function getCachedGardenFiles(): GardenCloudFile[] | null {
+  return gardenFiles;
+}
+
+/** Refresh /Garden Survey JSON listing for the Load picker. */
+export async function refreshGardenFileList(): Promise<void> {
+  if (!msalConfigured() || !isSignedIn() || listInFlight) return;
+  listInFlight = true;
+  try {
+    const result = await listGardenFilesOnOneDrive();
+    if (result.ok) {
+      gardenFiles = result.files;
+      notify();
+    }
+  } finally {
+    listInFlight = false;
+  }
+}
+
 function formatWhen(iso: string | null): string {
   if (!iso) return 'Never saved to OneDrive from this browser.';
   const d = new Date(iso);
@@ -84,6 +114,7 @@ export function getCloudStatus(): CloudStatus {
   const lastSaveIso = getLastSaveIso();
   let accountLabel: string | null = null;
   if (signedIn) accountLabel = displayName();
+  const fileName = getGardenCloudFileName();
 
   return {
     configured,
@@ -93,6 +124,13 @@ export function getCloudStatus(): CloudStatus {
     lastSaveLabel: formatWhen(lastSaveIso),
     message,
     busy,
-    pathHint: `/${ONEDRIVE_PATH}`,
+    fileName,
+    pathHint: `/${onedrivePathFor(fileName)}`,
+    gardenFiles,
   };
+}
+
+/** Notify listeners after garden file/version pref changes. */
+export function notifyCloudPrefsChanged(): void {
+  notify();
 }
