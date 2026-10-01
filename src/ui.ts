@@ -48,6 +48,7 @@ import {
   canTransition,
   legalActions,
   persistGardenLocal,
+  clearCachedGarden,
   exportGarden,
   importGarden,
   loadCachedGarden,
@@ -208,7 +209,8 @@ function stopInAppCamera(): void {
   cameraOverlay = null;
 }
 
-function videoToThumbnailDataUrl(video: HTMLVideoElement, maxEdge = 960): string {
+/** Capture thumbs for in-memory + OneDrive (local cache strips these). */
+function videoToThumbnailDataUrl(video: HTMLVideoElement, maxEdge = 640): string {
   const vw = video.videoWidth || 1280;
   const vh = video.videoHeight || 960;
   const scale = Math.min(1, maxEdge / Math.max(vw, vh));
@@ -220,7 +222,7 @@ function videoToThumbnailDataUrl(video: HTMLVideoElement, maxEdge = 960): string
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas unavailable');
   ctx.drawImage(video, 0, 0, w, h);
-  return canvas.toDataURL('image/jpeg', 0.85);
+  return canvas.toDataURL('image/jpeg', 0.72);
 }
 
 /**
@@ -789,14 +791,42 @@ function setState(partial: Partial<UiState>): void {
   // on legal transitions while illegal refusals (no save) still appear to work.
   if (partial.doc) {
     const saved = persistGardenLocal(partial.doc);
-    if (!saved.ok && !state.refuseMessage) {
-      const msg = `Working copy updated, but could not save to this browser (${saved.error}). Export garden.json to keep your work.`;
-      logError(msg, { source: 'persist' });
-      state = { ...state, refuseMessage: msg };
+    if (!saved.ok) {
+      handleLocalPersistFailure(partial.doc, saved);
+    } else if (state.refuseMessage && /browser|quota|storage/i.test(state.refuseMessage)) {
+      state = { ...state, refuseMessage: null };
     }
     scheduleCloudBackup(partial.doc);
   }
   for (const fn of [...listeners]) fn();
+}
+
+/** Local draft is best-effort; OneDrive is source of truth when signed in. */
+function handleLocalPersistFailure(
+  doc: GardenDocument,
+  saved: { error: string; quotaExceeded?: boolean },
+): void {
+  const quota = Boolean(saved.quotaExceeded);
+  if (quota && isSignedIn()) {
+    // Soft status only — queue OneDrive immediately; do not alarm the hamburger.
+    setCloudMessage(
+      'Photos filled this browser’s storage. Saving to OneDrive (cloud is source of truth)…',
+    );
+    if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+    cloudSaveTimer = null;
+    void quietCloudSave(doc, { afterLocalQuota: true });
+    return;
+  }
+  if (quota) {
+    const msg =
+      'Photos filled this browser’s storage. Export garden.json, sign in to use OneDrive, or clear the browser cache for this site (Sign in → Clear local cache).';
+    logError(msg, { source: 'persist-quota' });
+    if (!state.refuseMessage) state = { ...state, refuseMessage: msg };
+    return;
+  }
+  const msg = `Working copy updated, but could not save to this browser (${saved.error}). Export garden.json to keep your work.`;
+  logError(msg, { source: 'persist' });
+  if (!state.refuseMessage) state = { ...state, refuseMessage: msg };
 }
 
 function setDoc(doc: GardenDocument, refuse: string | null = null): void {
@@ -811,14 +841,31 @@ function scheduleCloudBackup(doc: GardenDocument): void {
   }, 2500);
 }
 
-async function quietCloudSave(doc: GardenDocument): Promise<void> {
+async function quietCloudSave(
+  doc: GardenDocument,
+  opts: { afterLocalQuota?: boolean } = {},
+): Promise<void> {
   if (!isSignedIn()) return;
   const result = await saveGardenCloud(doc);
   if (result.ok) {
     setLastSaveIso(result.savedAt);
-    setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
+    if (opts.afterLocalQuota) {
+      setCloudMessage(
+        `Browser storage full (photos) — saved ${result.fileName} to OneDrive. Load from OneDrive on other devices; Clear local cache if this browser stays full.`,
+      );
+      if (state.refuseMessage && /browser|quota|storage/i.test(state.refuseMessage)) {
+        state = { ...state, refuseMessage: null };
+        for (const fn of [...listeners]) fn();
+      }
+    } else {
+      setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
+    }
   } else {
-    setCloudMessage(`Could not auto-save to OneDrive: ${result.error}`);
+    setCloudMessage(
+      opts.afterLocalQuota
+        ? `Browser storage full, and OneDrive save failed: ${result.error}. Export garden.json now.`
+        : `Could not auto-save to OneDrive: ${result.error}`,
+    );
   }
 }
 
@@ -1479,6 +1526,18 @@ function onShellClick(e: Event): void {
     const pick = panel?.querySelector('[data-field=onedrive-file]') as HTMLSelectElement | null;
     const chosen = pick?.value?.trim();
     void onOneDriveLoad(chosen || undefined);
+    return;
+  }
+  if (cmd === 'clear-local-cache') {
+    clearCachedGarden();
+    setCloudMessage(
+      'Cleared browser garden cache (photo thumbs were not stored locally). In-memory work kept — Save to OneDrive or Export to keep it.',
+    );
+    if (state.refuseMessage && /browser|quota|storage/i.test(state.refuseMessage)) {
+      setState({ refuseMessage: null });
+    } else {
+      for (const fn of [...listeners]) fn();
+    }
     return;
   }
 }
@@ -2252,7 +2311,7 @@ function errorLogSectionStatus(): {
 }
 
 /** Downscale a camera/gallery image to a JPEG data URL for Photo.thumbnailDataUrl. */
-async function fileToThumbnailDataUrl(file: File, maxEdge = 480): Promise<string> {
+async function fileToThumbnailDataUrl(file: File, maxEdge = 360): Promise<string> {
   const bitmap = await createImageBitmap(file);
   try {
     const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
@@ -2264,7 +2323,7 @@ async function fileToThumbnailDataUrl(file: File, maxEdge = 480): Promise<string
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas unavailable');
     ctx.drawImage(bitmap, 0, 0, w, h);
-    return canvas.toDataURL('image/jpeg', 0.82);
+    return canvas.toDataURL('image/jpeg', 0.7);
   } finally {
     bitmap.close();
   }
@@ -3336,6 +3395,17 @@ function buildCloudPanel(): HTMLElement {
       }),
     );
   }
+  row.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Clear local cache',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'clear-local-cache',
+        title: 'Remove slim garden draft from this browser (not OneDrive)',
+      },
+    }),
+  );
   panel.appendChild(row);
   return panel;
 }

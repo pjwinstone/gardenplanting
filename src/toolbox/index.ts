@@ -6,6 +6,7 @@ export {
   createEmptyGarden,
   createSyntheticGarden,
   persistGardenLocal,
+  clearCachedGarden,
   exportGarden,
   importGarden,
 } from './documentOps';

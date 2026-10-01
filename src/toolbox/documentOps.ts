@@ -7,6 +7,8 @@ import {
   exportGardenJson,
   importGardenJson,
   loadDocument,
+  clearDocument,
+  isQuotaExceededMessage,
 } from '../storage';
 
 export function loadCachedGarden(): GardenDocument | null {
@@ -23,10 +25,19 @@ export function createSyntheticGarden(): GardenDocument {
 
 export function persistGardenLocal(
   doc: GardenDocument,
-): { ok: true } | { ok: false; error: string } {
+): { ok: true } | { ok: false; error: string; quotaExceeded?: boolean } {
   const result = saveDocument(doc);
   if (result.ok) return { ok: true };
-  return { ok: false, error: result.error ?? 'localStorage save failed' };
+  return {
+    ok: false,
+    error: result.error ?? 'localStorage save failed',
+    quotaExceeded: result.quotaExceeded || isQuotaExceededMessage(result.error),
+  };
+}
+
+/** Drop the slim local draft (does not touch OneDrive or in-memory work). */
+export function clearCachedGarden(): void {
+  clearDocument();
 }
 
 export function exportGarden(doc: GardenDocument): void {

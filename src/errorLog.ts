@@ -41,6 +41,10 @@ function notify(): void {
 /** Classify a log line — red/☰ for real faults; info for soft workflow notes. */
 export function classifyLogSeverity(message: string, source?: string): LogSeverity {
   const src = (source ?? '').toLowerCase();
+  // Soft: browser cache full while OneDrive / export can still keep work
+  if (src === 'persist-quota' || /quota has been exceeded|filled (this )?browser/i.test(message)) {
+    return 'info';
+  }
   if (
     src === 'unhandledrejection' ||
     src === 'window.onerror' ||
