@@ -308,8 +308,8 @@ export function addPhotoMeasurement(
     estimate: { x: coords.x, y: coords.y },
     thumbnailDataUrl: hasRealThumb ? opts.thumbnailDataUrl! : placeholderThumb('#1a5f7a'),
     note: hasRealThumb
-      ? `Photo for ${id} via ${bl ? `${bl.a}–${bl.b}` : 'active ends'}`
-      : `Placeholder photo for ${id} via ${bl ? `${bl.a}–${bl.b}` : 'active ends'}`,
+      ? `Provisional ${id} off baseline ${bl ? `${bl.a}–${bl.b}` : '(ends)'} — tap marks later`
+      : `Provisional ${id} off baseline ${bl ? `${bl.a}–${bl.b}` : '(ends)'}`,
   };
 
   const objects = (next.objects ?? []).map((o) => {
@@ -667,33 +667,141 @@ export function deleteLayerMeasurement(
   return { doc: next };
 }
 
-function estimateNextPointCoords(
-  doc: GardenDocument,
-  obj: GardenObject,
-): { x: number; y: number } {
+type BaselineFrame = {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  len: number;
+  /** Unit along A→B. */
+  ux: number;
+  uy: number;
+  /** Unit left-normal of A→B (points on +side of the directed segment). */
+  nx: number;
+  ny: number;
+};
+
+function baselineFrameFromEnds(doc: GardenDocument): BaselineFrame | null {
   const ends = activeBaselineEnds(doc);
   const a = ends.a ? doc.points.find((p) => p.id === ends.a) : undefined;
   const b = ends.b ? doc.points.find((p) => p.id === ends.b) : undefined;
+  if (a?.x == null || a.y == null || b?.x == null || b.y == null) return null;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (!(len > 1e-6)) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  // Left normal when walking A→B.
+  return { ax: a.x, ay: a.y, bx: b.x, by: b.y, len, ux, uy, nx: -uy, ny: ux };
+}
+
+/** Signed distance to the infinite A–B line (metres); + = left of A→B. */
+function signedDistToBaseline(x: number, y: number, f: BaselineFrame): number {
+  return (x - f.ax) * f.nx + (y - f.ay) * f.ny;
+}
+
+function sideSign(x: number, y: number, f: BaselineFrame): 1 | -1 | 0 {
+  const d = signedDistToBaseline(x, y, f);
+  if (Math.abs(d) < 0.05) return 0; // on / nearly on the line
+  return d > 0 ? 1 : -1;
+}
+
+/** Majority side of points vs baseline; ties → 0. */
+function majoritySide(points: Point[], f: BaselineFrame): 1 | -1 | 0 {
+  let pos = 0;
+  let neg = 0;
+  for (const p of points) {
+    if (p.x == null || p.y == null) continue;
+    const s = sideSign(p.x, p.y, f);
+    if (s > 0) pos += 1;
+    else if (s < 0) neg += 1;
+  }
+  if (pos === neg) return 0;
+  return pos > neg ? 1 : -1;
+}
+
+/**
+ * Provisional OCC placement for + Point / camera-first until photo clicks resect.
+ * Never sits on the baseline segment: always a clear perpendicular offset on a
+ * consistent side (item majority → layer mates → last point → default left of A→B).
+ */
+export function estimateNextPointCoords(
+  doc: GardenDocument,
+  obj: GardenObject,
+): { x: number; y: number } {
+  const frame = baselineFrameFromEnds(doc);
   const measured = obj.measuredPointIds
     .map((id) => doc.points.find((p) => p.id === id))
     .filter((p): p is Point => !!p && p.x != null && p.y != null);
 
-  if (measured.length) {
+  const layerId = obj.layerId;
+  const layerMates = doc.points.filter(
+    (p) =>
+      p.layerId === layerId &&
+      p.x != null &&
+      p.y != null &&
+      (p.kind === 'OCC' || p.kind === 'BED' || p.kind === 'TRK') &&
+      !obj.measuredPointIds.includes(p.id),
+  );
+
+  const minOff = frame ? Math.max(1.5, frame.len * 0.2) : 2.5;
+  const step = frame ? Math.max(0.8, frame.len * 0.12) : 1.0;
+
+  let side: 1 | -1 = 1;
+  if (frame) {
+    const fromItem = majoritySide(measured, frame);
+    const fromLayer = majoritySide(layerMates, frame);
+    const last = measured[measured.length - 1];
+    const fromLast =
+      last?.x != null && last.y != null ? sideSign(last.x, last.y, frame) : 0;
+    if (fromItem !== 0) side = fromItem;
+    else if (fromLast !== 0) side = fromLast;
+    else if (fromLayer !== 0) side = fromLayer;
+  }
+
+  let x: number;
+  let y: number;
+
+  if (frame && measured.length) {
     const last = measured[measured.length - 1]!;
-    const angle = measured.length * 0.9;
-    const r = 0.6 + measured.length * 0.35;
-    return { x: last.x! + r * Math.cos(angle), y: last.y! + r * Math.sin(angle) };
+    const along = (last.x! - frame.ax) * frame.ux + (last.y! - frame.ay) * frame.uy;
+    const nextAlong = along + step;
+    x = frame.ax + frame.ux * nextAlong + frame.nx * side * minOff;
+    y = frame.ay + frame.uy * nextAlong + frame.ny * side * minOff;
+  } else if (frame) {
+    const mx = (frame.ax + frame.bx) / 2;
+    const my = (frame.ay + frame.by) / 2;
+    x = mx + frame.nx * side * minOff;
+    y = my + frame.ny * side * minOff;
+  } else if (measured.length) {
+    const last = measured[measured.length - 1]!;
+    x = last.x! + step;
+    y = last.y! + minOff;
+  } else {
+    const ends = activeBaselineEnds(doc);
+    const a = ends.a ? doc.points.find((p) => p.id === ends.a) : undefined;
+    if (a?.x != null && a.y != null) {
+      x = a.x + 1.5;
+      y = a.y + minOff;
+    } else {
+      x = 2;
+      y = minOff;
+    }
   }
-  if (a?.x != null && a.y != null && b?.x != null && b.y != null) {
-    const mx = (a.x + b.x) / 2;
-    const my = (a.y + b.y) / 2;
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
-    const len = Math.hypot(dx, dy) || 1;
-    return { x: mx - (dy / len) * 2.5, y: my + (dx / len) * 2.5 };
+
+  // Final guard: never leave a provisional OCC on/near the baseline segment.
+  if (frame) {
+    const dist = signedDistToBaseline(x, y, frame);
+    if (Math.abs(dist) < minOff * 0.85) {
+      const along = (x - frame.ax) * frame.ux + (y - frame.ay) * frame.uy;
+      const useSide: 1 | -1 = dist === 0 ? side : dist > 0 ? 1 : -1;
+      x = frame.ax + frame.ux * along + frame.nx * useSide * minOff;
+      y = frame.ay + frame.uy * along + frame.ny * useSide * minOff;
+    }
   }
-  if (a?.x != null && a.y != null) return { x: a.x + 1.5, y: a.y + 1.5 };
-  return { x: 2, y: 3 };
+
+  return { x, y };
 }
 
 export function refitObject(

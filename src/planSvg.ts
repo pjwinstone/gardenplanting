@@ -140,12 +140,19 @@ export function renderPlanSvg(doc: GardenDocument, width = 720, height = 560): s
       const isActiveEnd = p.id === ends.a || p.id === ends.b;
       const isInspect = p.id === inspecting;
       const r = isInspect ? 8 : isActiveEnd ? 7 : isScatter ? 6 : p.kind === 'ROD' ? 5 : 4;
+      // Provisional OCC/BED (no photo clicks yet) — dashed halo so off-baseline drafts read clearly.
+      const provisionalScatter =
+        isScatter &&
+        (p.photoIds ?? []).every((id) => {
+          const ph = doc.photos.find((x) => x.id === id);
+          return !ph || !(ph.clicks?.length);
+        });
       const ring = isInspect
         ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 5}" fill="none" stroke="#c45c26" stroke-width="2.5"/>`
         : isActiveEnd
           ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 3}" fill="none" stroke="#c45c26" stroke-width="1.5"/>`
           : isScatter
-            ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 2}" fill="none" stroke="#fffdf8" stroke-width="1.5" opacity="0.95"/>`
+            ? `<circle cx="${tx(p.x!)}" cy="${ty(p.y!)}" r="${r + 2}" fill="none" stroke="${provisionalScatter ? '#1a5f7a' : '#fffdf8'}" stroke-width="1.5" stroke-dasharray="${provisionalScatter ? '3 2' : 'none'}" opacity="0.95"/>`
             : '';
       const label = isScatter
         ? `<text x="${tx(p.x!) + 9}" y="${ty(p.y!) - 9}" font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" font-weight="700" fill="#1a5f7a">${escapeXml(p.id)}</text>`
