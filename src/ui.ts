@@ -801,16 +801,23 @@ function setState(partial: Partial<UiState>): void {
   for (const fn of [...listeners]) fn();
 }
 
-/** Local draft is best-effort; OneDrive is source of truth when signed in. */
+/**
+ * Local draft is best-effort; OneDrive is source of truth when signed in.
+ * Never sets refuseMessage / overlay — that covers + Point Close/A±.
+ * Persist problems go to Error log + Sign-in status only.
+ */
 function handleLocalPersistFailure(
   doc: GardenDocument,
   saved: { error: string; quotaExceeded?: boolean },
 ): void {
   const quota = Boolean(saved.quotaExceeded);
   if (quota && isSignedIn()) {
-    // Soft status only — queue OneDrive immediately; do not alarm the hamburger.
     setCloudMessage(
       'Photos filled this browser’s storage. Saving to OneDrive (cloud is source of truth)…',
+    );
+    logError(
+      'Photos filled this browser’s storage. Saving to OneDrive instead (local cache skipped).',
+      { source: 'persist-quota' },
     );
     if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
     cloudSaveTimer = null;
@@ -819,14 +826,14 @@ function handleLocalPersistFailure(
   }
   if (quota) {
     const msg =
-      'Photos filled this browser’s storage. Export garden.json, sign in to use OneDrive, or clear the browser cache for this site (Sign in → Clear local cache).';
+      'Photos filled this browser’s storage. Export garden.json, sign in for OneDrive, or Sign in → Clear local cache. (+ Point stays usable.)';
     logError(msg, { source: 'persist-quota' });
-    if (!state.refuseMessage) state = { ...state, refuseMessage: msg };
+    setCloudMessage(msg);
     return;
   }
-  const msg = `Working copy updated, but could not save to this browser (${saved.error}). Export garden.json to keep your work.`;
-  logError(msg, { source: 'persist' });
-  if (!state.refuseMessage) state = { ...state, refuseMessage: msg };
+  const msg = `Could not save draft to this browser (${saved.error}). Export garden.json or use OneDrive — working copy in memory is fine.`;
+  logError(msg, { source: 'persist-quota' });
+  setCloudMessage(msg);
 }
 
 function setDoc(doc: GardenDocument, refuse: string | null = null): void {
@@ -1718,13 +1725,9 @@ function buildSurveyView(): HTMLElement {
   // Plan chrome: bottom-right hamburger only (+ translucent point dialogue when open).
   wrap.appendChild(buildHamburgerButton());
 
-  if (state.pointDialog) {
-    const dialog = buildPointDialog(doc, state.pointDialog);
-    wrap.appendChild(dialog);
-    attachPointDialogDrag(dialog);
-  }
-
-  if (state.refuseMessage) {
+  // Refuse banner stays under the floating + Point dialog (never covers Close / A±).
+  // Persist/quota must not use refuseMessage — see handleLocalPersistFailure.
+  if (state.refuseMessage && !state.pointDialog) {
     wrap.appendChild(
       el('div', {
         className: 'refuse refuse--overlay',
@@ -1732,6 +1735,12 @@ function buildSurveyView(): HTMLElement {
         text: state.refuseMessage,
       }),
     );
+  }
+
+  if (state.pointDialog) {
+    const dialog = buildPointDialog(doc, state.pointDialog);
+    wrap.appendChild(dialog);
+    attachPointDialogDrag(dialog);
   }
 
   if (state.menuOpen) {

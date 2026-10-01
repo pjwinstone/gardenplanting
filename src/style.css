@@ -587,7 +587,8 @@ body {
   position: fixed;
   left: max(0.4rem, env(safe-area-inset-left));
   top: max(0.4rem, env(safe-area-inset-top));
-  z-index: 35;
+  /* Above refuse--overlay — persist/coach banners must never cover Close / A± */
+  z-index: 45;
   width: min(20.5rem, calc(100vw - 0.9rem));
   max-height: min(72vh, 32rem);
   overflow: auto;
@@ -931,9 +932,11 @@ body {
   left: max(0.65rem, env(safe-area-inset-left));
   right: max(0.65rem, env(safe-area-inset-right));
   top: max(3.6rem, calc(env(safe-area-inset-top) + 3.4rem));
-  z-index: 35;
+  /* Below .point-dialog (45) and menu drawer — never block dialog chrome */
+  z-index: 28;
   margin: 0;
   border-radius: 2px;
+  pointer-events: none;
 }
 
 .cloud-status {
