@@ -2,7 +2,7 @@
 
 **Status:** design only. No app change in this note. `ui.ts` stays as it is. Implementation follows a review of this note.
 
-**Reviewers:** the Photo & Marker Vision Reviewer has reviewed section 1. The five blocking items from that review are taken in the table below. The Geometry & Maths Advisor reviews section 3. No comment from that advisor was on PR #4 when this revision was written. Section 2 is the import that joins them.
+**Reviewers:** the Photo & Marker Vision Reviewer has reviewed section 1. The five blocking items from that review are taken in the first table. The Geometry & Maths Advisor has reviewed section 3 (PR #4). The second table is that review. Section 2 is the import that joins them.
 
 | Photo review | This revision |
 |---|---|
@@ -22,6 +22,19 @@ Notes that travel with those five, and are not separate gates:
 - The raw MakerNote is not stored. Only the three acceleration numbers.
 - The probe prints GPS as yes or no, not as coordinates.
 - `clickSpace` is `sensor-continuous`, so the half-pixel is applied once.
+
+| Maths review | This revision |
+|---|---|
+| 1× field of view. STN02 saw the baseline ends 81.8° apart. STN01 at 7.20 m / 7.20 m needed 67.5°. | STN01 is **8.00 m / 8.00 m** (60°). STN02 moves to **6.50 m from BAS01 and 9.00 m from BAS02** (59.6°). Every photo in the field sheet is checked against a **67°** landscape frame, which is the narrow end of 1× (`fx/width` 0.75; 0.69 is about 72°). The spare on each side is stated in §3.0. |
+| STN02’s second turn saw no known mark. | That turn is gone. STN02’s second photo keeps **BAS02**. CRC04 is not photographed from STN02. |
+| The solver needs the side of the baseline. | Each station records `branchChoices`. STN01 is opposite the peg. STN02 and STN03 are on the peg’s side. |
+| The lens must be on the pole axis. | `phonePole.lensOnAxis`. The field sheet says to sight the lens over the middle of the pole before plumbing. |
+| The circle fit must use the joint covariance. Per-point covariance makes `σ_R` about 1.6–2.5× too small. | §3.2 fits with `C = GQGᵀ + σ²_stick I`. Marginal `Q_i` is not the weight. |
+| Add about 6 mm of per-stick scatter. | `σ_stick = 6 mm` inside that `C`. |
+| Use `σ_setout ≈ 4 mm`. Keep the 3.29 single-point threshold. | `radiusSigmaM` is 0.004. `w_i` uses the full residual covariance. The threshold stays 3.29. |
+| Withheld tapes need `σ ≈ 9 mm`, including lean. | `σ_check = 0.009` m on every withheld length. |
+| The circle test cannot see a baseline blunder. | The laser baseline is withheld (`CHK-BASE`). The two tape pulls must agree within 10 mm. |
+| A pass or fail requires STN03. The fixture’s shared-`fx` flag is false. | Two-station captures are reported and not graded. Completeness requires `fxSharedInSolve: false`. It does not require `fxShared: true`. |
 
 **Field sheet:** [FIELD_PROTOCOL_CIRCLE.md](FIELD_PROTOCOL_CIRCLE.md).
 
@@ -184,14 +197,16 @@ The bytes are immutable. A new shutter is a new photo id and a new file. Re-savi
   "phone": {
     "phoneId": "paul-iphone",
     "lens": "1x",
-    "fxShared": true,
+    "fxSharedInSolve": false,
     "calibrationPhotoId": "ph-cal"
   },
   "photos": []
 }
 ```
 
-One phone, one 1× lens, one shared `fx` for every photo in the capture. A second `phoneId` is an error, not a second calibration. `fx` is not written as a derived number. The calibration photo contributes raw observations (section 1.4.1). An EXIF `FocalLengthIn35mmFormat`, when the still has it, is stored as a prior only (`fx/width` about 0.69–0.75). It is not the calibration.
+One phone, one 1× lens, one calibration photo. A second `phoneId` is an error, not a second calibration. `fx` is not written as a derived number. The calibration photo contributes raw observations (section 1.4.1). An EXIF `FocalLengthIn35mmFormat`, when the still has it, is stored as a prior only (`fx/width` about 0.69–0.75). It is not the calibration.
+
+`fxSharedInSolve` is **false**. The phase 1 solver gives every photo its own `fx`. The capture is still one phone, so a later shared-`fx` solve has the raw calibration, but this fixture does not claim that today’s solve shared `fx`. Completeness requires the flag to be false. It does not require `fxShared: true`.
 
 Each photo entry:
 
@@ -207,15 +222,15 @@ Each photo entry:
 | `appReceivedAt` | When the page received the file. This is the Use Photo or library tap. Not the shutter. |
 | `setupId`, `stationId`, `yawOnly`, `sightedBaselineId` | Same meanings as the garden JSON. Yaw-only photos share `stationId`. |
 | `gravity` | `{ x, y, z, source, frame, usable }`. `source` is `makernote` or `motion-bracket`. `frame` is `apple-makernote` or `devicemotion-raw`. `usable` is false when the bracket failed the stillness check. The solver’s camera frame, about `(0, +1, 0)`, is not written until §9 of the geometry note is checked. |
-| `phonePole` | `{ plumbOk, leanBoundDeg, poleHeightM }`. The survey pole, plumbed with a bubble to about 1°. |
+| `phonePole` | `{ plumbOk, leanBoundDeg, poleHeightM, lensOnAxis }`. The survey pole, plumbed with a bubble to about 1°. `lensOnAxis` is true only when the lens glass, not the middle of the phone, was over the pole centre. |
 | `clicks[]` | `{ pointId, px, py, sigmaPx, sleeveHeightM, sleeveRadiusM, plumbOk, leanBoundDeg }`. `px`, `py` are `sensor-continuous` (pixel centre at +0.5). `sigmaPx` is the click σ in full-resolution sensor pixels. |
 
 **Sleeve height and the bubble live on the click, because they belong to the rod in that photo, and on the photo, because the pole was plumbed for that shutter.**
 
 - `sleeveHeightM` is `h_s`, metres, ground to the **centre of the sleeve**. The same rod keeps one height for the session; copy it onto every click of that rod so the photo entry stands alone. The marker note’s ground shift is `h_s sin λ`: **17 mm at 2° when `h_s` is 0.5 m**, 9 mm at 1°, 35 mm at 2° if the sleeve centre is 1.0 m up. Record the height you measured, not a default.
-- `sleeveRadiusM` is `R`. Full-width A4 sleeve: `(210 − 10) / π / 2 = 0.0318` m. A thinner stick stores its own `R`.
+- `sleeveRadiusM` is `R`. This fixture uses **0.032 m** (32 mm), the same number as the field sheet. The paper geometry of a full-width A4 sleeve is `(210 − 10) / π / 2 = 0.0318` m. The 0.2 mm is kept as one number on purpose: 0.2 mm on each end moves the fitted radius by less than 0.1 mm. A thinner stick stores its own `R`.
 - `plumbOk` and `leanBoundDeg` are the rod bubble. The field rule is about **1°**. With the bubble, the along-sight lean that one photo cannot see is carried as `σ_λ` of about 1–2°. `plumbOk: false` does not enter this fixture; the rod is replumbed first.
-- `phonePole` is the camera pole, separate from the target rod. A 1° lean on a 1 m pole is 17 mm at the ground.
+- `phonePole` is the camera pole, separate from the target rod. A 1° lean on a 1 m pole is 17 mm at the ground. `lensOnAxis` is a different error: an iPhone lens near a corner is about 20–50 mm off the middle of the phone. That offset is a lateral bias on every ray from the station. The field sheet has the surveyor sight the lens over the pole centre before the bubble. A photo with `lensOnAxis` false does not enter this fixture.
 
 The garden point for that rod stores the same `sleeveHeightM`, `sleeveRadiusM`, `plumbOk`, and `leanBoundDeg`, so a tape can find them without opening a photo.
 
@@ -237,13 +252,13 @@ Store the raw pieces, not a computed `fx` and not a range derived from `h_px · 
 | `sheetHeightM` | Measured sheet height if the paper was trimmed, else 0.297 m. |
 | `sleeveHeightM`, `plumbOk`, `leanBoundDeg` | As on any rod. |
 
-Publishing `fx = h_px · d / H` from this same photo and then using that `fx` on this photo counts the pixels twice. The adjustment, when it estimates `fx`, consumes the tape, the levelled elevations of the sleeve ends, one shared `fx` for the phone, and `H`. Until that estimation is in the solver, the fixture still carries these raw fields, and an EXIF focal length may sit as the prior `fxOverWidth` with a relative σ. The circle test fails closed if the calibration photo is missing or if any fixture photo is `canvas-derived`.
+Publishing `fx = h_px · d / H` from this same photo and then using that `fx` on this photo counts the pixels twice. A later adjustment that estimates one `fx` for the phone would consume the tape, the levelled elevations of the sleeve ends, and `H`. This fixture’s solve does not do that. `fxSharedInSolve` stays false, and each photo keeps its own EXIF prior. The circle test fails closed if the calibration photo is missing or if any fixture photo is `canvas-derived`. The calibration shot is still required. It is the raw material for that later estimate, and it is not a derived focal length.
 
 #### 1.4.2 Tapes in the metadata
 
-A tape or laser is a line in the garden JSON plus a copy in the manifest under `distances[]`: `id`, `a`, `b`, `instrument`, `slopeM`, `deltaHM`, `horizontalM`, `radiusEachEndM`, `endsOnSleeve`.
+A tape that enters the solve is a line in the garden JSON plus a copy in the manifest under `distances[]`: `id`, `a`, `b`, `instrument`, `slopeM`, `deltaHM`, `horizontalM`, `radiusEachEndM`, `endsOnSleeve`. The laser baseline is not one of those lines. It is `CHK-BASE` in `ground-truth.json`, withheld. Putting it in `lines` would make `solveGardenDocument` treat it as a used distance.
 
-Approved reduction, from the marker note §3: horizontal first, then `+R` for each end that stopped on the paper. `R` is 0.0318 m on the full-width sleeve. Both ends on sleeves means `+2R`. A laser spot more than about **`R/2` (16 mm)** off the rod centreline is not a measurement; it is retaken. The spot offset is not a stored correction.
+Approved reduction, from the marker note §3: horizontal first, then `+R` for each end that stopped on the paper. `R` is **0.032 m** on the full-width sleeve, the same 32 mm as the field sheet. Both ends on sleeves means `+2R`. A laser spot more than about **`R/2` (16 mm)** off the rod centreline is not a measurement; it is retaken. The spot offset is not a stored correction.
 
 The phase 1 helper `horizontalDistance` adds `faceOffsetM` onto the slope and then takes the square root. On a level tape that is the same as adding `R` afterwards. On a slope the two differ by about 2 mm for this sleeve at 20°. This fixture holds tapes level, so they agree. The importer still stores slope, `Δh`, and `R` separately and builds the solver length as `√(s² − Δh²) + nR`. It does not pass `R` through `faceOffsetM`.
 
@@ -276,7 +291,7 @@ Not in this change. The order is fixed. Step 1 is the gate.
 3. Read `DateTimeOriginal` and `SubSecTimeOriginal` from the bytes. Store `appReceivedAt` separately.
 4. Gravity from MakerNote `AccelerationVector` when present, otherwise the stillness bracket. Never a single reading at the `change` event.
 5. Clicks in `sensor-continuous` pixels, σ in full-resolution sensor pixels, click canvas inside the Safari limit in §1.2.2.
-6. Sleeve height, sleeve radius, and the rod bubble on the point and on each click. `phonePole` on the photo. Calibration block as raw tape, `Δh`, `R`, `H`, and sleeve height. One `LensModel` per capture.
+6. Sleeve height, sleeve radius, and the rod bubble on the point and on each click. `phonePole` on the photo, including `lensOnAxis`. Calibration block as raw tape, `Δh`, `R`, `H`, and sleeve height. One `LensModel` per capture. `fxSharedInSolve` false.
 7. Extend the OneDrive list so the sibling folder is recognised, without making a second garden document.
 
 ## 2. Turn a capture into a fixture
@@ -327,26 +342,48 @@ Written by the surveyor, not fitted by the script. The known radius is not an ob
 ```json
 {
   "radiusM": 4.0,
-  "radiusSigmaM": 0.01,
-  "setOut": "peg and non-stretch line, chords checked",
+  "radiusSigmaM": 0.004,
+  "setOut": "peg and non-stretch line, both diameters and the closing chord inside the sheet limits",
   "circlePointIds": ["CRC01", "CRC02", "CRC03", "CRC04", "CRC05", "CRC06"],
   "nearBaselineEndId": "BAS02",
   "farBaselineEndId": "BAS01",
   "pegToNearEndM": 4.3,
   "phoneId": "paul-iphone",
   "lens": "1x",
+  "fxSharedInSolve": false,
   "calibrationPhotoId": "ph-cal",
-  "sleeveRadiusM": 0.0318,
+  "sleeveRadiusM": 0.032,
+  "sigmaCheckM": 0.009,
+  "sigmaStickM": 0.006,
+  "baselinePullsAgreeWithinM": 0.01,
+  "gradeRequiresStationIds": ["STN01", "STN02", "STN03"],
+  "branchChoices": [
+    { "id": "STN01", "candidateIndex": 1, "side": "opposite-peg" },
+    { "id": "STN02", "candidateIndex": 0, "side": "peg" },
+    { "id": "STN03", "candidateIndex": 0, "side": "peg" }
+  ],
   "build": "",
   "withheld": [
+    {
+      "id": "CHK-BASE",
+      "a": "BAS02",
+      "b": "BAS01",
+      "instrument": "laser",
+      "sigmaM": 0.009,
+      "slopeM": null,
+      "deltaHM": null,
+      "radiusEachEndM": 0.032,
+      "note": "laser baseline; not typed into the app; the tape mean is the observation"
+    },
     {
       "id": "CHK-DIA",
       "a": "CRC01",
       "b": "CRC04",
       "instrument": "tape",
+      "sigmaM": 0.009,
       "slopeM": null,
       "deltaHM": null,
-      "radiusEachEndM": 0.0318,
+      "radiusEachEndM": 0.032,
       "note": "fresh diameter; axis length is horizontal plus 2R"
     },
     {
@@ -354,16 +391,23 @@ Written by the surveyor, not fitted by the script. The known radius is not an ob
       "a": "CRC01",
       "b": "CRC03",
       "instrument": "tape",
+      "sigmaM": 0.009,
       "slopeM": null,
       "deltaHM": null,
-      "radiusEachEndM": 0.0318,
+      "radiusEachEndM": 0.032,
       "note": "120° chord, about 6.93 m axis to axis"
     }
   ]
 }
 ```
 
-`slopeM` and `deltaHM` are the fresh pulls from the sheet. The script does not invent them. `radiusSigmaM` is the set-out σ from the protocol (10 mm when both diameters agree). `pegToNearEndM` is the taped distance from the centre peg to the near baseline end, so the “circle approaches this end” check has a number. The peg is not a solved point.
+`slopeM` and `deltaHM` are the fresh pulls from the sheet. The script does not invent them. `radiusSigmaM` is the set-out σ from the protocol, **4 mm**. The old 10 mm figure was a tolerance on a diameter, not a standard deviation. `pegToNearEndM` is the taped distance from the centre peg to the near baseline end, so the “circle approaches this end” check has a number. The peg is not a solved point.
+
+`branchChoices` are the sides the sheet ticks. `candidateIndex` is the index from `intersectCircles(BAS02, tape to BAS02, BAS01, tape to BAS01)`: **0** is the peg side (left of BAS02→BAS01), **1** is opposite the peg. The import writes the index from the ticked side. It does not guess it from a stored coordinate.
+
+`baselinePullsAgreeWithinM` is the field gate on the two tape pulls. The mean of the two axis lengths is the baseline in the app. A pair that differs by more than 10 mm is remeasured, not averaged. That gate is not a substitute for `CHK-BASE`. A baseline that is long by the same amount both ways still agrees with itself, and the circle test barely moves, because the station tapes carry the scale. The withheld laser is what sees that blunder.
+
+`sigmaCheckM` is **9 mm** on every withheld length, laser included. A bare tape σ (20 mm) or a bare laser σ (2 mm) leaves out the lean of the two sticks. At the recorded sleeve height, `√2 · h_s · σ_λ` is about 7 mm, and the instrument sits on top of that. 9 mm is the combined figure. Do not use 2 mm for `CHK-BASE`.
 
 ### 2.4 Privacy, and the public repo
 
@@ -387,35 +431,60 @@ Whether this public repo should have a licence, and whether a survey of a home b
 
 One real capture. The synthetic suite already checks ellipse coverage and NEES. This test checks that **this** network, solved from the field observations, lands on a circle whose radius matches the set-out, within the covariances the solver published. A single trial “within X mm” is not the gate.
 
+### 3.0 The network this test grades
+
+The field sheet places three taped stations. Views below use the narrow 1× frame, **67°** landscape (`fx/width` 0.75; `2 atan(0.5 / 0.75)`). A phone at 0.69 is about 72° and has more spare. Portrait is not this frame. The sheet says landscape.
+
+| Station | Tapes, BAS01 / BAS02 | Side | `candidateIndex` | Photos, and the spare on a 67° frame |
+|---|---|---|---|---|
+| STN01 | 8.00 / 8.00 | Opposite the peg | 1 | Both ends and CRC01–CRC05, scene **60°**, about **3.7°** spare each side. Second photo keeps BAS02 and adds CRC06, about **9°** outside BAS02. |
+| STN02 | 6.50 / 9.00 | Peg side | 0 | Both ends, scene **59.6°**, about **3.9°** spare each side. No circle stick lies in that wedge. Second photo keeps BAS02 and takes CRC02, CRC01, CRC06, CRC05, CRC03, span about **54°**, about **7°** spare each side. |
+| STN03 | 10.50 / 10.50 | Peg side | 0 | Both ends and CRC01–CRC03, scene **44.8°**, about **11°** spare each side. Second photo keeps BAS02 and adds CRC06, CRC05, CRC04, span **48°**, about **10°** spare each side. |
+
+CRC04 from the old STN02 (5.00 m / 7.00 m) sat about 74° from the nearest baseline end, and CRC03 sat about 82° out, so the turn that showed them had no known mark. Dropping that turn without moving the station still leaves CRC03 with no oriented ray, and CRC03 is one of the two shallow crossings. No peg-side point with both tapes inside 8 m puts CRC03 inside a 67° frame with a baseline end and still crosses it cleanly. **6.50 m / 9.00 m** is the round pair that does, and it keeps both baseline ends inside the same 67° frame, with about the same spare as STN01. From there CRC04 is still about 62° from BAS02 and is not photographed. STN01 and STN03 both see CRC04, and those two rays meet at about **85°**.
+
+CRC02 and CRC03 are the shallow pair between STN01 and STN03 (about **7.5°** and **11°**). STN02 is there to cross them: about **40°** at CRC02 and about **85°** at CRC03, with BAS02 in the same photo so the yaw has a known mark. The other four sticks meet STN01 and STN03 at **52°** or more.
+
+**A grade requires STN03.** A capture that has STN01 and STN02 only is solved and the statistics are printed. It is not passed and it is not failed. Two stations with a per-photo `fx` do not support a pass/fail on this circle. The same rule applies when `CHK-BASE` is missing: the report is printed, and there is no grade, because a baseline blunder does not show up in the radius.
+
+**Checked is not expected.** Each station is fixed by exactly two tapes, so that fix has no spare observation. With three stations the phase 1 gate marks only CRC01 checked. With two stations it marks none. Plantable is the same gate plus the ellipse and a withheld distance. This layout’s grade is the circle table in §3.3, not a checked or plantable flag.
+
+The both-tapes path in the phase 1 solver does not read `branchChoices`. It places every such station with `gardenSide` and `gardenSign` +1, which is the peg side. STN01 is the other side, so that station will not land until the path honours the recorded choice. The fixture records the choice anyway. Do not drop STN01 to make today’s path pass.
+
 ### 3.1 Solve
 
 1. Load `garden.json`, `normalizeDocument`, require `version: 1`.
 2. Completeness, before any fit:
-   - One `phoneId`, one `LensModel`, `lens` `1x`, `fxShared` true, and the calibration photo present with raw tape, `R`, `H`, `sleeveHeightM`, and `plumbOk`.
+   - One `phoneId`, one `LensModel`, `lens` `1x`, `fxSharedInSolve` **false**, and the calibration photo present with raw tape, `R`, `H`, `sleeveHeightM`, and `plumbOk`. `fxShared: true` is not a requirement. A true value fails this check, because this solver does not share `fx`.
+   - `branchChoices` for STN01, STN02, and STN03, with the sides in §3.0.
+   - Every station photo has `phonePole.lensOnAxis` true.
    - Every fixture photo is `original-still` from a probe **go** (`FocalLength` and `LensModel` present). A `canvas-derived` photo, or a still with either tag missing, fails the test.
    - Clicks are `sensor-continuous` and each click has `sigmaPx` in sensor pixels.
    - Every circle point in `circlePointIds` has `sleeveHeightM`, `sleeveRadiusM`, and `plumbOk: true` with `leanBoundDeg` ≤ 2.
    - Every photo that clicks a circle rod copies that rod’s sleeve height and bubble onto the click.
-3. `solveGardenDocument`. Do not read stored `x,y` as measurements. The field sheet’s third station is optional when only an 8 m tape is on site. The test does not require a point named STN03. It requires the circle points.
-4. Append `ground-truth.withheld` as withheld distances using `√(s² − Δh²) + nR`, not `faceOffsetM`.
-5. Fail if the variance test is `high`, if the solve did not converge, or if any circle point is `unset`. `low` is not a failure.
-6. Photos skipped as `no-fx` fail this fixture. The prior may be the EXIF 35 mm equivalent (`fx/width` in the 0.69–0.75 band, width in sensor pixels) with a relative σ, shared by every photo of that phone. Each ray uses that photo’s `sigmaPx` in sensor pixels, not a flat 2 px on a thumbnail. The calibration block is present either way. The test does not compute `fx` from the sleeve.
+   - The two baseline tape pulls differ by at most `baselinePullsAgreeWithinM` (10 mm) on the axis lengths.
+3. `solveGardenDocument`, passing `branchChoices`. Do not read stored `x,y` as measurements. If STN03 is absent, or `CHK-BASE` is absent, print the statistics and **do not grade**. A grade requires STN01, STN02, and STN03.
+4. Append `ground-truth.withheld` as withheld distances using `√(s² − Δh²) + nR`, not `faceOffsetM`. `CHK-BASE` is in that list. It is not a line in `garden.json`.
+5. Fail if the variance test is `high`, if the solve did not converge, or if any circle point is `unset`. `low` is not a failure. This fail is a grade. It is not applied to an ungraded two-station capture; that capture is reported.
+6. Photos skipped as `no-fx` fail this fixture. The prior may be the EXIF 35 mm equivalent (`fx/width` in the 0.69–0.75 band, width in sensor pixels) with a relative σ, **one prior per photo**. Each ray uses that photo’s `sigmaPx` in sensor pixels, not a flat 2 px on a thumbnail. The calibration block is present either way. The test does not compute `fx` from the sleeve, and it does not force the photos onto one `fx`.
 
-Checked versus unchecked is reported per point. A circle point does not have to be plantable for the radius test to run. Plantable remains the roadmap rule (95% semi-major ≤ 100 mm, a spare observation, and a withheld distance inside its own limit). This layout’s withheld tapes are the diameter and one chord, so those two lengths carry the plantable distance check. The other points are judged by the circle statistics below.
+Checked versus unchecked is reported per point, and for this layout the expected report is that the points are **not** checked, apart from CRC01 when all three stations are in. A circle point does not have to be plantable for the radius test to run. Plantable remains the roadmap rule (95% semi-major ≤ 100 mm, a spare observation, and a withheld distance inside its own limit). The withheld lengths are the laser baseline, the diameter, and one chord. They are checks on those lengths. They are not what makes the other points plantable.
 
 ### 3.2 Geometric fit
 
 Use an orthogonal-distance fit of the **solved** circle points only. Kåsa is the seed. Kåsa’s radius is not the result. The existing `fitCircleGeometric` is the right shape and the wrong weight for this gate: it treats points as equal and independent, and it multiplies the radius variance by `rss / dof`. That scaled σ is a residual statistic. The gate stays on the **a-priori** covariances, as in the geometry note.
 
-Let `Q_i` be the marginal `(qxx, qxy, qyy)` of solved point `i`. Let `g_i` be the unit radial vector from the current centre to the point. The radial variance is
+Let `Q` be the **joint** cofactor of the six circle points, 12×12, in the same point order as `circlePointIds`. The marginal `(qxx, qxy, qyy)` on each point is not this matrix. Points that share a station or the datum are correlated, and a fit that keeps only the 2×2 blocks makes `σ_R` about **1.6–2.5× too small**. On this three-station network the marginal blocks give a radius σ of about 6.4 mm; the joint cofactor gives about 9.2 mm.
 
-`σ²_{ρ,i} = g_iᵀ Q_i g_i`.
+Let `g_i` be the unit radial vector from the current centre to point `i`. Let `G` be the 6×12 matrix whose `i`th row is `g_iᵀ` in that point’s two columns and zeros elsewhere. Add the per-stick scatter on the diagonal:
 
-Weight `w_i = 1 / σ²_{ρ,i}`. Iterate the orthogonal Gauss–Newton the same way as `fitCircleGeometric` (residual `‖p_i − c‖ − R`, Jacobian `(−g_i, −1)`), with those weights. Recompute `g_i` and `w_i` each iteration.
+`C = G Q Gᵀ + σ²_stick I`
 
-`σ²_R` is the radius entry of `(Jᵀ W J)⁻¹`. Do not multiply by `σ̂₀²`. If the variance test was `high`, the fixture has already failed; do not inflate this limit to absorb it.
+`σ_stick` is **6 mm** (`sigmaStickM`). That is about 3 mm of placement and about 5 mm from a 1° lean at a 0.5 m sleeve, added in quadrature. It is the same order as the lean the bubble does not remove. Leaving it out makes the shape test tight in the same way the marginal blocks do.
 
-**Approximation, for the reviewer.** Marginal `Q_i` ignores covariance between points that share a station or the datum. That makes `σ_R` somewhat tight. The withheld tapes already use the joint normal matrix inside the solver, so they are the strict distance checks. Using the joint cofactor of the circle points is a follow-up when the solver exports it, not a reason to block this test.
+Fit by generalised least squares with covariance `C`. Residual `v_i = ‖p_i − c‖ − R`, Jacobian row `(−g_i, −1)`, normal matrix `N = Jᵀ C⁻¹ J`. Recompute `g_i`, `G`, and `C` each iteration.
+
+`σ²_R` is the radius entry of `N⁻¹`. Do not multiply by `σ̂₀²`. If the variance test was `high`, the fixture has already failed; do not inflate this limit to absorb it. Do not form `σ_R` from the marginal `Q_i`.
 
 Arc span is the same quantity as `arcRad` in `fitCircleGeometric`. The protocol is a full circle, so the span is about `2π` and `radiusWeak` is false. If a future capture spans under `π/2`, report `σ_R` and **do not** apply the radius gate. That is the geometry note and the roadmap: a short arc does not pin a radius.
 
@@ -427,11 +496,11 @@ Arc span is the same quantity as `arcRad` in `fitCircleGeometric`. The protocol 
 |---|---|---|
 | Network | Solver variance test | Not `high`. One-sided, upper tail, α = 5%, as implemented. `low` does not fail. |
 | Circle points | Status | None `unset`. |
-| Radius | `\|R̂ − R_known\| ≤ 1.96 √(σ²_R + σ²_setout)` | 1.96 is the 1D 95% factor, the same one used on a withheld tape. `σ_setout` is `radiusSigmaM`. |
-| Shape | `vᵀ W v ≤ χ²(n − 3, 0.95)` | `v_i = ‖p_i − ĉ‖ − R̂`, weights from the a-priori radial variances. One-sided. This is the set of radial residuals, not a millimetre cap on each point. |
-| One point | `\|w_i\| ≤ 3.29` | `w_i = v_i / (σ_{ρ,i} √r_i)`, `r_i = 1 − h_ii` from the weighted fit. 3.29 is the solver’s two-sided 0.1% residual threshold. A point outside 1.96 σ is reported and does not by itself fail. |
+| Radius | `\|R̂ − R_known\| ≤ 1.96 √(σ²_R + σ²_setout)` | 1.96 is the 1D 95% factor, the same one used on a withheld tape. `σ_setout` is `radiusSigmaM`, **4 mm**. |
+| Shape | `vᵀ C⁻¹ v ≤ χ²(n − 3, 0.95)` | `v_i = ‖p_i − ĉ‖ − R̂`. `C` is the joint radial covariance from §3.2, stick scatter included. One-sided. This is the set of radial residuals, not a millimetre cap on each point. |
+| One point | `\|w_i\| ≤ 3.29` | `w_i = v_i / √(C_vv)_{ii}`, with `C_vv = C − J N⁻¹ Jᵀ` and `N = Jᵀ C⁻¹ J`. 3.29 is the solver’s two-sided 0.1% residual threshold. It stays 3.29. It is not tightened to a Bonferroni 2.64, and it is not `v_i / (σ_i √(1 − h_ii))` from a diagonal weight matrix. A point outside 1.96 σ is reported and does not by itself fail. |
 | Short arc | `arcRad < π/2` | Radius row is not applied. Shape and `w_i` still are. |
-| Withheld tape | Existing solver check | `\|miss\| ≤ 1.96 √(gᵀ Q_xx g + σ²_check)` on the axis-to-axis length. |
+| Withheld length | Existing solver check | `\|miss\| ≤ 1.96 √(gᵀ Q g + σ²_check)` on the axis-to-axis length. `σ_check` is **9 mm**, including lean, on `CHK-BASE`, `CHK-DIA`, and `CHK-CHORD`. |
 | Near end | Recorded peg distance | Distance from the fitted circle to `nearBaselineEndId` is smaller than the distance to the far end. The gap to the near end is reported against `\|pegToNearEndM − R_known\|`. It is a stake-note check, not a second radius gate. |
 | Calibration | Manifest | Present, raw, same phone, 1×, sleeve height and bubble filled. |
 | Class report | 95% semi-major | Printed per circle point. ≤ 100 mm meets the plantable bar only together with the spare-observation rule. The radius test does not require every point to be under 100 mm. A semi-major over 5 m is already `sanity` and unset. |
@@ -440,14 +509,14 @@ The radius row is the scale check. The fit can have tiny residuals and a wrong r
 
 ### 3.4 What one capture does not prove
 
-It does not estimate NEES and it does not show that 95% of repeats fall in the ellipse. That remains the synthetic suite. It does not validate the DeviceMotion-to-camera map, and it does not treat a MakerNote vector as that map. Rays without a mapped, usable gravity vector stay unlevelled, and the station class is judged accordingly. It does not estimate `fx` from the sleeve. It stores the observations that estimation needs.
+It does not estimate NEES and it does not show that 95% of repeats fall in the ellipse. That remains the synthetic suite. It does not validate the DeviceMotion-to-camera map, and it does not treat a MakerNote vector as that map. Rays without a mapped, usable gravity vector stay unlevelled, and the station class is judged accordingly. It does not estimate `fx` from the sleeve, and it does not grade a capture as if `fx` had been shared. It stores the observations that estimation needs. A two-station visit is reported and is not a failed grade.
 
 ## Decisions
 
 1. **Probe first, then stills.** A path is an archive path only after `FocalLength` and `LensModel` survive on that phone. The canvas shutter is a thumb, not the archive. Stills sit in a sibling folder.
 2. **Stay on document version 1** with optional fields. v2 remains the bump already agreed. The sidecar is not a second garden file.
 3. **Node import script.** Not an in-app export. Photos stay on OneDrive. The repo gets observations and ground truth. Any future image bytes are rewritten to the allow-list in §2.4.
-4. **Circle test** as the table in §3.3, geometric and covariance-weighted, 1.96 on the radius, `χ²(n−3)` on the radial residuals, 3.29 on a single point.
-5. **`+R` after horizontal reduction**, stored separately from v1 `offsetMm`. Leave that box at 0.
-6. **One phone, one `LensModel`, one shared `fx`, one calibration shot at 3–5 m**, raw tape and sleeve height, no derived focal length in the file.
+4. **Circle test** as the table in §3.3. Geometric fit on the joint covariance, with 6 mm of stick scatter. 1.96 on the radius with `σ_setout` of 4 mm. `χ²(n−3)` on the radial residuals. 3.29 on a single point, from the full residual covariance. Withheld lengths at 9 mm. A grade needs STN03 and the withheld laser baseline.
+5. **`+R` after horizontal reduction**, stored separately from v1 `offsetMm`. Leave that box at 0. One sleeve radius, **32 mm**, on the sheet and in the fixture.
+6. **One phone, one `LensModel`, one calibration shot at 3–5 m**, raw tape and sleeve height, no derived focal length in the file. `fxSharedInSolve` is false: this solver gives each photo its own `fx`.
 7. **Licence and the public repo.** The repo is public and has no licence. Paul decides whether to add one, and whether a survey of this garden should be committed here at all. This note does not pick a licence. Until that decision, fixture photos are not committed.
