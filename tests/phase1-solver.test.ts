@@ -1788,6 +1788,33 @@ test('B4: rejecting a station after adjustment does not throw', () => {
   assert.equal(tape.used, false);
   assert.equal(point(result, 'A').x, 0);
   assert.equal(result.reflected, false);
+
+  const heldOff = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
+    behindCameraResolves: 0,
+    distances: [
+      { id: 'SA', a: 'S', b: 'A', slopeM: Math.hypot(S.x, S.y), sigmaM: 0.001 },
+      { id: 'SB', a: 'S', b: 'B', slopeM: Math.hypot(S.x - 8, S.y), sigmaM: 0.001 },
+    ],
+    photos: [
+      {
+        id: 'cam',
+        stationId: 'S',
+        width,
+        height: 900,
+        fxOverWidth: fxOver,
+        gravity: { x: 0, y: 1, z: 0 },
+        bearingSigmaRad: 1 * DEG,
+        yawHeldRad: yawAway,
+        clicks,
+      },
+    ],
+  });
+  const late = point(heldOff, 'S');
+  assert.equal(late.status, 'unset');
+  assert.equal(late.x, undefined);
+  assert.equal(late.unsetCode, 'behind-camera');
+  assert.equal(heldOff.observations.find((o) => o.id === 'SA')?.used, false);
 });
 
 test('B5: opposite-side stations follow the branch choice and the bearings', () => {
@@ -1893,15 +1920,15 @@ test('B5: opposite-side stations follow the branch choice and the bearings', () 
   assert.ok(c4.x != null && err4 < 0.05, `CRC04 err ${err4} unset ${c4.unsetCode}`);
 });
 
-test('a whole-garden mirror is flagged, and one opposite station is not', () => {
+test('a −Y garden is not a mirror; only garden-sign points count', () => {
   assert.equal(wholeGardenReflection({ axisX: -0.2, gardenSign: 1, points: [] }), true);
   assert.equal(
     wholeGardenReflection({
       axisX: 8,
       gardenSign: 1,
       points: [
-        { x: 2, y: -1 },
-        { x: 4, y: -3 },
+        { x: 2, y: -1, fromGardenSign: true },
+        { x: 4, y: -3, fromGardenSign: true },
       ],
     }),
     true,
@@ -1911,8 +1938,8 @@ test('a whole-garden mirror is flagged, and one opposite station is not', () => 
       axisX: 8,
       gardenSign: 1,
       points: [
-        { x: 2, y: -1, branchChoice: true },
-        { x: 4, y: -3, branchChoice: true },
+        { x: 2, y: -1 },
+        { x: 4, y: -3 },
       ],
     }),
     false,
@@ -1922,24 +1949,43 @@ test('a whole-garden mirror is flagged, and one opposite station is not', () => 
       axisX: 8,
       gardenSign: 1,
       points: [
-        { x: 2, y: -1 },
-        { x: 4, y: 3 },
+        { x: 2, y: -1, fromGardenSign: true },
+        { x: 4, y: 3, fromGardenSign: true },
       ],
     }),
     false,
   );
 
+  // BAS01 at the origin, BAS02 on +X. Index 0 is +Y, index 1 is −Y (the peg side).
   const width = 1200;
   const fxOver = 0.72;
+  const length = 8;
+  const onSide = (index: 0 | 1) =>
+    solve({
+      datum: { originId: 'BAS01', axisPointId: 'BAS02', lengthM: length, fixScale: true, gardenSign: 1 },
+      distances: [
+        { id: 'PA', a: 'P', b: 'BAS01', slopeM: 5, sigmaM: 0.005 },
+        { id: 'PB', a: 'P', b: 'BAS02', slopeM: 5, sigmaM: 0.005 },
+      ],
+      branchChoices: [{ id: 'P', candidateIndex: index }],
+    });
+  const plus = point(onSide(0), 'P');
+  const minus = point(onSide(1), 'P');
+  assert.ok((plus.y ?? 0) > 2, `index 0 y ${plus.y}`);
+  assert.ok((minus.y ?? 0) < -2, `index 1 y ${minus.y}`);
+  assert.ok(Math.abs((plus.x ?? 0) - 4) < 1e-6);
+  assert.equal(onSide(1).reflected, false);
+
   const stations = [
-    { id: 'P', x: 3, y: 4 },
-    { id: 'Q', x: 6, y: 5 },
+    { id: 'STN01', x: 3, y: -4 },
+    { id: 'STN02', x: 6, y: -5 },
   ];
-  const result = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true, gardenSign: -1 },
+  const yaw = Math.PI / 2;
+  const garden = solve({
+    datum: { originId: 'BAS01', axisPointId: 'BAS02', lengthM: length, fixScale: true, gardenSign: 1 },
     distances: stations.flatMap((s) => [
-      { id: `${s.id}A`, a: s.id, b: 'A', slopeM: Math.hypot(s.x, s.y), sigmaM: 0.005 },
-      { id: `${s.id}B`, a: s.id, b: 'B', slopeM: Math.hypot(s.x - 8, s.y), sigmaM: 0.005 },
+      { id: `${s.id}A`, a: s.id, b: 'BAS01', slopeM: Math.hypot(s.x, s.y), sigmaM: 0.005 },
+      { id: `${s.id}B`, a: s.id, b: 'BAS02', slopeM: Math.hypot(s.x - length, s.y), sigmaM: 0.005 },
     ]),
     photos: stations.map((s) => ({
       id: s.id,
@@ -1950,27 +1996,94 @@ test('a whole-garden mirror is flagged, and one opposite station is not', () => 
       gravity: { x: 0, y: 1, z: 0 },
       bearingSigmaRad: 0.1 * DEG,
       clicks: [
-        { pointId: 'A', ...projectClick(s, -Math.PI / 2, { x: 0, y: 0 }, width, fxOver) },
-        { pointId: 'B', ...projectClick(s, -Math.PI / 2, { x: 8, y: 0 }, width, fxOver) },
+        { pointId: 'BAS01', ...projectClick(s, yaw, { x: 0, y: 0 }, width, fxOver) },
+        { pointId: 'BAS02', ...projectClick(s, yaw, { x: length, y: 0 }, width, fxOver) },
       ],
     })),
   });
-  assert.ok((point(result, 'P').y ?? 0) > 0);
-  assert.ok((point(result, 'Q').y ?? 0) > 0);
-  assert.equal(result.reflected, true);
+  assert.ok((point(garden, 'STN01').y ?? 0) < -3, `STN01 ${point(garden, 'STN01').y}`);
+  assert.ok((point(garden, 'STN02').y ?? 0) < -4, `STN02 ${point(garden, 'STN02').y}`);
+  assert.equal(garden.converged, true);
+  assert.equal(garden.reflected, false);
 });
 
-test('circle trial grades only with STN03, and fxShared false is allowed', () => {
+test('a branch that contradicts the bearings is a branch conflict', () => {
+  const width = 1200;
+  const fxOver = 0.72;
+  const bad = { id: 'STN01', x: 4, y: -5 };
+  const good = { id: 'STN02', x: 2.5, y: 4.33 };
+  const photo = (s: { id: string; x: number; y: number }) => ({
+    id: s.id,
+    stationId: s.id,
+    width,
+    height: 900,
+    fxOverWidth: fxOver,
+    gravity: { x: 0, y: 1, z: 0 },
+    bearingSigmaRad: 0.1 * DEG,
+    clicks: [
+      { pointId: 'BAS01', ...projectClick(s, s.y > 0 ? -Math.PI / 2 : Math.PI / 2, { x: 0, y: 0 }, width, fxOver) },
+      { pointId: 'BAS02', ...projectClick(s, s.y > 0 ? -Math.PI / 2 : Math.PI / 2, { x: 8, y: 0 }, width, fxOver) },
+    ],
+  });
+  const result = solve({
+    datum: { originId: 'BAS01', axisPointId: 'BAS02', lengthM: 8, fixScale: true, gardenSign: 1 },
+    distances: [bad, good].flatMap((s) => [
+      { id: `${s.id}A`, a: s.id, b: 'BAS01', slopeM: Math.hypot(s.x, s.y), sigmaM: 0.005 },
+      { id: `${s.id}B`, a: s.id, b: 'BAS02', slopeM: Math.hypot(s.x - 8, s.y), sigmaM: 0.005 },
+    ]),
+    photos: [photo(bad), photo(good)],
+    branchChoices: [{ id: 'STN01', candidateIndex: 0 }],
+  });
+  const conflict = point(result, 'STN01');
+  assert.equal(conflict.status, 'unset');
+  assert.equal(conflict.x, undefined);
+  assert.equal(conflict.unsetCode, 'branch-conflict');
+  const kept = point(result, 'STN02');
+  assert.ok(Math.abs((kept.y ?? 0) - good.y) < 0.05, `STN02 ${kept.y} ${kept.unsetCode}`);
+  assert.equal(result.converged, true);
+  assert.notEqual(result.varianceTest, 'high');
+});
+
+test('joint cofactor is the unscaled covariance of the named points', () => {
+  const result = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 10, fixScale: true },
+    distances: [
+      { id: 'AP', a: 'A', b: 'P', slopeM: 5, sigmaM: 0.005 },
+      { id: 'BP', a: 'B', b: 'P', slopeM: Math.hypot(6, 3), sigmaM: 0.005 },
+      { id: 'AQ', a: 'A', b: 'Q', slopeM: Math.hypot(7, 5), sigmaM: 0.005 },
+      { id: 'BQ', a: 'B', b: 'Q', slopeM: Math.hypot(3, 5), sigmaM: 0.005 },
+      { id: 'PQ', a: 'P', b: 'Q', slopeM: Math.hypot(3, 2), sigmaM: 0.005 },
+    ],
+  });
+  assert.notEqual(result.varianceTest, 'high');
+  const c = result.jointCofactor(['P', 'Q']);
+  assert.ok(c);
+  assert.equal(c.length, 4);
+  assert.equal(c[0].length, 4);
+  const p = point(result, 'P');
+  const q = point(result, 'Q');
+  assert.ok(p.q && q.q);
+  assert.ok(Math.abs(c[0][0] - p.q[0]) < 1e-9);
+  assert.ok(Math.abs(c[0][1] - p.q[1]) < 1e-9);
+  assert.ok(Math.abs(c[1][1] - p.q[2]) < 1e-9);
+  assert.ok(Math.abs(c[2][2] - q.q[0]) < 1e-9);
+  assert.ok(Math.abs(c[0][2] - c[2][0]) < 1e-12);
+  assert.ok(c[0][0] > 0 && c[2][2] > 0);
+  assert.equal(result.jointCofactor(['P', 'GONE']), null);
+});
+
+test('circle trial grades only fxShared false with STN03', () => {
   const two = circleTrialVerdict({ fxShared: false, stationIds: ['STN01', 'STN02'] });
   assert.equal(two.fxShared, false);
   assert.equal(two.grade, false);
-  assert.match(two.report, /not graded/);
   const three = circleTrialVerdict({ fxShared: false, stationIds: ['STN01', 'STN02', 'STN03'] });
   assert.equal(three.grade, true);
   assert.equal(three.fxShared, false);
+  const shared = circleTrialVerdict({ fxShared: true, stationIds: ['STN01', 'STN02', 'STN03'] });
+  assert.equal(shared.fxShared, true);
+  assert.equal(shared.grade, false);
   const unnamed = circleTrialVerdict({ stationIds: ['BAS01', 'CRC01'] });
-  assert.equal(unnamed.fxShared, false);
-  assert.equal(unnamed.grade, true);
+  assert.equal(unnamed.grade, false);
 });
 
 const fieldFixture = join(root, 'fixtures/field-circle-baseline/garden.json');

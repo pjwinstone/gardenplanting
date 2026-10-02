@@ -20,9 +20,14 @@
  *   residual, flagged or not, and the variance test then passes.
  * - ∂β/∂s uses the nominal focal length. The current fx would add a factor (1+s).
  * - A both-tapes station takes its side from the branch choice or from the
- *   bearing order in its own photo. The garden sign is only the distance-only fallback.
- * - After a behind-camera rejection the normal equations are rebuilt and solved again.
- * - reflected is set when the axis has x < 0 or the whole net sits on the wrong side.
+ *   bearing order in its own photo. Index 0 is +Y of origin→axis (BAS01 at
+ *   the origin, BAS02 on +X, so the peg side is index 1). A branch that
+ *   contradicts those bearings is unset as branch-conflict. The garden sign
+ *   is only the distance-only fallback.
+ * - After a behind-camera rejection the normal equations are rebuilt and
+ *   solved again, and the check runs once more after the last re-solve.
+ * - reflected counts only garden-sign fallback points, so a garden on −Y
+ *   is not a false mirror. jointCofactor returns the a-priori joint covariance.
  * - House Q_m holds the first azimuth and puts angle noise on the other n−1
  *   turnings. All n interior angles also face |Σα−(n−2)π| ≤ 1.96 σ √n.
  * - v1 offsetMm is not applied. A constant frame offset is used only when the

@@ -404,22 +404,23 @@ export function distanceSigma(opts: {
 }
 
 /**
- * True when the solved net is a reflection of the datum: the axis point
- * came out with x < 0, or every non-branch point sits on the opposite side
- * of the stored garden sign. One opposite station does not trip it.
- * Branch choices are the user's side, so they are not counted.
+ * True when the axis point came out with x < 0, or every point whose side
+ * was chosen by the garden-sign fallback sits on the opposite side of that
+ * sign. Bearings, rays, and branch choices are not counted: they cannot
+ * reflect at the same cost, and a garden that lies wholly on −Y is legitimate
+ * when `solveGardenDocument` still passes sign +1.
  */
 export function wholeGardenReflection(opts: {
   axisX: number;
   gardenSign: 1 | -1;
-  points: { x: number; y: number; branchChoice?: boolean }[];
+  points: { x: number; y: number; fromGardenSign?: boolean }[];
 }): boolean {
   if (opts.axisX < -1e-4) return true;
   let sided = 0;
   let wrong = 0;
   const tol = 1e-3 * Math.max(1, Math.abs(opts.axisX));
   for (const p of opts.points) {
-    if (p.branchChoice) continue;
+    if (!p.fromGardenSign) continue;
     const cross = opts.axisX * p.y;
     if (Math.abs(cross) < tol) continue;
     sided++;

@@ -2,8 +2,8 @@
  * Field fixture check — circular path vs baseline.
  * Skips (exit 0) when fixtures/field-circle-baseline/garden.json is absent.
  *
- * fxShared: false is a valid record (per-photo focal length). A capture that
- * names STN stations but has no STN03 is reported and not graded.
+ * Grade only fxShared false with STN03. fxShared true fails this check.
+ * A capture that names STN stations but has no STN03 is reported and not graded.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -45,10 +45,11 @@ for (const photo of raw.photos ?? []) {
   if (typeof id === 'string' && /^STN\d+$/.test(id)) stationIds.add(id);
 }
 const verdict = circleTrialVerdict({
-  fxShared: raw.fxShared === true,
+  fxShared: raw.fxShared === true ? true : raw.fxShared === false ? false : undefined,
   stationIds: [...stationIds],
 });
 console.log(verdict.report);
+if (verdict.fxShared) errors.push(verdict.report);
 
 if (!baselines.length) errors.push('expected at least one baseline');
 const withXy = points.filter((p) => (p as { x?: number; y?: number }).x != null && (p as { y?: number }).y != null);
@@ -65,7 +66,7 @@ if (errors.length) {
 }
 
 if (!verdict.grade) {
-  console.log('SKIP grade field-circle-baseline: two-station capture is reported only.');
+  console.log('SKIP grade field-circle-baseline: not an fxShared-false capture with STN03.');
   process.exit(0);
 }
 

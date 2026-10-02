@@ -25,4 +25,4 @@ npm run test:field-circle
 
 Skips cleanly until `garden.json` exists.
 
-`fxShared: false` on that JSON is allowed. The first trial is graded only when STN03 is in the capture. Two stations are reported and not graded.
+The first trial is graded only when `fxShared` is false and STN03 is in the capture. `fxShared: true` is not graded. Two stations are reported and not graded. Branch index 0 is +Y of BAS01→BAS02; the peg side is index 1.

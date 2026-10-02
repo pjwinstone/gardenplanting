@@ -1,37 +1,42 @@
 /**
  * First circle trial. Shared fx is not in the adjustment yet.
- * A capture is graded only when STN03 was occupied. Two stations are reported.
- * `fxShared: false` is the recorded mode and is a valid fixture field.
+ * Grade only a capture with `fxShared: false` and STN03 present.
+ * `fxShared: true` is not graded. Two stations are reported.
  */
 
 export interface CircleTrialInput {
-  /** Omitted or false: each photo keeps its own focal length. */
+  /** Omitted or false: each photo keeps its own focal length. True is not graded. */
   fxShared?: boolean;
   stationIds: string[];
 }
 
 export interface CircleTrialVerdict {
   fxShared: boolean;
-  /** False means report the capture and do not pass or fail it. */
+  /** True only for fxShared false (or omitted) and STN03 present. */
   grade: boolean;
   report: string;
 }
 
 export function circleTrialVerdict(input: CircleTrialInput): CircleTrialVerdict {
   const fxShared = input.fxShared === true;
-  const named = input.stationIds.some((id) => /^STN\d+$/.test(id));
-  if (named && !input.stationIds.includes('STN03')) {
+  const hasThird = input.stationIds.includes('STN03');
+  if (fxShared) {
     return {
-      fxShared,
+      fxShared: true,
       grade: false,
-      report: 'Two-station capture is reported and not graded. A pass or fail needs STN03.',
+      report: 'fxShared is true. This trial is not graded. Grading needs fxShared false and STN03.',
+    };
+  }
+  if (!hasThird) {
+    return {
+      fxShared: false,
+      grade: false,
+      report: 'Not graded. A pass or fail needs fxShared false and STN03.',
     };
   }
   return {
-    fxShared,
+    fxShared: false,
     grade: true,
-    report: fxShared
-      ? 'Shared fx is recorded. This solver still estimates one fx per photo.'
-      : 'fxShared is false. Each photo keeps its own focal length.',
+    report: 'fxShared is false and STN03 is present. This capture can be graded.',
   };
 }

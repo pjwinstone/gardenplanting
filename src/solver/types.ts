@@ -18,7 +18,8 @@ export type UnsetCode =
   | 'parallel-rays'
   | 'behind-camera'
   | 'diverged'
-  | 'sanity';
+  | 'sanity'
+  | 'branch-conflict';
 
 export type EarlyWarning =
   | 'shallow-intersection'
@@ -132,9 +133,11 @@ export interface SolverBranchChoice {
   /** Station or free-point id. */
   id: string;
   /**
-   * Which circle intersection. For tapes to the datum ends, 0 is the +Y
-   * side of origin→axis and 1 is the other side. This wins over bearings
-   * and over the garden sign.
+   * Which circle intersection. For tapes to the datum ends the circles are
+   * taken origin then axis, so 0 is the +Y side of origin→axis and 1 is −Y.
+   * With BAS01 at the origin and BAS02 on +X, the peg side of the circle
+   * sheet (right of BAS01→BAS02) is index 1. Bearings that contradict the
+   * index leave the station unset as `branch-conflict` instead of being overridden.
    */
   candidateIndex: 0 | 1;
 }
@@ -151,6 +154,11 @@ export interface SolveInput {
    * stands clear of the next residual, flagged or not, and the variance test then passes.
    */
   dropBlunders?: boolean;
+  /**
+   * How many behind-camera rejections rebuild and re-solve. Default 4.
+   * The check still runs once after the last of these, with no further solve.
+   */
+  behindCameraResolves?: number;
 }
 
 export interface SolvePoint {
@@ -244,11 +252,18 @@ export interface SolveResult {
   /** Levenberg–Marquardt reached the 0.1 mm step. False means coordinates were not published. */
   converged: boolean;
   /**
-   * The axis came out with x < 0, or every solved point that was not an
-   * explicit branch choice lies on the opposite side of the garden sign.
-   * A bad seed can reflect the whole net at the same cost. One opposite station does not.
+   * The axis came out with x < 0, or every point that took its side from the
+   * garden-sign fallback lies on the opposite side of that sign. Bearings,
+   * rays, and branch choices carry their own side and are not counted, so a
+   * garden that really sits on −Y is not flagged. Coordinates stay published.
    */
   reflected: boolean;
+  /**
+   * A-priori joint cofactor of the named points, unscaled by σ̂₀².
+   * Rows are x then y for each id, in the order given. The axis point has
+   * no y row. Null when any id is unset or the normal matrix has no inverse.
+   */
+  jointCofactor: (pointIds: string[]) => number[][] | null;
   droppedObservationIds: string[];
   /** Flagged observations that were not isolated enough to drop. */
   inseparableObservationIds: string[];

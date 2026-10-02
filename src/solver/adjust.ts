@@ -97,6 +97,8 @@ interface PointState {
   candidates?: Xy[];
   thetaRad?: number;
   branchChoice?: boolean;
+  /** Side came from the garden-sign fallback, not from bearings, rays, or a branch. */
+  sidedByGardenSign?: boolean;
   earlyWarning?: EarlyWarning;
   dangerRatio?: number;
   dangerKind?: 'circle' | 'line';
@@ -112,6 +114,8 @@ interface ObsFn {
   residual: (x: number[]) => number;
   jacobian: (x: number[]) => number[];
   predict?: (x: number[]) => number;
+  /** False once a later rejection has removed an endpoint. */
+  live?: () => boolean;
 }
 
 export function solve(input: SolveInput): SolveResult {
@@ -272,6 +276,7 @@ function solveOnce(input: SolveInput): SolveResult {
         s.y = placed.point.y;
         s.method = placed.branch ? 'branch' : 'distances';
         s.branchChoice = placed.branch;
+        s.sidedByGardenSign = placed.fromGardenSign === true;
         s.weak = placed.weak;
         s.unsetCode = undefined;
         s.candidates = undefined;
@@ -328,26 +333,7 @@ function solveOnce(input: SolveInput): SolveResult {
           originId,
           axisId,
         );
-        if (side.branch && side.point) {
-          s.x = side.point.x;
-          s.y = side.point.y;
-          s.method = 'branch';
-          s.branchChoice = true;
-          s.unsetCode = undefined;
-        } else if (side.point && knownMarks.length >= 2) {
-          s.x = side.point.x;
-          s.y = side.point.y;
-          if (s.method !== 'branch') s.method = 'both-tapes';
-          s.unsetCode = undefined;
-        } else if (!side.point && knownMarks.length >= 2) {
-          s.x = undefined;
-          s.y = undefined;
-          s.method = undefined;
-          s.branchChoice = undefined;
-          s.unsetCode = 'mirror';
-        } else if (s.method === 'distances' && knownMarks.length >= 2) {
-          s.method = 'both-tapes';
-        }
+        applyStationSide(s, side, knownMarks.length);
       }
       classifyControl(s, knownMarks, xyOf);
       continue;
@@ -367,18 +353,8 @@ function solveOnce(input: SolveInput): SolveResult {
         originId,
         axisId,
       );
-      if (side.point) {
-        s.x = side.point.x;
-        s.y = side.point.y;
-        s.method = side.branch ? 'branch' : 'both-tapes';
-        s.branchChoice = side.branch || undefined;
-        s.unsetCode = undefined;
-        classifyControl(s, knownMarks, xyOf);
-      } else {
-        s.unsetCode = 'mirror';
-        s.x = undefined;
-        s.y = undefined;
-      }
+      applyStationSide(s, side, knownMarks.length);
+      if (side.point && !side.conflict) classifyControl(s, knownMarks, xyOf);
       continue;
     }
 
@@ -494,6 +470,7 @@ function solveOnce(input: SolveInput): SolveResult {
     s.x = hit.point.x;
     s.y = hit.point.y;
     s.method = 'rays';
+    s.sidedByGardenSign = false;
     s.unsetCode = undefined;
     if (cross < RAY_CROSS_WARN_DEG) s.earlyWarning = 'shallow-rays';
   }
@@ -554,12 +531,15 @@ function solveOnce(input: SolveInput): SolveResult {
   rankTrim();
   writeSolved();
 
+  const behindResolves = input.behindCameraResolves ?? 4;
   if (!adjusted.converged) {
     markDiverged();
   } else {
     // A rejection removes the point from the free set. Rebuild without its
     // observations and solve again, or finishStats reads a coordinate that is gone.
-    for (let pass = 0; pass < 4 && adjusted.converged; pass++) {
+    // The check also runs after the last re-solve, including the 4th, and that
+    // last pass does not solve again.
+    for (let pass = 0; pass < behindResolves && adjusted.converged; pass++) {
       const victims = rejectBehindCamera(bearings, built, adjusted, state, free, held, originId, axisId);
       if (victims.length === 0) break;
       built = assemble(input, free, state, held, distances, bearings, offsets, originId, axisId);
@@ -567,6 +547,9 @@ function solveOnce(input: SolveInput): SolveResult {
       rankTrim();
       writeSolved();
       if (!adjusted.converged) markDiverged();
+    }
+    if (adjusted.converged) {
+      rejectBehindCamera(bearings, built, adjusted, state, free, held, originId, axisId);
     }
   }
 
@@ -630,10 +613,89 @@ function solveOnce(input: SolveInput): SolveResult {
       gardenSign,
       points: [...state.values()]
         .filter((s) => s.id !== originId && s.id !== axisId && !held.has(s.id) && s.x != null && s.y != null)
-        .map((s) => ({ x: s.x as number, y: s.y as number, branchChoice: s.branchChoice })),
+        .map((s) => ({ x: s.x as number, y: s.y as number, fromGardenSign: s.sidedByGardenSign === true })),
     }),
+    jointCofactor: (pointIds: string[]) => jointCofactorOf(pointIds, built, adjusted, state, held, originId, axisId),
     datum: { originId, axisPointId: axisId, gardenSign },
   };
+}
+
+function jointCofactorOf(
+  pointIds: string[],
+  built: Built,
+  adjusted: LmResult,
+  state: Map<string, PointState>,
+  held: Map<string, Xy>,
+  originId: string,
+  axisId: string,
+): number[][] | null {
+  const q = adjusted.q;
+  if (!q) return null;
+  const slots: (number | null)[] = [];
+  for (const id of pointIds) {
+    const s = state.get(id);
+    const solved = id === originId || held.has(id) || (s?.x != null && s?.y != null);
+    if (!solved) return null;
+    slots.push(built.index.get(`${id}:x`) ?? null);
+    if (id !== axisId) slots.push(built.index.get(`${id}:y`) ?? null);
+  }
+  const n = slots.length;
+  const c = Array.from({ length: n }, () => Array<number>(n).fill(0));
+  for (let a = 0; a < n; a++) {
+    for (let b = 0; b < n; b++) {
+      const ia = slots[a];
+      const ib = slots[b];
+      if (ia == null || ib == null) continue;
+      c[a][b] = q[ia][ib];
+    }
+  }
+  return c;
+}
+
+interface SidePick {
+  point: Xy | null;
+  branch: boolean;
+  conflict: boolean;
+  fromGardenSign: boolean;
+}
+
+function applyStationSide(s: PointState, side: SidePick, knownMarks: number): void {
+  if (side.conflict) {
+    s.x = undefined;
+    s.y = undefined;
+    s.method = undefined;
+    s.branchChoice = true;
+    s.sidedByGardenSign = false;
+    s.unsetCode = 'branch-conflict';
+    return;
+  }
+  if (side.branch && side.point) {
+    s.x = side.point.x;
+    s.y = side.point.y;
+    s.method = 'branch';
+    s.branchChoice = true;
+    s.sidedByGardenSign = false;
+    s.unsetCode = undefined;
+    return;
+  }
+  if (side.point && knownMarks >= 2) {
+    s.x = side.point.x;
+    s.y = side.point.y;
+    if (s.method !== 'branch') s.method = 'both-tapes';
+    s.sidedByGardenSign = false;
+    s.unsetCode = undefined;
+    return;
+  }
+  if (!side.point && knownMarks >= 2) {
+    s.x = undefined;
+    s.y = undefined;
+    s.method = undefined;
+    s.branchChoice = undefined;
+    s.sidedByGardenSign = false;
+    s.unsetCode = 'mirror';
+    return;
+  }
+  if (s.method === 'distances' && knownMarks >= 2) s.method = 'both-tapes';
 }
 
 function prepareDistances(input: SolveInput): DistPrep[] {
@@ -773,7 +835,7 @@ function placeFromDistances(
     bearings: BearingPrep[];
     branch?: 0 | 1;
   },
-): { point?: Xy; weak?: boolean; branch?: boolean; code: UnsetCode; candidates?: Xy[] } {
+): { point?: Xy; weak?: boolean; branch?: boolean; fromGardenSign?: boolean; code: UnsetCode; candidates?: Xy[] } {
   const d0 = toKnown[0];
   const d1 = toKnown[1];
   const k0 = d0.raw.a === id ? d0.raw.b : d0.raw.a;
@@ -825,11 +887,13 @@ function placeFromDistances(
   const ownMarks = uniqueMarks(own.filter((b) => xyOf(b.pointId) && b.pointId !== id));
   const onBaseline = bothOnBaseline(c0, c1, ctx.origin, ctx.axis);
   const side = chooseSide(hits, own, ownMarks, xyOf, ctx.branch, ctx.origin, ctx.axis, ctx.gardenSign, onBaseline);
+  if (side.conflict) return { code: 'branch-conflict', candidates: hits };
   if (side.point) {
     return {
       point: featureFromMark(side.point, id, offsets),
       weak,
       branch: side.branch,
+      fromGardenSign: side.fromGardenSign,
       code: side.branch ? 'mirror' : 'one-distance',
     };
   }
@@ -846,10 +910,11 @@ const SIDE_MATCH_RAD = (10 * Math.PI) / 180;
 
 /**
  * Candidate 0 is the first circle intersection. For tapes to the datum ends
- * that order is origin then axis, so index 0 is +Y when the axis runs +X.
- * An explicit branch wins. Otherwise the signed order of two marks in one
- * photo of this station wins. The garden sign is only the distance-only fallback.
- * When those photos exist and neither hit agrees, the point is not published.
+ * that order is origin then axis, so index 0 is +Y when the axis runs +X
+ * (BAS01 at the origin, BAS02 on +X: the peg side of that sheet is index 1).
+ * An explicit branch is used when the station's own bearings agree, or when
+ * there are none. A contradiction is `branch-conflict` and the station is not
+ * seeded. The garden sign is only the distance-only fallback.
  */
 function chooseSide(
   hits: Xy[],
@@ -861,14 +926,24 @@ function chooseSide(
   axis: Xy,
   gardenSign: 1 | -1,
   allowGardenSign: boolean,
-): { point: Xy | null; branch: boolean } {
-  if (hits.length === 1) return { point: hits[0], branch: false };
-  if (branch != null && hits[branch]) return { point: hits[branch], branch: true };
-  if (markIds.length >= 2) {
-    return { point: pickByBearings(hits, markIds, ownBearings, xyOf), branch: false };
+): SidePick {
+  const empty: SidePick = { point: null, branch: false, conflict: false, fromGardenSign: false };
+  if (hits.length === 1) return { ...empty, point: hits[0] };
+  if (branch != null && hits[branch]) {
+    if (markIds.length >= 2) {
+      const byBearing = pickByBearings(hits, markIds, ownBearings, xyOf);
+      const chosen = hits[branch];
+      if (!byBearing || Math.hypot(byBearing.x - chosen.x, byBearing.y - chosen.y) > 1e-3) {
+        return { point: null, branch: true, conflict: true, fromGardenSign: false };
+      }
+    }
+    return { point: hits[branch], branch: true, conflict: false, fromGardenSign: false };
   }
-  if (!allowGardenSign) return { point: null, branch: false };
-  return { point: gardenSide(origin, axis, hits, gardenSign), branch: false };
+  if (markIds.length >= 2) {
+    return { point: pickByBearings(hits, markIds, ownBearings, xyOf), branch: false, conflict: false, fromGardenSign: false };
+  }
+  if (!allowGardenSign) return empty;
+  return { point: gardenSide(origin, axis, hits, gardenSign), branch: false, conflict: false, fromGardenSign: true };
 }
 
 function sideFromBaselineTapes(
@@ -884,12 +959,14 @@ function sideFromBaselineTapes(
   gardenSign: 1 | -1,
   originId: string,
   axisId: string,
-): { point: Xy | null; branch: boolean } {
+): SidePick {
   const da = tapeTo(originId);
   const db = tapeTo(axisId);
   const originMark = markOf(originId);
   const axisMark = markOf(axisId);
-  if (!da || !db || !originMark || !axisMark) return { point: null, branch: false };
+  if (!da || !db || !originMark || !axisMark) {
+    return { point: null, branch: false, conflict: false, fromGardenSign: false };
+  }
   const hits = intersectCircles(originMark, da.horizontalM, axisMark, db.horizontalM);
   void stationId;
   return chooseSide(hits, photoBearings, knownMarks, xyOf, branch, origin, axis, gardenSign, true);
@@ -1067,6 +1144,7 @@ function assemble(
       kind: 'distance',
       sigma: d.sigma,
       pointIds: [d.raw.a, d.raw.b],
+      live: () => coord(x0, d.raw.a) != null && coord(x0, d.raw.b) != null,
       residual: (x) => {
         const a = mark(x, d.raw.a)!;
         const b = mark(x, d.raw.b)!;
@@ -1124,6 +1202,7 @@ function assemble(
       kind: 'bearing',
       sigma,
       pointIds: [b.photo.stationId, b.pointId],
+      live: () => coord(x0, b.photo.stationId) != null && coord(x0, b.pointId) != null,
       residual: (x) => {
         const c = coord(x, b.photo.stationId)!;
         const m = mark(x, b.pointId)!;
@@ -1155,6 +1234,7 @@ function assemble(
       kind: 'focal',
       sigma: photo.fxRelativeUncertainty,
       pointIds: [photo.stationId],
+      live: () => coord(x0, photo.stationId) != null,
       residual: (x) => -x[fxIndex],
       jacobian: () => {
         const j = Array<number>(params.length).fill(0);
@@ -1174,6 +1254,7 @@ function assemble(
       kind: 'angle',
       sigma: ang.sigmaRad,
       pointIds: [ang.at, ang.from, ang.to],
+      live: () => coord(x0, ang.at) != null && coord(x0, ang.from) != null && coord(x0, ang.to) != null,
       residual: (x) => wrap(ang.radians - angleAt(coord(x, ang.at)!, coord(x, ang.from)!, coord(x, ang.to)!)),
       jacobian: (x) => {
         const v = coord(x, ang.at)!;
@@ -1410,6 +1491,10 @@ function finishStats(built: Built, adjusted: LmResult): { observations: SolveObs
   const n = built.params.length;
   const q = adjusted.q;
   for (const o of built.obs) {
+    if (o.live && !o.live()) {
+      observations.push(unusedObs(o.id, o.kind, o.sigma, o.pointIds));
+      continue;
+    }
     const v = o.residual(adjusted.x);
     const p = 1 / (o.sigma * o.sigma);
     vPv += v * v * p;
