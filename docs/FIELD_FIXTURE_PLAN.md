@@ -27,12 +27,12 @@ Notes that travel with those five, and are not separate gates:
 |---|---|
 | 1× field of view. STN02 saw the baseline ends 81.8° apart. STN01 at 7.20 m / 7.20 m needed 67.5°. | STN01 is **8.00 m / 8.00 m** (60°). STN02 moves to **6.50 m from BAS01 and 9.00 m from BAS02** (59.6°). Every photo in the field sheet is checked against a **67°** landscape frame, which is the narrow end of 1× (`fx/width` 0.75; 0.69 is about 72°). The spare on each side is stated in §3.0. |
 | STN02’s second turn saw no known mark. | That turn is gone. STN02’s second photo keeps **BAS02**. CRC04 is not photographed from STN02. |
-| The solver needs the side of the baseline. | Each station records `branchChoices`. STN01 is opposite the peg. STN02 and STN03 are on the peg’s side. |
+| The solver needs the side of the baseline. | Datum is BAS01 at the origin, BAS02 on +X, matching the sheet order BAS01–BAS02. Paul ticks left or right looking from BAS01 toward BAS02. The importer writes the index. |
 | The lens must be on the pole axis. | `phonePole.lensOnAxis`. The field sheet says to sight the lens over the middle of the pole before plumbing. |
 | The circle fit must use the joint covariance. Per-point covariance makes `σ_R` about 1.6–2.5× too small. | §3.2 fits with `C = GQGᵀ + σ²_stick I`. Marginal `Q_i` is not the weight. |
 | Add about 6 mm of per-stick scatter. | `σ_stick = 6 mm` inside that `C`. |
-| Use `σ_setout ≈ 4 mm`. Keep the 3.29 single-point threshold. | `radiusSigmaM` is 0.004. `w_i` uses the full residual covariance. The threshold stays 3.29. |
-| Withheld tapes need `σ ≈ 9 mm`, including lean. | `σ_check = 0.009` m on every withheld length. |
+| Use `σ_setout ≈ 4 mm`. Keep the 3.29 single-point threshold. | `radiusSigmaM` is **0.003**, the common set-out only. The 6 mm stick term stays in `C` and is not counted again. `w_i` and 3.29 are unchanged. |
+| Withheld tapes need `σ ≈ 9 mm`, including lean. | That 9 mm was a ground tape. These checks are sleeve to sleeve, so lean cancels. `CHK-BASE` is **5 mm**. The figure checks are **5 mm** and are diagnostics, not the grade. |
 | The circle test cannot see a baseline blunder. | The laser baseline is withheld (`CHK-BASE`). The two tape pulls must agree within 10 mm. |
 | A pass or fail requires STN03. The fixture’s shared-`fx` flag is false. | Two-station captures are reported and not graded. Completeness requires `fxSharedInSolve: false`. It does not require `fxShared: true`. |
 
@@ -342,7 +342,7 @@ Written by the surveyor, not fitted by the script. The known radius is not an ob
 ```json
 {
   "radiusM": 4.0,
-  "radiusSigmaM": 0.004,
+  "radiusSigmaM": 0.003,
   "setOut": "peg and non-stretch line, both diameters and the closing chord inside the sheet limits",
   "circlePointIds": ["CRC01", "CRC02", "CRC03", "CRC04", "CRC05", "CRC06"],
   "nearBaselineEndId": "BAS02",
@@ -363,14 +363,20 @@ Written by the surveyor, not fitted by the script. The known radius is not an ob
     "BAS02": null,
     "CAL": null
   },
-  "sigmaCheckM": 0.009,
+  "sigmaM": {
+    "baseline": 0.003,
+    "stationTape": 0.010,
+    "checkBaseline": 0.005,
+    "checkFigure": 0.005
+  },
   "sigmaStickM": 0.006,
+  "datum": { "originId": "BAS01", "axisPointId": "BAS02" },
   "baselinePullsAgreeWithinM": 0.01,
   "gradeRequiresStationIds": ["STN01", "STN02", "STN03"],
   "branchChoices": [
-    { "id": "STN01", "candidateIndex": 1, "side": "opposite-peg" },
-    { "id": "STN02", "candidateIndex": 0, "side": "peg" },
-    { "id": "STN03", "candidateIndex": 0, "side": "peg" }
+    { "id": "STN01", "candidateIndex": 0, "side": "left" },
+    { "id": "STN02", "candidateIndex": 1, "side": "right" },
+    { "id": "STN03", "candidateIndex": 1, "side": "right" }
   ],
   "build": "",
   "withheld": [
@@ -379,42 +385,63 @@ Written by the surveyor, not fitted by the script. The known radius is not an ob
       "a": "BAS02",
       "b": "BAS01",
       "instrument": "laser",
-      "sigmaM": 0.009,
+      "sigmaM": 0.005,
+      "tapedAt": "sleeve",
       "slopeM": null,
       "deltaHM": null,
-      "note": "laser baseline; not typed into the app; the tape mean is the observation; add sleeveRadiusM of each sleeved end"
+      "note": "laser baseline, sleeve to sleeve; not typed into the app; the tape mean is the observation; add sleeveRadiusM of each sleeved end"
     },
     {
       "id": "CHK-DIA",
       "a": "CRC01",
       "b": "CRC04",
       "instrument": "tape",
-      "sigmaM": 0.009,
+      "sigmaM": 0.005,
+      "tapedAt": "sleeve",
       "slopeM": null,
       "deltaHM": null,
-      "note": "fresh diameter; axis length is horizontal plus sleeveRadiusM of CRC01 and of CRC04"
+      "note": "fresh diameter, sleeve to sleeve; axis length is horizontal plus sleeveRadiusM of CRC01 and of CRC04; diagnostic, not a grade failure"
     },
     {
       "id": "CHK-CHORD",
       "a": "CRC01",
       "b": "CRC03",
       "instrument": "tape",
-      "sigmaM": 0.009,
+      "sigmaM": 0.005,
+      "tapedAt": "sleeve",
       "slopeM": null,
       "deltaHM": null,
-      "note": "120° chord, about 6.93 m axis to axis; add sleeveRadiusM of CRC01 and of CRC03"
+      "note": "120° chord, sleeve to sleeve, about 6.93 m axis to axis; add sleeveRadiusM of CRC01 and of CRC03; diagnostic, not a grade failure"
     }
   ]
 }
 ```
 
-`slopeM` and `deltaHM` are the fresh pulls from the sheet. The script does not invent them. `sleeveRadiusM` is the measured R of that stick, copied from the sheet into the point and into each click of that point. A null in this example means the sheet has not been copied yet. The script does not write 0.030. `radiusSigmaM` is the set-out σ from the protocol, **4 mm**. The old 10 mm figure was a tolerance on a diameter, not a standard deviation. `pegToNearEndM` is the taped distance from the centre peg to the near baseline end, so the “circle approaches this end” check has a number. The peg is not a solved point.
+`slopeM` and `deltaHM` are the fresh pulls from the sheet. The script does not invent them. `sleeveRadiusM` is the measured R of that stick, copied from the sheet into the point and into each click of that point. A null in this example means the sheet has not been copied yet. The script does not write 0.030. `radiusSigmaM` is the common set-out σ, **3 mm**. The 6 mm stick term is already in `C` (§3.2). Putting it in `radiusSigmaM` as well counted it twice; the old 4 mm did that (about `√(3² + 5.8²/6) ≈ 3.9 mm`). The difference on the radius limit is under 1 mm, and it is still the wrong place for that term. `pegToNearEndM` is the taped distance from the centre peg to the near baseline end, so the “circle approaches this end” check has a number. The peg is not a solved point.
 
-`branchChoices` are the sides the sheet ticks. `candidateIndex` is the index from `intersectCircles(BAS02, tape to BAS02, BAS01, tape to BAS01)`: **0** is the peg side (left of BAS02→BAS01), **1** is opposite the peg. The import writes the index from the ticked side. It does not guess it from a stored coordinate.
+**Datum.** `originId` is BAS01 and `axisPointId` is BAS02. BAS01 is `(0, 0)`. BAS02 lies on `+X`. That is the sheet order, baseline BAS01–BAS02, and it is what `solveGardenDocument` does when the baseline’s `a` is BAS01. The other order, origin at BAS02, is not this fixture. Swapping the ends and keeping these indices unsets the net.
 
-`baselinePullsAgreeWithinM` is the field gate on the two tape pulls. The mean of the two axis lengths is the baseline in the app. A pair that differs by more than 10 mm is remeasured, not averaged. That gate is not a substitute for `CHK-BASE`. A baseline that is long by the same amount both ways still agrees with itself, and the circle test barely moves, because the station tapes carry the scale. The withheld laser is what sees that blunder.
+**Sides.** Paul ticks left or right while standing at BAS01 and looking toward BAS02. He does not tick a number. The peg is on the **right** in that view. STN02 and STN03 are on the right with the peg. STN01 is on the left.
 
-`sigmaCheckM` is **9 mm** on every withheld length, laser included. A bare tape σ (20 mm) or a bare laser σ (2 mm) leaves out the lean of the two sticks. At the recorded sleeve height, `√2 · h_s · σ_λ` is about 7 mm, and the instrument sits on top of that. 9 mm is the combined figure. Do not use 2 mm for `CHK-BASE`.
+`candidateIndex` is the index from `intersectCircles(BAS01, tape to BAS01, BAS02, tape to BAS02)`. With BAS02 on `+X`, index **0** is `+Y`, which is the **left** as you look from BAS01 toward BAS02. Index **1** is the **right**. So STN01 is 0 and STN02 and STN03 are 1. The importer derives the index from the tick and from this datum order. It does not copy the index off the sheet, and it does not guess it from a stored coordinate.
+
+Those indices are the opposite of the earlier note, which defined them with BAS02 as the origin. Using 1, 0, 0 under a BAS01 origin puts every station on the wrong side and the solve diverges.
+
+A correct solve of this datum can still report `reflected`. The default garden sign is the left-hand side of BAS01→BAS02, and the circle sits on the right. Points that were placed by an explicit branch choice are not what sets that flag; the circle points do. `reflected` true is not a grade failure.
+
+The solver at `d680a49` does read `branchChoices` for a both-tapes station. An explicit index wins, then the order of two marks in a photo of that station, then the garden sign. The first photo at each station holds both ends, so the bearings can pick the side when the index is absent. The fixture still records the index. A click order is a worse place to keep the side than the tick.
+
+`baselinePullsAgreeWithinM` is the field gate on the two tape pulls. The mean of the two axis lengths is the baseline in the app, stored with `sigmaM.baseline` of **3 mm**. A pair that differs by more than 10 mm is remeasured, not averaged. A 10 mm limit on the difference of two pulls is `1.96 √2 σ_pull`, so each pull is about **3.6 mm**. The mean of two such pulls is about **2.5 mm**. The stored 3 mm sits just above that, for the level and the sleeve correction. The solver’s unset-tape default is 20 mm. At 20 mm only about 27% of good pulls would pass the 10 mm rule, so that default is not written on this baseline.
+
+Station tapes are one pull each, from the pole to the sleeve, and the long ones are 10.5 m. They are stored at **10 mm** (`sigmaM.stationTape`), the top of the 5–10 mm band. Five millimetres would suit the short level legs and not the 10.5 m ones. Ten millimetres is also the station-tape σ in the trial quoted in §3.3, so the pass rates there belong to this number. Twenty millimetres is not used: a check against a 20 mm network cannot see a 20 mm baseline blunder.
+
+`baselinePullsAgreeWithinM` is not a substitute for `CHK-BASE`. A baseline that is long by the same amount both ways still agrees with itself, and the circle test barely moves, because the station tapes carry the scale. The withheld laser is what sees that blunder.
+
+**Check σ, and where the tape is held.** All three withheld lengths are sleeve to sleeve, the same height as the solved sleeve centres. The lean `√2 · h_s · σ_λ` belongs only when a length is taken at the ground and the solved point is the sleeve. It does not belong here, so the old 9 mm figure is withdrawn.
+
+`CHK-BASE` is **5 mm**. The laser itself is about 2–3 mm, and a dot half a radius off the centreline can still bias the range by about 4 mm. Five millimetres covers both. At 9 mm that check catches a 20 mm baseline blunder about **57%** of the time. At 5 mm it catches it about **95%**, and a good laser still fails the check under 1% of the time. In the full grade those two settings are about **66%** and **96%** detection.
+
+`CHK-DIA` and `CHK-CHORD` are **5 mm** for the same reason: sleeve to sleeve, lean left out. They are printed. They do not fail the grade (§3.3).
 
 ### 2.4 Privacy, and the public repo
 
@@ -442,28 +469,33 @@ One real capture. The synthetic suite already checks ellipse coverage and NEES. 
 
 The field sheet places three taped stations. Views below use the narrow 1× frame, **67°** landscape (`fx/width` 0.75; `2 atan(0.5 / 0.75)`). A phone at 0.69 is about 72° and has more spare. Portrait is not this frame. The sheet says landscape.
 
+Sides are as you look from BAS01 toward BAS02. Index 0 is your left. Index 1 is your right. The peg is on your right.
+
 | Station | Tapes, BAS01 / BAS02 | Side | `candidateIndex` | Photos, and the spare on a 67° frame |
 |---|---|---|---|---|
-| STN01 | 8.00 / 8.00 | Opposite the peg | 1 | Both ends and CRC01–CRC05, scene **60°**, about **3.7°** spare each side. Second photo keeps BAS02 and adds CRC06, about **9°** outside BAS02. |
-| STN02 | 6.50 / 9.00 | Peg side | 0 | Both ends, scene **59.6°**, about **3.9°** spare each side. No circle stick lies in that wedge. Second photo keeps BAS02 and takes CRC02, CRC01, CRC06, CRC05, CRC03, span about **54°**, about **7°** spare each side. |
-| STN03 | 10.50 / 10.50 | Peg side | 0 | Both ends and CRC01–CRC03, scene **44.8°**, about **11°** spare each side. Second photo keeps BAS02 and adds CRC06, CRC05, CRC04, span **48°**, about **10°** spare each side. |
+| STN01 | 8.00 / 8.00 | Left | 0 | Both ends and CRC01–CRC05, scene **60°**, about **3.7°** spare each side. Second photo keeps BAS02 and adds CRC06, about **9°** outside BAS02. |
+| STN02 | 6.50 / 9.00 | Right | 1 | Both ends, scene **59.6°**, about **3.9°** spare each side. No circle stick lies in that wedge. Second photo keeps BAS02 and takes CRC02, CRC01, CRC06, CRC03. Span about **54°**, about **7°** spare each side. CRC05 is not in this photo. |
+| STN03 | 10.50 / 10.50 | Right | 1 | Both ends and CRC01–CRC03, scene **44.8°**, about **11°** spare each side. Second photo keeps BAS02 and adds CRC06, CRC05, CRC04, span **48°**, about **10°** spare each side. |
 
 CRC04 from the old STN02 (5.00 m / 7.00 m) sat about 74° from the nearest baseline end, and CRC03 sat about 82° out, so the turn that showed them had no known mark. Dropping that turn without moving the station still leaves CRC03 with no oriented ray, and CRC03 is one of the two shallow crossings. No peg-side point with both tapes inside 8 m puts CRC03 inside a 67° frame with a baseline end and still crosses it cleanly. **6.50 m / 9.00 m** is the round pair that does, and it keeps both baseline ends inside the same 67° frame, with about the same spare as STN01. From there CRC04 is still about 62° from BAS02 and is not photographed. STN01 and STN03 both see CRC04, and those two rays meet at about **85°**.
 
 CRC02 and CRC03 are the shallow pair between STN01 and STN03 (about **7.5°** and **11°**). STN02 is there to cross them: about **40°** at CRC02 and about **85°** at CRC03, with BAS02 in the same photo so the yaw has a known mark. The other four sticks meet STN01 and STN03 at **52°** or more.
 
+From STN02, CRC05 lies **0.07°** behind CRC03. CRC03 is the near cane (about 3 m) and its sleeve covers the far one (about 10 m). Keeping CRC03’s cane under about 0.8 m would open a vertical gap, and it is easy to miss in the field. The sheet drops CRC05 from that photo instead. CRC05 is still seen from STN01 and from STN03, and those rays meet at about **85°**. The angular span of the STN02 photo does not change: CRC05 was already on CRC03’s azimuth.
+
 **A grade requires STN03.** A capture that has STN01 and STN02 only is solved and the statistics are printed. It is not passed and it is not failed. Two stations with a per-photo `fx` do not support a pass/fail on this circle. The same rule applies when `CHK-BASE` is missing: the report is printed, and there is no grade, because a baseline blunder does not show up in the radius.
 
 **Checked is not expected.** Each station is fixed by exactly two tapes, so that fix has no spare observation. With three stations the phase 1 gate marks only CRC01 checked. With two stations it marks none. Plantable is the same gate plus the ellipse and a withheld distance. This layout’s grade is the circle table in §3.3, not a checked or plantable flag.
 
-The both-tapes path in the phase 1 solver does not read `branchChoices`. It places every such station with `gardenSide` and `gardenSign` +1, which is the peg side. STN01 is the other side, so that station will not land until the path honours the recorded choice. The fixture records the choice anyway. Do not drop STN01 to make today’s path pass.
+From `d680a49` the both-tapes path reads `branchChoices`. The recorded index is applied before the bearing order and before the garden sign. Do not drop STN01, and do not reuse the old indices 1, 0, 0 that belonged to a BAS02 origin.
 
 ### 3.1 Solve
 
 1. Load `garden.json`, `normalizeDocument`, require `version: 1`.
 2. Completeness, before any fit:
    - One `phoneId`, one `LensModel`, `lens` `1x`, `fxSharedInSolve` **false**, and the calibration photo present with raw tape, `R`, `H`, `sleeveHeightM`, and `plumbOk`. `fxShared: true` is not a requirement. A true value fails this check, because this solver does not share `fx`.
-   - `branchChoices` for STN01, STN02, and STN03, with the sides in §3.0.
+   - Datum origin BAS01, axis BAS02. `branchChoices` for STN01, STN02, and STN03 are the indices in §3.0, derived from left/right looking from BAS01 toward BAS02.
+   - The baseline line carries `sigmaM` 0.003. Each station tape carries `sigmaM` 0.010. A missing `sigmaM` is not filled with the 20 mm default.
    - Every station photo has `phonePole.lensOnAxis` true.
    - Every fixture photo is `original-still` from a probe **go** (`FocalLength` and `LensModel` present). A `canvas-derived` photo, or a still with either tag missing, fails the test.
    - Clicks are `sensor-continuous` and each click has `sigmaPx` in sensor pixels.
@@ -503,16 +535,33 @@ Arc span is the same quantity as `arcRad` in `fitCircleGeometric`. The protocol 
 |---|---|---|
 | Network | Solver variance test | Not `high`. One-sided, upper tail, α = 5%, as implemented. `low` does not fail. |
 | Circle points | Status | None `unset`. |
-| Radius | `\|R̂ − R_known\| ≤ 1.96 √(σ²_R + σ²_setout)` | 1.96 is the 1D 95% factor, the same one used on a withheld tape. `σ_setout` is `radiusSigmaM`, **4 mm**. |
+| Radius | `\|R̂ − R_known\| ≤ 1.96 √(σ²_R + σ²_setout)` | 1.96 is the 1D 95% factor. `σ_setout` is `radiusSigmaM`, **3 mm**, the common set-out only. |
 | Shape | `vᵀ C⁻¹ v ≤ χ²(n − 3, 0.95)` | `v_i = ‖p_i − ĉ‖ − R̂`. `C` is the joint radial covariance from §3.2, stick scatter included. One-sided. This is the set of radial residuals, not a millimetre cap on each point. |
 | One point | `\|w_i\| ≤ 3.29` | `w_i = v_i / √(C_vv)_{ii}`, with `C_vv = C − J N⁻¹ Jᵀ` and `N = Jᵀ C⁻¹ J`. 3.29 is the solver’s two-sided 0.1% residual threshold. It stays 3.29. It is not tightened to a Bonferroni 2.64, and it is not `v_i / (σ_i √(1 − h_ii))` from a diagonal weight matrix. A point outside 1.96 σ is reported and does not by itself fail. |
 | Short arc | `arcRad < π/2` | Radius row is not applied. Shape and `w_i` still are. |
-| Withheld length | Existing solver check | `\|miss\| ≤ 1.96 √(gᵀ Q g + σ²_check)` on the axis-to-axis length. `σ_check` is **9 mm**, including lean, on `CHK-BASE`, `CHK-DIA`, and `CHK-CHORD`. |
+| Laser baseline | Existing solver check | `\|miss\| ≤ 1.96 √(gᵀ Q g + σ²_check)` with `σ_check` **5 mm**. Sleeve to sleeve. This row is part of the grade. |
+| Figure tapes | Same check, printed only | `CHK-DIA` and `CHK-CHORD`, also **5 mm**, sleeve to sleeve. Printed. They do not fail the grade. |
 | Near end | Recorded peg distance | Distance from the fitted circle to `nearBaselineEndId` is smaller than the distance to the far end. The gap to the near end is reported against `\|pegToNearEndM − R_known\|`. It is a stake-note check, not a second radius gate. |
 | Calibration | Manifest | Present, raw, same phone, 1×, that rod’s measured `R`, sleeve height, and bubble filled. |
 | Class report | 95% semi-major | Printed per circle point. ≤ 100 mm meets the plantable bar only together with the spare-observation rule. The radius test does not require every point to be under 100 mm. A semi-major over 5 m is already `sanity` and unset. |
 
-The radius row is the scale check. The fit can have tiny residuals and a wrong radius; the known radius catches that. The shape row is the radial residuals against the covariances. Together they are the field fixture.
+The radius row is the scale check. The fit can have tiny residuals and a wrong radius; the known radius catches that. The shape row is the radial residuals against the covariances.
+
+**One grade, not seven vetoes.** Every row above is printed. The CI result is a single pass or fail. It fails when the solve is unusable (no convergence, or a circle point unset), or when any of these rows fails: network, radius, shape, `|w|`, or `CHK-BASE`. `CHK-DIA`, `CHK-CHORD`, the near-end note, and `reflected` are diagnostics.
+
+The numbers that decide this, from the re-check at solver `d680a49` (500 trials, a focal length shared by the phone, baseline 4 mm in that trial, station tapes 10 mm):
+
+| Policy | A correct capture passes | A stick 50 mm off the circle is caught | A baseline typed 20 mm long is caught |
+|---|---|---|---|
+| All seven rows at about 5%, AND-ed | **80%** (false-fail 20%) | **69%** | **66%** if `CHK-BASE` is 9 mm; **96%** if it is 5 mm |
+| All seven rows at about 1% | **93%** (false-fail 7%) | **43%** | **77%** with `CHK-BASE` at 5 mm |
+| This grade | about **97%** | about **69%** | about **96%** |
+
+The 20% false-fail is mostly `CHK-DIA`. On a correct capture that one check fails alone in **17%** of trials, because a focal length shared by the phone is not shared by this solve, and the diameter then fails safe. Moving every row to 1% would lift a correct capture to 93%, and it would catch the 50 mm stick only 43% of the time. The stick is what this test is for, and shape plus `|w|` are what catch it (about 58% and 14%). Those rows stay at `χ²(3, 0.95)` and at 3.29.
+
+Leaving `CHK-DIA` and `CHK-CHORD` out of the grade removes that 17 points. What remains of the 20% is about **3%**, so a correct capture passes about **97%**. The stick stays at about **69%**. `CHK-BASE` at 5 mm stays in the grade, so the 20 mm baseline stays at about **96%** (the check itself about 95%). `|w|` is already a 0.1% threshold, not a 5% one, so it adds little false-fail. The network row stays at 5%: a common focal length 5% high is caught there every time, and only about 42% of the time if that test is moved to 1%.
+
+The trial’s baseline was 4 mm and this fixture stores 3 mm. The rates above are the trial’s. The 1 mm is the rounding from the 10 mm pull rule down to a stored 3 mm, not a second network.
 
 ### 3.4 What one capture does not prove
 
@@ -523,7 +572,7 @@ It does not estimate NEES and it does not show that 95% of repeats fall in the e
 1. **Probe first, then stills.** A path is an archive path only after `FocalLength` and `LensModel` survive on that phone. The canvas shutter is a thumb, not the archive. Stills sit in a sibling folder.
 2. **Stay on document version 1** with optional fields. v2 remains the bump already agreed. The sidecar is not a second garden file.
 3. **Node import script.** Not an in-app export. Photos stay on OneDrive. The repo gets observations and ground truth. Any future image bytes are rewritten to the allow-list in §2.4.
-4. **Circle test** as the table in §3.3. Geometric fit on the joint covariance, with 6 mm of stick scatter. 1.96 on the radius with `σ_setout` of 4 mm. `χ²(n−3)` on the radial residuals. 3.29 on a single point, from the full residual covariance. Withheld lengths at 9 mm. A grade needs STN03 and the withheld laser baseline.
+4. **Circle test** as §3.3. One pass/fail: the circle rows plus the laser baseline. Figure tapes are printed and do not fail the grade. Joint covariance, 6 mm stick scatter, `σ_setout` 3 mm, `|w|` at 3.29. Baseline σ 3 mm, station tapes 10 mm, `CHK-BASE` 5 mm. Datum BAS01 → BAS02. A grade needs STN03.
 5. **`+R` after horizontal reduction**, stored separately from v1 `offsetMm`. Leave that box at 0. `R` is the sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md), stored on each stick.
 6. **One phone, one `LensModel`, one calibration shot at 3–5 m**, raw tape and sleeve height, no derived focal length in the file. `fxSharedInSolve` is false: this solver gives each photo its own `fx`.
 7. **Licence and the public repo.** The repo is public and has no licence. Paul decides whether to add one, and whether a survey of this garden should be committed here at all. This note does not pick a licence. Until that decision, fixture photos are not committed.

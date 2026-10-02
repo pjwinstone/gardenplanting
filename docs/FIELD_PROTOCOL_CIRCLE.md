@@ -69,7 +69,7 @@ You want a clear patch about **8 m** along the baseline and about **17 m** acros
 5. Continue the same way for **CRC03**, **CRC04**, **CRC05**, **CRC06**. Each new stick is 4.000 m from the peg and 4.000 m from the one before.
 6. The last chord, CRC06 back to CRC01, should also be 4.000 m. More than 30 mm out: walk the sticks again.
 7. Tape the two diameters, CRC01–CRC04 and CRC02–CRC05, holding the tape level. Each should be 8.000 m between the axes. If you taped to the paper, the reading is short by the two sleeves’ measured R added together (about 60 mm). Write the raw reading and “both ends on paper”.
-8. Both diameters within 20 mm of 8.000 m, and the closing chord within 30 mm of 4.000 m: write `radius σ = 4 mm`. That 4 mm is the set-out scatter this test uses. A 10 mm or 20 mm figure here is a tolerance on a length, not this σ. If a diameter or the closing chord is outside those limits, walk the sticks again. Do not write a larger σ and carry on.
+8. Both diameters within 20 mm of 8.000 m, and the closing chord within 30 mm of 4.000 m: write `radius σ = 3 mm`. That 3 mm is the part of the set-out that shifts the whole circle together. The wobble of one stick is counted later, on its own, so it is not in this 3 mm. A 10 mm or 20 mm figure here is a tolerance on a length, not this σ. If a diameter or the closing chord is outside those limits, walk the sticks again. Do not write a larger σ and carry on.
 
 CRC04 is opposite CRC01. CRC01 is the point you will bring close to the baseline.
 
@@ -80,11 +80,11 @@ The two end sticks are **BAS01** and **BAS02**. BAS02 is the end nearest the cir
 1. From the peg, through CRC01, go on to **4.30 m**. That point is BAS02. It sits about **0.30 m** past CRC01. Write the distance you actually taped. The circle then passes about 0.30 m from BAS02.
 2. The baseline runs square to that line, through BAS02. From BAS02 back toward the peg, mark **3.00 m**. From that mark swing **5.00 m**, and from BAS02 swing **4.00 m**. Where they meet is 4 m out to the side, square to the peg line. A 3-4-5 triangle.
 3. BAS01 is **8.000 m** from BAS02, through that side point. The tape runs past the circle and stays clear of it. BAS01 is the far end.
-4. Tape BAS01 to BAS02 **both ways**, BAS01 to BAS02 and back. Pull the tape firm and hold it level. Write both readings.
+4. Tape BAS01 to BAS02 **both ways**, BAS01 to BAS02 and back. Hold the tape at the **sleeves**, paper to paper, not down at the ground. Pull it firm and hold it level. Write both readings.
 5. If one end is higher, write the height difference. The level length is the one that counts. A drop of 0.3 m in 8 m makes the slope reading about 6 mm long.
 6. Level each reading first. Then add the sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md) for each end that stopped on the paper. Write “level, then +R” and the R you used for each end. Both ends on paper means add both.
 7. The two axis lengths must agree within **10 mm**. More than that: tape both ways again. Do not average a pair that disagrees by more than 10 mm. The mean of the two that do agree is the baseline you type into the app. Kind: tape.
-8. Shoot the same baseline with the laser. This reading is required. It is a check, and it is **not** typed into the app. The circle test cannot see a bad baseline on its own, because the tapes from the stations carry the scale. Keep the dot within half that sleeve’s measured R (about 15 mm) of the middle of the stick. If it sits further out, shoot again. Level that reading, then add that end’s measured R for each sleeved end. Write the laser on this sheet.
+8. Shoot the same baseline with the laser, again **sleeve to sleeve**, at the same height as the tape, not at the ground. This reading is required. It is a check, and it is **not** typed into the app. The circle test cannot see a bad baseline on its own, because the tapes from the stations carry the scale. Keep the dot within half that sleeve’s measured R (about 15 mm) of the middle of the stick. If it sits further out, shoot again. Level that reading, then add that end’s measured R for each sleeved end. Write the laser on this sheet.
 
 ## 3. Plumb every stick and write its height
 
@@ -112,23 +112,25 @@ Every later photo is this same phone at 1×.
 
 ## 5. Where to stand
 
-Each place is fixed by two tapes, one to BAS01 and one to BAS02. Stand where those two lengths meet. There are two such places. Use the side in the table, and tick that side on the sheet. The solver needs the side. A station with no side written is not placed.
+Each place is fixed by two tapes, one to BAS01 and one to BAS02. Stand where those two lengths meet. There are two such places.
+
+The side is which hand the station is on. Stand at **BAS01** and look toward **BAS02**. The peg is on your **right**. Tick **left** or **right** for each station. That tick is the whole record. Do not write 0 or 1. A station with no side ticked is not placed.
 
 **The lens sits on the pole, not the middle of the phone.** The iPhone camera is near a corner. If the middle of the phone is on the pole, the lens is a couple of centimetres off to one side, and every direction from that station is off by that amount. Before you plumb, look down the pole and slide the phone until the lens glass is over the middle of the pole top. A pencil mark on the pole cap makes the next station quicker. Then bubble the pole (about 1 m, about 1°). Tick “lens on the pole” only after that look.
 
-| Station | From BAS01 | From BAS02 | Which side |
+| Station | From BAS01 | From BAS02 | Looking from BAS01 toward BAS02 |
 |---|---|---|---|
-| STN01 | 8.00 m | 8.00 m | Opposite the peg |
-| STN02 | 6.50 m | 9.00 m | Peg’s side, outside the circle |
-| STN03 | 10.50 m | 10.50 m | Peg’s side, past the far sticks |
+| STN01 | 8.00 m | 8.00 m | **Left** (away from the peg) |
+| STN02 | 6.50 m | 9.00 m | **Right** (peg’s side, outside the circle) |
+| STN03 | 10.50 m | 10.50 m | **Right** (peg’s side, past the far sticks) |
 
-STN01 uses the whole 8 m tape, both ways. Hold it level. There is no spare in an 8 m tape. STN02’s 9.00 m leg and both of STN03’s legs need the laser or a longer tape. At STN02, check you are outside the circle, on the peg’s side, nearer BAS01 than BAS02.
+STN01 uses the whole 8 m tape, both ways. Hold it level. There is no spare in an 8 m tape. STN02’s 9.00 m leg and both of STN03’s legs need the laser or a longer tape. At STN02, check you are outside the circle, on your right as you look from BAS01 to BAS02, nearer BAS01 than BAS02.
 
 **STN03 is part of this test.** A capture with only STN01 and STN02 can be written up, and the numbers can be printed, but it is not a pass or a fail. The grade needs all three stations. If you cannot reach 10.5 m, stop and say so on the sheet. Do not call the two-station visit a finished test.
 
-Tape from the **pole** to each end stick. Hold it level. Add that end’s measured R if that end is a sleeve. The phone-end of the tape is the pole, not a sleeve, so you add R once, not twice. Write each reading.
+Tape from the **pole** to the **sleeve** on each end stick, not to the ground. Hold it level. Add that end’s measured R if that end is a sleeve. The phone-end of the tape is the pole, not a sleeve, so you add R once, not twice. Write each reading.
 
-In the app these are ordinary tapes. They are how the station is fixed. The photos then check it. Write the side in the notes as well as on the sheet: STN01 opposite the peg, STN02 and STN03 on the peg’s side.
+In the app these are ordinary tapes. They are how the station is fixed. The photos then check it. Write the side in the notes as well as on the sheet: STN01 left, STN02 right, STN03 right, looking from BAS01 toward BAS02.
 
 ## 6. Photos at each station
 
@@ -136,18 +138,18 @@ In the app these are ordinary tapes. They are how the station is fixed. The phot
 
 The 1× frame, held landscape, is about 67° across on a narrow phone and a little wider on others. Every list below fits inside that 67°, with a few degrees spare at each edge. Aim so the named marks sit in from the edges. If a mark listed for that photo is cut off, the pole is not where the tapes said. Re-measure. Do not take an extra turn to chase it.
 
-**STN01**, opposite the peg.
+**STN01**, on your left as you look from BAS01 toward BAS02.
 
 1. Both baseline ends, and CRC01, CRC02, CRC03, CRC04, CRC05. Those five sticks sit inside the 60° between the two ends. CRC06 does not.
 2. Turn, and keep **BAS02** in the frame. Add CRC06. CRC05 may stay in. BAS02 is the known mark in this photo. The turn is only about 9°.
 
-**STN02**, peg’s side.
+**STN02**, on your right as you look from BAS01 toward BAS02.
 
 1. Both baseline ends. They sit 60° apart, the same class of view as STN01. No circle stick lies between them from here, and that is fine. This photo is what lines the station up.
-2. Turn, and keep **BAS02** in the frame. Take CRC02, CRC01, CRC06, CRC05, and CRC03 in that photo. BAS02 is the known mark.
+2. Turn, and keep **BAS02** in the frame. Take CRC02, CRC01, CRC06, and CRC03. BAS02 is the known mark. Do not take CRC05 in this photo. CRC05 sits directly behind CRC03 from here, and CRC03’s cane hides it. CRC05 is already in the STN01 photo and in the STN03 photos.
 3. Do not take a photo of CRC04 from here. CRC04 is too far from both baseline ends to share a 1× frame with either of them. A turn that puts CRC04 in the middle has no known mark in it, and the solver cannot aim that photo. CRC04 is photographed from STN01 and from STN03.
 
-**STN03**, peg’s side, past the far sticks. Required for a grade.
+**STN03**, on your right, past the far sticks. Required for a grade.
 
 1. Both baseline ends, and CRC01, CRC02, CRC03. Those three sit inside the angle between the ends.
 2. Turn, and keep **BAS02** in the frame. Add CRC06, CRC05, and CRC04.
@@ -158,14 +160,14 @@ Tap the marks afterwards: BAS01, BAS02, and each CRC you can see. The full photo
 
 Measure these after the stations. Write them on this sheet. The app’s distances are the baseline and the tapes from the places you stood.
 
-1. **Diameter** CRC01 to CRC04, a fresh pull, separate from the set-out diameters. Level. Raw reading. Note whether each end was on paper, and add that end’s measured R.
-2. **Long chord** CRC01 to CRC03. Same rules. Axis-to-axis should be near **6.93 m**. The neighbour chords of 4.000 m were the set-out. This longer chord is the check.
+1. **Diameter** CRC01 to CRC04, a fresh pull, separate from the set-out diameters. Hold the tape at the **sleeves**, paper to paper, not at the ground. Level. Raw reading. Note whether each end was on paper, and add that end’s measured R.
+2. **Long chord** CRC01 to CRC03. Same rules: sleeve to sleeve, not at the ground. Axis-to-axis should be near **6.93 m**. The neighbour chords of 4.000 m were the set-out. This longer chord is the check.
 
-The laser baseline from section 2 is the third check. It stays on this sheet. It is not typed into the app. The tape mean is the baseline in the app.
+The laser baseline from section 2 is the third check, also sleeve to sleeve. It stays on this sheet. It is not typed into the app. The tape mean is the baseline in the app.
 
 ## 8. In the app, briefly
 
-- Baseline BAS01–BAS02, the level length after the sleeve correction, offset mm left at 0.
+- Baseline **BAS01 then BAS02**, in that order. BAS01 is the first end. BAS02 is the second. The level length after the sleeve correction, offset mm left at 0. Do not swap the two ends. Swapping them puts every station on the wrong side of the line.
 - The six circle points on one item, geometry **circle**.
 - A station at each place you stood, with the two tapes, the side you ticked, and the photos.
 - The calibration photo kept with the capture.
@@ -178,18 +180,18 @@ Keep this filled sheet. The stills that count are the ones from the path the pro
 - [ ] Probe done. The path you used was go (focal length, lens name, camera time, long side at least 3000 px)
 - [ ] Same iPhone, same lens, 1×, for the calibration and every station
 - [ ] Line marked 4.000 m, six sticks, neighbour chords 4.000 m
-- [ ] Both diameters written; closing chord within 30 mm; radius σ **4 mm**
+- [ ] Both diameters written; closing chord within 30 mm; radius σ **3 mm**
 - [ ] Baseline 8.000 m, both directions, level, plus each sleeved end’s measured R
 - [ ] The two baseline pulls agree within 10 mm
 - [ ] Laser baseline written, and not typed into the app
 - [ ] Peg to BAS02 written (aim 4.30 m)
 - [ ] Every cane bubbled, height to the middle of the paper written, and that sleeve’s measured R written
 - [ ] Calibration tape from the front of the phone written raw
-- [ ] STN01, STN02, and STN03, each with two tapes, each side ticked
+- [ ] STN01, STN02, and STN03, each with two tapes, each ticked left or right looking from BAS01 toward BAS02
 - [ ] Lens over the middle of the pole at each station, then the pole bubbled
 - [ ] STN01, STN02, STN03 photos as in section 6, landscape, each turn keeping a baseline end in the frame
 - [ ] CRC04 not photographed from STN02
-- [ ] Check diameter and check chord written, and not typed into the app
+- [ ] Check diameter and check chord taped sleeve to sleeve, written, and not typed into the app
 - [ ] Offset mm left at 0
 - [ ] Saved, and this sheet filled
 
@@ -232,11 +234,11 @@ Motion reading inside the photo: yes / no.
 | STN03 to BAS01 | | | | | |
 | STN03 to BAS02 | | | | | |
 
-Radius σ (4 mm when both diameters and the closing chord passed):
+Radius σ (3 mm when both diameters and the closing chord passed):
 
 The two baseline pulls differ by (mm):
 
-Side ticked — STN01 opposite the peg / STN02 peg side / STN03 peg side:
+Looking from BAS01 toward BAS02 — STN01 left / STN02 right / STN03 right:
 
 Lens over the pole centre, then bubble ok — STN01 / STN02 / STN03:
 
