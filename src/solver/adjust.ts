@@ -31,6 +31,7 @@ import {
   distanceSigma,
   gardenSide,
   horizontalDistance,
+  wholeGardenReflection,
   hypot2,
   intersectionAngle,
   intersectCircles,
@@ -257,6 +258,8 @@ function solveOnce(input: SolveInput): SolveResult {
         continue;
       }
       const placed = placeFromDistances(id, toKnown, distances, xyOf, markOf, offsets, {
+        originId,
+        axisId,
         origin: { x: 0, y: 0 },
         axis: { x: axis.x ?? input.datum.lengthM, y: 0 },
         gardenSign,
@@ -308,35 +311,73 @@ function solveOnce(input: SolveInput): SolveResult {
     const tapeTo = (id: string) => tapes.find((d) => d.raw.a === id || d.raw.b === id);
     const bothEnds = ends.every((id) => tapeTo(id));
     if (s.x != null && s.y != null && (s.method === 'distances' || s.method === 'branch')) {
-      // Tapes to both baseline ends already fixed this station. Bearings check
-      // it, and the coordinate does not depend on focal length.
-      if (s.method === 'distances' && knownMarks.length >= 2 && bothEnds) s.method = 'both-tapes';
+      // Tapes to both baseline ends already fixed this station. The side is
+      // the branch choice or the bearing order, not the garden sign.
+      if (bothEnds) {
+        const side = sideFromBaselineTapes(
+          stationId,
+          tapeTo,
+          markOf,
+          photoBearings,
+          knownMarks,
+          xyOf,
+          branch.get(stationId),
+          { x: 0, y: 0 },
+          { x: axis.x ?? input.datum.lengthM, y: 0 },
+          gardenSign,
+          originId,
+          axisId,
+        );
+        if (side.branch && side.point) {
+          s.x = side.point.x;
+          s.y = side.point.y;
+          s.method = 'branch';
+          s.branchChoice = true;
+          s.unsetCode = undefined;
+        } else if (side.point && knownMarks.length >= 2) {
+          s.x = side.point.x;
+          s.y = side.point.y;
+          if (s.method !== 'branch') s.method = 'both-tapes';
+          s.unsetCode = undefined;
+        } else if (!side.point && knownMarks.length >= 2) {
+          s.x = undefined;
+          s.y = undefined;
+          s.method = undefined;
+          s.branchChoice = undefined;
+          s.unsetCode = 'mirror';
+        } else if (s.method === 'distances' && knownMarks.length >= 2) {
+          s.method = 'both-tapes';
+        }
+      }
       classifyControl(s, knownMarks, xyOf);
       continue;
     }
     if (knownMarks.length >= 2 && bothEnds) {
-      const da = tapeTo(originId)!;
-      const db = tapeTo(axisId)!;
-      const hits = intersectCircles(
-        markOf(originId)!,
-        da.horizontalM,
-        markOf(axisId)!,
-        db.horizontalM,
-      );
-      const picked = pickByBearings(hits, knownMarks, photoBearings, xyOf) ?? gardenSide(
+      const side = sideFromBaselineTapes(
+        stationId,
+        tapeTo,
+        markOf,
+        photoBearings,
+        knownMarks,
+        xyOf,
+        branch.get(stationId),
         { x: 0, y: 0 },
         { x: axis.x ?? input.datum.lengthM, y: 0 },
-        hits,
         gardenSign,
+        originId,
+        axisId,
       );
-      if (picked) {
-        s.x = picked.x;
-        s.y = picked.y;
-        s.method = 'both-tapes';
+      if (side.point) {
+        s.x = side.point.x;
+        s.y = side.point.y;
+        s.method = side.branch ? 'branch' : 'both-tapes';
+        s.branchChoice = side.branch || undefined;
         s.unsetCode = undefined;
         classifyControl(s, knownMarks, xyOf);
       } else {
-        s.unsetCode = 'miss';
+        s.unsetCode = 'mirror';
+        s.x = undefined;
+        s.y = undefined;
       }
       continue;
     }
@@ -468,46 +509,65 @@ function solveOnce(input: SolveInput): SolveResult {
 
   let built = assemble(input, free, state, held, distances, bearings, offsets, originId, axisId);
   let adjusted = runLm(built);
-  for (let drop = 0; drop < 5 && adjusted.rankDeficient; drop++) {
-    const victim = worstNullPoint(adjusted.nullVector, built.params, originId, axisId);
-    if (!victim) break;
-    free.delete(victim);
-    const s = state.get(victim);
-    if (s && !held.has(victim)) {
-      s.x = undefined;
-      s.y = undefined;
-      s.unsetCode = 'rank';
-      s.method = undefined;
-    }
-    built = assemble(input, free, state, held, distances, bearings, offsets, originId, axisId);
-    adjusted = runLm(built);
-  }
 
-  // Write solved coordinates back.
-  for (const s of state.values()) {
-    if (s.id === originId) continue;
-    if (held.has(s.id)) {
-      s.x = held.get(s.id)!.x;
-      s.y = held.get(s.id)!.y;
-      continue;
+  const rankTrim = () => {
+    for (let drop = 0; drop < 5 && adjusted.rankDeficient; drop++) {
+      const victim = worstNullPoint(adjusted.nullVector, built.params, originId, axisId);
+      if (!victim) break;
+      free.delete(victim);
+      const s = state.get(victim);
+      if (s && !held.has(victim)) {
+        s.x = undefined;
+        s.y = undefined;
+        s.unsetCode = 'rank';
+        s.method = undefined;
+      }
+      built = assemble(input, free, state, held, distances, bearings, offsets, originId, axisId);
+      adjusted = runLm(built);
     }
-    if (!free.has(s.id)) continue;
-    const x = paramValue(built, adjusted.x, s.id, 'x');
-    const y = s.id === axisId ? 0 : paramValue(built, adjusted.x, s.id, 'y');
-    if (x == null || y == null) continue;
-    s.x = x;
-    s.y = y;
-  }
-
-  if (!adjusted.converged) {
+  };
+  const writeSolved = () => {
+    for (const s of state.values()) {
+      if (s.id === originId) continue;
+      if (held.has(s.id)) {
+        s.x = held.get(s.id)!.x;
+        s.y = held.get(s.id)!.y;
+        continue;
+      }
+      if (!free.has(s.id)) continue;
+      const x = paramValue(built, adjusted.x, s.id, 'x');
+      const y = s.id === axisId ? 0 : paramValue(built, adjusted.x, s.id, 'y');
+      if (x == null || y == null) continue;
+      s.x = x;
+      s.y = y;
+    }
+  };
+  const markDiverged = () => {
     for (const s of state.values()) {
       if (!free.has(s.id)) continue;
       s.x = undefined;
       s.y = undefined;
       s.unsetCode = 'diverged';
     }
+  };
+
+  rankTrim();
+  writeSolved();
+
+  if (!adjusted.converged) {
+    markDiverged();
   } else {
-    rejectBehindCamera(bearings, built, adjusted, state, free, held, originId, axisId);
+    // A rejection removes the point from the free set. Rebuild without its
+    // observations and solve again, or finishStats reads a coordinate that is gone.
+    for (let pass = 0; pass < 4 && adjusted.converged; pass++) {
+      const victims = rejectBehindCamera(bearings, built, adjusted, state, free, held, originId, axisId);
+      if (victims.length === 0) break;
+      built = assemble(input, free, state, held, distances, bearings, offsets, originId, axisId);
+      adjusted = runLm(built);
+      rankTrim();
+      writeSolved();
+      if (!adjusted.converged) markDiverged();
+    }
   }
 
   const stats = finishStats(built, adjusted);
@@ -565,6 +625,13 @@ function solveOnce(input: SolveInput): SolveResult {
     droppedObservationIds: [],
     inseparableObservationIds: [],
     skippedPhotos: [],
+    reflected: wholeGardenReflection({
+      axisX: state.get(axisId)?.x ?? input.datum.lengthM,
+      gardenSign,
+      points: [...state.values()]
+        .filter((s) => s.id !== originId && s.id !== axisId && !held.has(s.id) && s.x != null && s.y != null)
+        .map((s) => ({ x: s.x as number, y: s.y as number, branchChoice: s.branchChoice })),
+    }),
     datum: { originId, axisPointId: axisId, gardenSign },
   };
 }
@@ -698,6 +765,8 @@ function placeFromDistances(
   markOf: (id: string) => Xy | null,
   offsets: Map<string, Xy>,
   ctx: {
+    originId: string;
+    axisId: string;
     origin: Xy;
     axis: Xy;
     gardenSign: 1 | -1;
@@ -739,23 +808,29 @@ function placeFromDistances(
     return { point: featureFromMark(hits[0], id, offsets), weak, code: 'one-distance' };
   }
 
-  const sight = ctx.bearings.find((b) => b.pointId === id && xyOf(b.photo.stationId));
-  if (sight) {
-    const picked = pickByBearings(hits, [id], ctx.bearings, xyOf);
-    if (picked) return { point: featureFromMark(picked, id, offsets), weak, code: 'one-distance' };
+  const datumPair =
+    (k0 === ctx.originId && k1 === ctx.axisId) || (k0 === ctx.axisId && k1 === ctx.originId);
+  if (datumPair) {
+    const originMark = markOf(ctx.originId);
+    const axisMark = markOf(ctx.axisId);
+    const rOrigin = k0 === ctx.originId ? d0.horizontalM : d1.horizontalM;
+    const rAxis = k0 === ctx.axisId ? d0.horizontalM : d1.horizontalM;
+    if (originMark && axisMark) {
+      const ordered = intersectCircles(originMark, rOrigin, axisMark, rAxis);
+      if (ordered.length === 2) hits = ordered;
+    }
   }
 
-  if (bothOnBaseline(c0, c1, ctx.origin, ctx.axis)) {
-    const picked = gardenSide(c0, c1, hits, ctx.gardenSign);
-    if (picked) return { point: featureFromMark(picked, id, offsets), weak, code: 'one-distance' };
-  }
-
-  if (ctx.branch != null && hits[ctx.branch]) {
+  const own = ctx.bearings.filter((b) => b.photo.stationId === id);
+  const ownMarks = uniqueMarks(own.filter((b) => xyOf(b.pointId) && b.pointId !== id));
+  const onBaseline = bothOnBaseline(c0, c1, ctx.origin, ctx.axis);
+  const side = chooseSide(hits, own, ownMarks, xyOf, ctx.branch, ctx.origin, ctx.axis, ctx.gardenSign, onBaseline);
+  if (side.point) {
     return {
-      point: featureFromMark(hits[ctx.branch], id, offsets),
+      point: featureFromMark(side.point, id, offsets),
       weak,
-      branch: true,
-      code: 'mirror',
+      branch: side.branch,
+      code: side.branch ? 'mirror' : 'one-distance',
     };
   }
   return { code: 'mirror', candidates: hits };
@@ -766,6 +841,60 @@ function featureFromMark(mark: Xy, id: string, offsets: Map<string, Xy>): Xy {
   return o ? { x: mark.x - o.x, y: mark.y - o.y } : mark;
 }
 
+/** Bearing-difference agreement, radians. The other mirror is several times this on a baseline. */
+const SIDE_MATCH_RAD = (10 * Math.PI) / 180;
+
+/**
+ * Candidate 0 is the first circle intersection. For tapes to the datum ends
+ * that order is origin then axis, so index 0 is +Y when the axis runs +X.
+ * An explicit branch wins. Otherwise the signed order of two marks in one
+ * photo of this station wins. The garden sign is only the distance-only fallback.
+ * When those photos exist and neither hit agrees, the point is not published.
+ */
+function chooseSide(
+  hits: Xy[],
+  ownBearings: BearingPrep[],
+  markIds: string[],
+  xyOf: (id: string) => Xy | null,
+  branch: 0 | 1 | undefined,
+  origin: Xy,
+  axis: Xy,
+  gardenSign: 1 | -1,
+  allowGardenSign: boolean,
+): { point: Xy | null; branch: boolean } {
+  if (hits.length === 1) return { point: hits[0], branch: false };
+  if (branch != null && hits[branch]) return { point: hits[branch], branch: true };
+  if (markIds.length >= 2) {
+    return { point: pickByBearings(hits, markIds, ownBearings, xyOf), branch: false };
+  }
+  if (!allowGardenSign) return { point: null, branch: false };
+  return { point: gardenSide(origin, axis, hits, gardenSign), branch: false };
+}
+
+function sideFromBaselineTapes(
+  stationId: string,
+  tapeTo: (id: string) => DistPrep | undefined,
+  markOf: (id: string) => Xy | null,
+  photoBearings: BearingPrep[],
+  knownMarks: string[],
+  xyOf: (id: string) => Xy | null,
+  branch: 0 | 1 | undefined,
+  origin: Xy,
+  axis: Xy,
+  gardenSign: 1 | -1,
+  originId: string,
+  axisId: string,
+): { point: Xy | null; branch: boolean } {
+  const da = tapeTo(originId);
+  const db = tapeTo(axisId);
+  const originMark = markOf(originId);
+  const axisMark = markOf(axisId);
+  if (!da || !db || !originMark || !axisMark) return { point: null, branch: false };
+  const hits = intersectCircles(originMark, da.horizontalM, axisMark, db.horizontalM);
+  void stationId;
+  return chooseSide(hits, photoBearings, knownMarks, xyOf, branch, origin, axis, gardenSign, true);
+}
+
 function pickByBearings(
   hits: Xy[],
   markIds: string[],
@@ -774,32 +903,37 @@ function pickByBearings(
 ): Xy | null {
   if (hits.length === 0) return null;
   if (hits.length === 1) return hits[0];
+  const byPhoto = new Map<string, BearingPrep[]>();
+  for (const b of bearings) {
+    if (!markIds.includes(b.pointId) || !xyOf(b.pointId)) continue;
+    const list = byPhoto.get(b.photo.id) ?? [];
+    list.push(b);
+    byPhoto.set(b.photo.id, list);
+  }
   let best: Xy | null = null;
   let bestCost = Infinity;
   for (const hit of hits) {
     let cost = 0;
     let n = 0;
-    for (const id of markIds) {
-      const b = bearings.find((br) => br.pointId === id);
-      const m = id === bearings[0]?.photo.stationId ? hit : xyOf(id);
-      if (!b || !m) continue;
-      // Compare the signed difference against another mark when possible.
+    for (const list of byPhoto.values()) {
+      if (list.length < 2) continue;
+      const b0 = list[0];
+      const b1 = list[1];
+      const p0 = xyOf(b0.pointId)!;
+      const p1 = xyOf(b1.pointId)!;
+      const az0 = Math.atan2(p0.y - hit.y, p0.x - hit.x);
+      const az1 = Math.atan2(p1.y - hit.y, p1.x - hit.x);
+      cost += Math.abs(wrap(wrap(az1 - az0) - wrap(b1.bearing - b0.bearing)));
       n++;
     }
-    // Side test: the bearing difference of the first two known marks.
-    const known = bearings.filter((b) => xyOf(b.pointId) && markIds.includes(b.pointId));
-    if (known.length >= 2) {
-      const az0 = Math.atan2(xyOf(known[0].pointId)!.y - hit.y, xyOf(known[0].pointId)!.x - hit.x);
-      const az1 = Math.atan2(xyOf(known[1].pointId)!.y - hit.y, xyOf(known[1].pointId)!.x - hit.x);
-      cost = Math.abs(wrap(wrap(az1 - az0) - wrap(known[1].bearing - known[0].bearing)));
-      n = 2;
-    }
-    if (n >= 2 && cost < bestCost) {
-      bestCost = cost;
+    if (n === 0) continue;
+    const mean = cost / n;
+    if (mean < bestCost) {
+      bestCost = mean;
       best = hit;
     }
   }
-  return bestCost < (10 * Math.PI) / 180 ? best : null;
+  return bestCost < SIDE_MATCH_RAD ? best : null;
 }
 
 function initialYaw(
@@ -1318,7 +1452,8 @@ function rejectBehindCamera(
   held: Map<string, Xy>,
   originId: string,
   axisId: string,
-): void {
+): string[] {
+  const victims: string[] = [];
   const place = (id: string): Xy | null => xyOfState(id, state, held, originId, axisId);
   for (const b of bearings) {
     const camera = place(b.photo.stationId);
@@ -1330,14 +1465,17 @@ function rejectBehindCamera(
     const range = hypot2(camera, mark);
     if (Math.abs(predicted) < Math.PI / 2 && range >= MIN_RAY_RANGE_M) continue;
     const victim = free.has(b.pointId) ? b.pointId : free.has(b.photo.stationId) ? b.photo.stationId : null;
-    if (!victim) continue;
+    if (!victim || victims.includes(victim)) continue;
     const s = state.get(victim);
     if (!s) continue;
     s.x = undefined;
     s.y = undefined;
     s.unsetCode = 'behind-camera';
+    s.method = undefined;
     free.delete(victim);
+    victims.push(victim);
   }
+  return victims;
 }
 
 function parameterGain(

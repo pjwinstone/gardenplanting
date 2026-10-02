@@ -403,6 +403,31 @@ export function distanceSigma(opts: {
   return 0.02;
 }
 
+/**
+ * True when the solved net is a reflection of the datum: the axis point
+ * came out with x < 0, or every non-branch point sits on the opposite side
+ * of the stored garden sign. One opposite station does not trip it.
+ * Branch choices are the user's side, so they are not counted.
+ */
+export function wholeGardenReflection(opts: {
+  axisX: number;
+  gardenSign: 1 | -1;
+  points: { x: number; y: number; branchChoice?: boolean }[];
+}): boolean {
+  if (opts.axisX < -1e-4) return true;
+  let sided = 0;
+  let wrong = 0;
+  const tol = 1e-3 * Math.max(1, Math.abs(opts.axisX));
+  for (const p of opts.points) {
+    if (p.branchChoice) continue;
+    const cross = opts.axisX * p.y;
+    if (Math.abs(cross) < tol) continue;
+    sided++;
+    if (opts.gardenSign * cross < 0) wrong++;
+  }
+  return sided >= 2 && wrong === sided;
+}
+
 /** Which mirror of a distance intersection lies on the garden side of A→B. */
 export function gardenSide(a: Xy, b: Xy, candidates: Xy[], sign: 1 | -1): Xy | null {
   if (candidates.length === 0) return null;

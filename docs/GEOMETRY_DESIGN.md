@@ -43,7 +43,7 @@ Shape, residuals, and `σ̂₀` do not depend on which baseline is the datum. Sw
 
 Point **error ellipses do** depend on the datum: a point near A looks tighter than the same point far from A. That is acceptable for the accept/reject gate. It does not mean the nearby point was measured better.
 
-**Which mirror.** Signed bearings from an upright rear camera have no mirror ambiguity: the left/right order of the two marks fixes the side (section 3.2). The garden sign applies to **distance-only** intersections. Those two solutions mirror across the line through the **two known points**, not across the datum baseline. The garden sign resolves them only when both points lie on that baseline. Otherwise use a third observation, agreement with a ray, or ask. Do not average the two sides.
+**Which mirror.** Signed bearings from an upright rear camera have no mirror ambiguity: the left/right order of the two marks fixes the side (section 3.2). A station taped to both baseline ends takes that order, or an explicit branch choice, before the garden sign. Candidate 0 is the +Y side of origin→axis. The garden sign applies to **distance-only** intersections. Those two solutions mirror across the line through the **two known points**, not across the datum baseline. The garden sign resolves them only when both points lie on that baseline and nothing else has chosen. Otherwise use a third observation, agreement with a ray, or ask. Do not average the two sides. A station whose own photo disagrees with both hits is left unset, so a mark that only that station could support is not given coordinates.
 
 ## 2. Marks and features
 
@@ -105,7 +105,7 @@ The 0.7.25 formula `atan2(px − cx, fx)` has the opposite sign. Camera at the o
 
 When the solver exists, that `(10, 1)` case is the sign check. It is not implemented in this change.
 
-**Side.** With signed bearings and an upright rear camera, resection has no mirror ambiguity. The 0.7.25 path that reads which click is on the left and then ignores it is the bug. The garden sign is only for tapes (section 1).
+**Side.** With signed bearings and an upright rear camera, resection has no mirror ambiguity. The 0.7.25 path that reads which click is on the left and then ignores it is the bug. The same signed order picks which circle intersection a both-tapes station sits on, compared inside one photo so two yaws are not mixed. An explicit branch choice wins over that. The garden sign is only for distance-only tapes (section 1). Two stations on opposite sides of the baseline are a normal circle-trial layout, not one shared side.
 
 **Tilt.** `py` is part of the ray. `atan(u / fx)` is the horizontal angle only when pitch and roll are both zero. A phone on a 1 m pole pitches down to see ground marks. At `fx = 900` px on a 1200 px frame the horizontal error versus a levelled ray is:
 
@@ -220,7 +220,7 @@ A point fixed by exactly two distances, or a three-mark resection, has **redunda
 1. Apply the minimal datum (section 1).
 2. Intersect circles where two distances exist. If they miss by at most `3 √(σ₀²+σ₁²)` (about 85 mm for two 20 mm tapes), take the closest point on the line of centres and mark it weak. A larger gap is a miss, not a weak point. A weak point that then has a null direction (the line of centres) stays unset as rank rather than as a blunder.
 3. Resect photos from the closed form in section 3.4, then LM.
-4. Intersect rays for marks seen from two stations. Both ray parameters must be positive. After adjustment, every predicted bearing must lie in front of its camera (`|β| < 90°`) and at least 0.5 m from it, or the free mark (else the free station) is unset as `behind-camera`. Do not publish a coordinate whose a-priori 95% semi-major exceeds 5 m (`sanity`). Levenberg–Marquardt stops when the position step is under 0.1 mm and the cost has settled, or when the Gauss–Newton decrement `gᵀ N⁻¹ g` is below `1e-10 · max(1, χ²)`. Otherwise free points are unset as `diverged`. The resection seed and the danger ratio both try every triple, not the first three clicks, and `flat-angle` is only the θ → 0 guard. Yaw is estimated per photo.
+4. Intersect rays for marks seen from two stations. Both ray parameters must be positive. After adjustment, every predicted bearing must lie in front of its camera (`|β| < 90°`) and at least 0.5 m from it, or the free mark (else the free station) is unset as `behind-camera`. That rejection drops the point's parameters and observations and the adjustment is run again, so a tape to a rejected station is not left in the normal equations. Do not publish a coordinate whose a-priori 95% semi-major exceeds 5 m (`sanity`). Levenberg–Marquardt stops when the position step is under 0.1 mm and the cost has settled, or when the Gauss–Newton decrement `gᵀ N⁻¹ g` is below `1e-10 · max(1, χ²)`. Otherwise free points are unset as `diverged`. The resection seed and the danger ratio both try every triple, not the first three clicks, and `flat-angle` is only the θ → 0 guard. Yaw is estimated per photo. After the solve, `reflected` is set when the axis point has come out with `x < 0`, or every solved point that was not an explicit branch choice lies on the opposite side of the garden sign. One station on the far side of the baseline does not set it.
 5. Leave everything the normal matrix cannot carry without coordinates.
 
 **House polygon.** Vertices are point ids in order. The distance between corner 1 and corner N is a **wall**, not a misclosure. The 0.7.25 close check compares that wall with 50 mm. This proposal does not.
@@ -364,8 +364,7 @@ Applied from the follow-up review, in the sections above: `w` critical value 3.2
 Still open after the phase 1 solver:
 
 1. Map `DeviceMotion` axes onto the camera for portrait and landscape, including whether the browser pre-rotates pixels, EXIF orientation, rear/front mirroring and the principal point, and the WebKit versus Chrome sign of `accelerationIncludingGravity`. A phone flat on a level table should read about `(0, +1, 0)` in the camera frame. Sample gravity at the shutter, not a session average. Field-test at known tilts.
-2. `pickByBearings` does not choose a side for a distance-fixed point, and it compares bearings across photos. The garden-sign fallback covers the cases tried so far.
-3. A tighter field-of-view margin than `|β| < 90°`.
-4. One `fx` parameter per phone, shared by yaw-only extras, rather than one per photo.
-5. The UI must not offer a 1e-8 m σ as a way to pin a coordinate. The solver does not turn a tiny JSON σ into `fixScale`.
-6. When a resection fails and a mark then has no solved station, the coach still says `no-observation`.
+2. A tighter field-of-view margin than `|β| < 90°`.
+3. One `fx` parameter per phone, shared by yaw-only extras, rather than one per photo. The first circle trial records `fxShared: false` and is graded only when STN03 was occupied. A two-station capture is reported and not graded. Shared `fx` can land after that trial.
+4. The UI must not offer a 1e-8 m σ as a way to pin a coordinate. The solver does not turn a tiny JSON σ into `fixScale`.
+5. When a resection fails and a mark then has no solved station, the coach still says `no-observation`.

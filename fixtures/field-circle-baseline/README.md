@@ -24,3 +24,5 @@ npm run test:field-circle
 ```
 
 Skips cleanly until `garden.json` exists.
+
+`fxShared: false` on that JSON is allowed. The first trial is graded only when STN03 is in the capture. Two stations are reported and not graded.

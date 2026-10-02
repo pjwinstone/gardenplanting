@@ -19,6 +19,10 @@
  * - One blunder is dropped only when its |w| is at least twice the next
  *   residual, flagged or not, and the variance test then passes.
  * - ∂β/∂s uses the nominal focal length. The current fx would add a factor (1+s).
+ * - A both-tapes station takes its side from the branch choice or from the
+ *   bearing order in its own photo. The garden sign is only the distance-only fallback.
+ * - After a behind-camera rejection the normal equations are rebuilt and solved again.
+ * - reflected is set when the axis has x < 0 or the whole net sits on the wrong side.
  * - House Q_m holds the first azimuth and puts angle noise on the other n−1
  *   turnings. All n interior angles also face |Σα−(n−2)π| ≤ 1.96 σ √n.
  * - v1 offsetMm is not applied. A constant frame offset is used only when the
@@ -29,6 +33,8 @@
 export { ELLIPSE_95, CHI2_2_95, W_CRITICAL, MDB_FACTOR, Z_95 } from './constants';
 export { solve } from './adjust';
 export { solveGardenDocument } from './document';
+export { circleTrialVerdict } from './circleTrial';
+export type { CircleTrialInput, CircleTrialVerdict } from './circleTrial';
 export { levelledBearing, predictedBearing, clickBearingUnlevelled, bearingSigma } from './bearing';
 export {
   arcStation,
@@ -40,6 +46,7 @@ export {
   distanceSigma,
   dangerAssessment,
   intersectRays,
+  wholeGardenReflection,
 } from './geometry';
 export { houseTolerance, openTraverse, traverseGeometry, misclosureChi2, angleSumCheck } from './house';
 export { fitCircleGeometric, kasaSeed } from './circleFit';

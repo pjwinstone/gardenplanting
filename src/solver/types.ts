@@ -131,6 +131,11 @@ export interface SolverDatumInput {
 export interface SolverBranchChoice {
   /** Station or free-point id. */
   id: string;
+  /**
+   * Which circle intersection. For tapes to the datum ends, 0 is the +Y
+   * side of origin→axis and 1 is the other side. This wins over bearings
+   * and over the garden sign.
+   */
   candidateIndex: 0 | 1;
 }
 
@@ -238,6 +243,12 @@ export interface SolveResult {
   covarianceScaled: boolean;
   /** Levenberg–Marquardt reached the 0.1 mm step. False means coordinates were not published. */
   converged: boolean;
+  /**
+   * The axis came out with x < 0, or every solved point that was not an
+   * explicit branch choice lies on the opposite side of the garden sign.
+   * A bad seed can reflect the whole net at the same cost. One opposite station does not.
+   */
+  reflected: boolean;
   droppedObservationIds: string[];
   /** Flagged observations that were not isolated enough to drop. */
   inseparableObservationIds: string[];
