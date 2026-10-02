@@ -1,20 +1,20 @@
 # Roadmap — Garden Survey toward a planted garden
 
-**Status:** planning note, 2026-10-02. Pass bars updated after the follow-up maths review on PR #2. Grounded in [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md). Does not change the survey method in `AGENTS.md`.
+**Status:** planning note, 2026-10-02. Pass bars follow the maths review on PR #2. Marker stages added after Phase 1. Grounded in [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md). Does not change the survey method in `AGENTS.md`.
 
-The app already coaches a baseline-first field loop, stores a garden JSON, and draws a plan. Coordinates are not yet something to trust at planting scale. **Phase 1 is a geometry prototype.** Layers, plants, and care wait until that prototype has passed the checks below.
+The app already coaches a baseline-first field loop, stores a garden JSON, and draws a plan. Coordinates are not yet something to trust at planting scale. **Phase 1 is the geometry prototype** (solver in PR #3, branch `cursor/phase1-geometry-solver-8c5c`; this roadmap does not edit that branch). **Phase 2 replaces hand clicks with coded markers.** Layers, plants, and care do not wait on markers, but automatic rays do wait on the Phase 1 solver.
 
 Existing docs to keep using, not replace:
 
 - Field method: [plan-baseline-then-house.md](plan-baseline-then-house.md), [stage-2-field-checklist.md](stage-2-field-checklist.md)
 - Layers / + Point: [plan-layers-objects-add-point.md](plan-layers-objects-add-point.md)
-- Solver proposal, revised after that review: [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md)
+- Solver proposal: [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md). Marker proposal: [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md).
 
 ## Phase 1 — Geometry prototype
 
 **Goal:** one local frame in which a baseline, a house corner, a fence post, and a path point are either **solved with a covariance** or **left blank on purpose**. A fix whose determining observations have redundancy `r_i ≲ 0.1` is drawn and labelled **unchecked**. It is not a point you plant from.
 
-Build it behind the current Adjust entry and the current JSON. Keep the phone UI. Do not start a native app for this phase. The maths review has already landed; this table is the revised bar.
+Build it behind the current Adjust entry and the current JSON. Keep the phone UI. Do not start a native app for this phase. The maths review has landed; this table is the bar PR #3 is measured against. Detections in Phase 2 must use that ray model, including focal length inside the covariance (advisor point B2 on PR #3).
 
 ### What the prototype must prove
 
@@ -44,9 +44,47 @@ Targets are a **95% error-ellipse semi-major** (about 2.45 times the 1σ semi-ma
 
 ### Milestone exit
 
-Adjust on the synthetic suite and on one real export meets the table, and the field checklist still runs on the existing PWA. Then Phase 2 can store boundaries and beds as things you believe.
+Adjust on the synthetic suite and on one real export meets the table, and the field checklist still runs on the existing PWA. Hand clicks remain valid. Phase 2 may then turn a photo into those same rays without a tap.
 
-## Phase 2 — Layered garden geometry
+## Phase 2 — Markers and photo network
+
+**Goal:** the phone recognises a rod or post from any side and emits the same kind of observation Phase 1 already adjusts. Design: [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md). Recommended mark is a **wrap-around ring code** for identity and bearing, plus an optional **flat AprilTag** when a face is visible and focal length needs a check.
+
+Stages are in order. A later stage does not start by weakening an earlier bar.
+
+### (a) Detect one marker in one photo
+
+**Prove:** a printed ring, photographed in Safari at 1×, returns the right ID or no ID. It does not return a neighbour’s ID. The vertical centreline of the sleeve repeats to about **2 px** (no worse than a careful click).
+
+**Accuracy:** pixel error only. A wrong ID is a failure even if the pixel is perfect. At full-resolution 1× (`fx/width` about 0.72), a 100 mm toilet-roll belt is only about **19 px** tall at 15 m, so ID at 15 m is not the bar. The bar is ID at **2 m and 5 m**, and a reject (not a guess) at long range.
+
+**Validate:** one printed sheet. Photos at 2 m and 5 m, plus a tilt, a leaf across one band, and sun on the sleeve. Zero wrong IDs on that set.
+
+### (b) Detections are rays
+
+**Prove:** the centreline becomes a levelled bearing `β = atan2(−x_level, z_level)` in the Phase 1 solver, with `σ_px` from the fit. Focal length is a parameter or a consider-parameter inside the ellipse (PR #3 B2), not a gate checked after the fact. A known band height may be a **weak distance** (several percent of range), enough to separate the two station candidates that sit about 20 m apart, and not a tape. A point that lands behind the camera is not published (PR #3 B3).
+
+**Accuracy:** same station class as Phase 1. **95% semi-major ≤ 200 mm** only when `fx` is known to about **1%** and the rays are levelled. A 10% focal error remains about **±1.98 m** on the 7 m / 20° case and must still fail that class. A plantable point stays at **100 mm** with a spare observation; a 200 mm station still needs a tape if you would plant from the new point.
+
+**Validate:** synthetic frames with 2 px noise through `solve()`, plus one real photo whose detections are compared with hand clicks on the same marks. Ellipse coverage about 95%, NEES ≈ 2, with `fx` noise included.
+
+### (c) Several photos, one network
+
+**Prove:** the same marker ID on two photos is the same point. The adjust is still the Phase 1 least squares; the new part is data association. A marker in only one photo does not invent a range.
+
+**Accuracy:** a withheld tape across the network meets `|miss| ≤ 1.96 √(gᵀ Q g + σ_check²)`. Swapping two rod IDs fails a `w` test or is rejected before it enters.
+
+**Validate:** three photos of a known baseline and two rods, IDs linking them, no hand clicks in the solve. One deliberate ID swap must not publish a checked point.
+
+### (d) Optional 3D
+
+**Prove:** only if (a)–(c) meet their bars. Full rays, not just the horizontal bearing, and a bundle that can carry a height. The plan view can stay 2D.
+
+**Accuracy:** a height σ stated from the same pixel and `fx` budget, or the stage is deferred. Not a planting requirement.
+
+**Validate:** a peg of known height, or an explicit decision to stop at the 2D network.
+
+## Phase 3 — Layered garden geometry
 
 **Goal:** the same points, drawn and edited as separate kinds of feature.
 
@@ -67,9 +105,9 @@ Rules for this phase:
 
 **Exit:** a plan that can show boundary, house, path, and one bed from a single adjust, each with its own residual, toggled by layer.
 
-## Phase 3 — Plant planning
+## Phase 4 — Plant planning
 
-**Goal:** choose and place plants **inside a bed that Phase 2 can draw**.
+**Goal:** choose and place plants **inside a bed that Phase 3 can draw**.
 
 - A plant is a record on a bed: species name, position in the garden frame (or a clear “unplaced”), spacing radius, sun/shade note, companion notes.
 - Spacing is a circle in metres on the plan, using the bed’s solved outline. Overlaps are a warning, not a solver.
@@ -79,7 +117,7 @@ Rules for this phase:
 
 **Exit:** place three plants in a bed, see spacing circles, reload from OneDrive, positions unchanged in the same frame as the bed.
 
-## Phase 4 — Maintenance and horticulture
+## Phase 5 — Maintenance and horticulture
 
 **Goal:** care as dates and tasks attached to plants and beds, after placements exist.
 
@@ -92,8 +130,7 @@ Rules for this phase:
 
 ## Explicitly later
 
-- Native iOS, ARKit, LiDAR, GPS control (see decisions).
-- Full bundle adjustment beyond the Phase 1 resection.
+- Native iOS, ARKit, LiDAR, GPS control (see decisions). A full 3D bundle is Phase 2 stage (d), not a separate product.
 - Railway (`TRK`, 184 mm) — draw only once those points exist.
 - Multi-user sync, accounts other than one personal OneDrive.
 
@@ -102,7 +139,7 @@ Rules for this phase:
 Each item is unresolved in the repo or is a fork the next phase should not guess. Recommendation is the default if you do not want to spend time on it.
 
 1. **Stay on the PWA for the survey.** The iPhone work is already Safari: camera, thumb menu, Pages. A native app is a second codebase before the coordinates are true.
-   **Recommendation:** keep Vite + the home-screen PWA through Phase 2.
+   **Recommendation:** keep Vite + the home-screen PWA through markers and layers. Detection has to run in Safari.
 
 2. **Do not require LiDAR or ARKit.** GPS on a phone is several metres, which is coarser than a bed. LiDAR is Pro-only and weak across a 20 m garden in sun. The notes you already wrote (tape primary, photo secondary) match the physics.
    **Recommendation:** tape and levelled, calibrated bearings. The maths review agrees nothing in the geometry note forces ARKit. Revisit AR only as an experiment after Phase 1 has a number to beat.
@@ -120,10 +157,10 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
    **Recommendation:** millimetres plus a direction for the mark, and an explicit laser face/reference offset. Laser σ in the solve is about **5 mm**, not the 2 mm constant in the code. Store both when the schema bumps.
 
 7. **When to stop special-casing `polygons` id `house`.** The field loop depends on it.
-   **Recommendation:** leave it through Phase 1. Fold it into a `structure` item in Phase 2 with a `normalizeDocument` migration.
+   **Recommendation:** leave it through Phase 1. Fold it into a `structure` item in Phase 3 with a `normalizeDocument` migration.
 
 8. **Layer ids.** `walkway` / `structure` / `plants` / `survey` are already in saved JSON. Product language also wants boundary, paths, and beds.
-   **Recommendation:** add `boundary` and `bed`. Keep `walkway` as the path layer id so old files load. Put plant **instances** on the bed in Phase 3, not as a second outline layer.
+   **Recommendation:** add `boundary` and `bed`. Keep `walkway` as the path layer id so old files load. Put plant **instances** on the bed in Phase 4, not as a second outline layer.
 
 9. **JSON `objects` vs the word Item.** UI says Item; JSON says `objects`.
    **Recommendation:** leave the key until a version bump. New docs and UI keep saying Item.
@@ -135,16 +172,28 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
     **Recommendation:** stay single-user, no backend. You already pick `garden-v{version}.json` in the Sign in accordion; one active file is enough.
 
 12. **Plan stays 2D.** Camera height (~1 m pole) is not a stored Z. Gravity at the shutter is attitude for levelling the ray, not a height survey. iOS will prompt for motion permission.
-   **Recommendation:** stay 2D through Phase 3. Request the gravity vector. If it is refused, require a level bubble and widen the angle σ so an unlevelled phone cannot pass the 200 mm station bar.
+   **Recommendation:** stay 2D through plant placement. Request the gravity vector. If it is refused, require a level bubble and widen the angle σ so an unlevelled phone cannot pass the 200 mm station bar. Optional heights are Phase 2 stage (d), after the 2D network passes.
 
 13. **Plant facts.** Spacing, sun, and companions have no source in the repo.
-    **Recommendation:** you type them. No catalogue API in Phase 3.
+    **Recommendation:** you type them. No catalogue API in Phase 4.
 
 14. **Reminders vs a list.**
-    **Recommendation:** in-app seasonal list in Phase 4. Calendar export only if you still want a buzz. No push notifications on the PWA.
+    **Recommendation:** in-app seasonal list in Phase 5. Calendar export only if you still want a buzz. No push notifications on the PWA.
 
 15. **Tests in CI.** Deploy currently runs `tsc` and Vite only. The three `npm run test:*` scripts do not call the TypeScript solver, and the circle fixture is an intentional skip.
     **Recommendation:** Phase 1 adds a node test of the real solver and runs it in the Pages workflow: ellipse coverage and NEES, the bearing-sign case, and the refusal cases in the table above. Capture the field circle file when you next do that walk; do not synthesise it.
 
 16. **UI churn vs solver work.** `src/ui.ts` is where almost every 0.7.x commit landed, and you are still editing it.
-    **Recommendation:** Phase 1 touches `photoGeometry.ts`, `adjustLayerA.ts`, `adjustLayerB.ts`, and tests. Leave the dialog alone except where a residual sentence has to change (`coach.ts`).
+   **Recommendation:** Phase 1 is the solver in PR #3, not another pass through the dialog. Marker work is Phase 2 and should not land in that PR.
+
+17. **What to print on a rod.** A flat AprilTag or ArUco is invisible from the other side of the pole. The current black/white belt is the same on every rod, so it cannot name the mark. A ring of bands wrapped 360° can.
+   **Recommendation:** hybrid. A wrap-around ring code is the everyday mark (ID and bearing from any direction). Add a flat AprilTag 36h11 only on a face you can look at squarely, for focal length and a tighter range. Do not wrap a square tag around the tube.
+
+18. **How far the code must read.** A 100 mm toilet-roll belt is about 19 px tall at 15 m on a full-resolution 1× photo, and about 9 px on the 1920-wide camera preview. That is not an ID.
+   **Recommendation:** automatic ID at **2 m and 5 m** on a sleeve about 250 mm tall, detected on a full-resolution 1× still. From 8–15 m, keep the bearing if the sleeve is still a clear column, and do not invent an ID. A large flat board is the only honest 15 m name-tag.
+
+19. **Wrong ID versus a miss.** Correcting a single glare-flipped band can turn rod A into rod B.
+   **Recommendation:** checksum, reject, do not correct. A failed read falls back to a hand click.
+
+20. **Hand clicks.** Markers will miss in sun, leaves, and blur.
+   **Recommendation:** keep the tap. A photo with no accepted code is still a photo you can mark by hand.
