@@ -40,27 +40,21 @@ The stick chooses the diameter. The sheet only has to be at least `πD + overlap
 
 **Use the full width, about 64 mm,** unless the stick you already have is thinner. A wider stick is a wider silhouette (section 4). A thinner stick still uses this band layout; the unused side of the sheet stays blank and holds the corner marks and the rulers, and the overlap strip moves in to `πD + 10 mm`.
 
-**The sleeve has to fit that stick.** The finished inside circumference is `πD`, the overlap is glued, and the paper must not be able to sit off to one side. If you can shift the tube so its axis leaves the stick, the centreline is not the point and the sleeve is rejected. Radial play after gluing should be under about **2 mm**. That is what keeps an off-centre sleeve out of the 8–24 mm centring budget in section 6.1.
+**The sleeve has to fit that stick.** A full-width sleeve slid over a 25 mm cane can sit `(64 − 25) / 2 = 19.5 mm` off the cane axis, and the centreline then follows the paper. Cut the sheet so the inside circumference is `πD` for that stick, glue the overlap, and reject a tube you can shift. A **63 mm** outside-diameter pipe uses the sheet: `π × 63.2 + 10 = 208.6 mm`, which is under 210 mm. Radial play after gluing should be under about **2 mm**.
 
 ## 3. Where the point is
 
 The coordinate in the garden is the **axis at ground level**, not the paper surface and not the axis at sleeve height.
 
-**Plumb rod.** Bearings and tapes meet the axis at the height of the sleeve. A lean `λ` moves the ground point by `h_s sin λ`, where `h_s` is the height of the sleeve centre. Record `h_s`. Plumb the rod with a bubble to about **1°**.
+**Marked height.** Bearings and tapes meet the axis at the sleeve. Mark the sleeve middle on the stick at a fixed height, **0.45 m**, and store that height with the point. A lean `λ` moves the ground point by `h_s sin λ`: **7.9 mm at 1°** and **24 mm at 3°** with the middle at 0.45 m. That is the centring budget, not the 1–3.5 mm pixel row.
 
-| Lean | Ground offset, sleeve centre at 0.5 m | At 1.0 m |
-|---|---|---|
-| 1° | 9 mm | 17 mm |
-| 2° | 17 mm | 35 mm |
-| 5° | 44 mm | 87 mm |
+The sideways part of the lean shows up in the photo. Fit the tilted axis, level it with the gravity sample, and extrapolate to the ground. The part along the line of sight does not show in one photo. Plumb the rod to about **1°**. If the sideways lean is fitted, `sigmaCentringM` is only that unseen part, about **8 mm** at 1°. If it is not fitted and the rod may be 3° off, use **0.024 m**. An unplumbed rod is stored as the axis at sleeve height and labelled with that bound; it is not the planting point.
 
-The sideways part of that lean shows up in the photo (the axis is not vertical after levelling) and can be taken out. The part along the line of sight does not show in one photo. With the bubble, carry it as `σ_λ` of about **1–2°**, which is the 9–17 mm row above when the sleeve centre is 0.5 m up. An unplumbed rod is stored as the axis at sleeve height and labelled with that bound; it is not the planting point.
-
-**Centring term.** Every sleeve bearing carries `sigmaCentringM`, in metres. It is the `σ_centring` already in the geometry note:
+**Centring term.** Every sleeve bearing carries `sigmaCentringM`, in metres. It is the centring piece of the bearing sigma in the geometry note (PR #3 `bearingSigma`):
 
 `σ_β² = (σ_px / fx)² + (sigmaCentringM / d)²`.
 
-It is not the pixel midline. Lean plus a sleeve that does not sit on the stick is **8–24 mm**, against a pixel-only claim of 1–3.5 mm. With the bubble at about 1° and the tight fit above, set `sigmaCentringM = 0.010`. If the rod is only known to about 2°, use **0.020**. If the sleeve can rattle, do not publish the bearing until the fit is fixed. The pixel noise stays in `σ_px` and is added as in the formula, not substituted for this term.
+It is not the pixel midline. A sleeve that does not fit the stick adds the 19.5 mm cane example above on top of the lean. Do not publish that bearing. The pixel noise stays in `σ_px`.
 
 **Centreline.** For a plumb rod the two tangent planes are vertical and symmetric about the plane through the axis, so the mean of the two edge **azimuths** is the axis azimuth at any distance and any off-centre angle. Average those levelled azimuths. Averaging pixel columns instead biases the bearing by about `tan β · (R / d)²`: 0.008° (0.3 mm) at 2 m and 30° off-centre. Small, and avoided by using azimuths. The bearing has **no** radial offset. It does not depend on reading the code.
 
@@ -80,7 +74,7 @@ Working camera: iPhone **1×**, **26 mm** equivalent, 4:3 still, **4032 × 3024*
 
 `fx / width = 26 / 34.6 = 0.751`, `fx = 0.751 × 4032 = 3028 px`.
 
-A 24 mm-equivalent phone is `fx ≈ 2798 px` (about 8% coarser). The 1920-wide preview is `fx ≈ 1442 px` and is not the detection image. Figures below use 3028 px.
+A 24 mm-equivalent phone is `fx ≈ 2798 px`. On that camera a 13 mm band is **7.3 px** at 5 m, under the 8 px floor, so the 5 m ID promise is for the 26 mm working figure (7.9 px) and has to be re-measured if the phone is 24 mm. Pro phones can open on a 24, 28 or 35 mm main lens. Read the real image width; do not assume 4032. A 24 MP default on iPhone 15 and later is unverified. The 1920-wide preview is `fx ≈ 1442 px` and is not the detection image. Figures below use 3028 px unless they say otherwise.
 
 Millimetres per pixel = `1000 × d / fx`:
 
@@ -99,49 +93,58 @@ A bar has to be about **8 px** tall before a black/white run is safe to classify
 
 Black is 1, white is 0. Quiet zones stay white.
 
-The previous layout had no clock. Its black-black start occurs inside the data of **201 of 256** eight-bit IDs. ID `0x00` is eight black bands with no edge to count, so it is one stripe. The white-white stop has no edge against the white quiet zone, so the code does not end. Filtering that old field down to the IDs with no run longer than 3 (75 IDs in the vision review) still leaves the stop buried in the margin. That filter is not the printed code.
+The previous layout had no clock. Its black-black start occurs inside the data of **201 of 256** eight-bit IDs. ID `0x00` is `BBW` plus a run of whites: one black stripe about 28 mm tall, with no edges to count. Twelve IDs have a run of eight bands or more, and at 8 m telling eight bands from nine needs the pitch known to about 6% while perspective and lean move it by 2–5%. The white-white stop has no edge against the bottom quiet zone. Filtering that old layout to runs of at most three, with CRC-6 on `x⁶ + x⁴ + x³ + 1`, init 0 and xorout `0x2A`, leaves **75** IDs, and the white stop is still buried in the margin. That filter is not the printed code.
 
 The clock is a run of four blacks, which the payload is not allowed to contain.
 
 | Bands | Role |
 |---|---|
-| 5 | **Sync.** `11110` (black, black, black, black, white). The only run of four blacks. Its length divided by 4 is the module height. |
-| 12 | **Payload.** Six data bits, then CRC-6. No run of either colour longer than 3. |
-| 2 | **Stop.** `01` (white, then black). The last band is black, so it does not disappear into the white quiet zone. |
+| 5 | **Sync.** `11110` (black, black, black, black, white). The only run of four blacks. Upside-down puts this run at the bottom, so orientation is the sync, not a guess. |
+| 12 | **Payload.** One of the 61 issued words below. No run of either colour longer than 3. |
+| 2 | **Stop.** `01` (white, then black). The last band is black, so the code ends on an edge. |
 
-Vertical budget. The module is **13 mm**, not 14 mm, so the quiet zones can be more than one module. Nineteen bands of 14 mm left only 15 mm and 16 mm of quiet, which is the margin the vision review rejected. At 5 m, 13 mm is 7.9 px against 8.5 px for 14 mm. That is the cost of the larger margin.
+Vertical budget. The module is **13 mm**, not 14 mm, so an empty quiet zone still fits. Nineteen bands of 14 mm left only 15 mm and 16 mm beside the code, and that strip also held the text, so it was not a quiet zone. At 5 m, 13 mm is 7.9 px on the 26 mm working camera, against 8.5 px for 14 mm. A width-coded stack in the old 266 mm code height holds `266 / (1.5 × 14) = 12.7` bars, not about ten; it still cannot carry a sync, a distance-4 payload and a black stop.
 
 | Strip | Height |
 |---|---|
-| Top quiet zone, white, with a 20 mm vertical check | 22 mm |
+| Unprinted top edge (printers miss the outer 3–5 mm); this edge is trimmed | 5 mm |
+| Name, corner cross, outside the quiet zone | 9 mm |
+| **Empty quiet zone** | **8 mm** |
 | **19 code bands × 13 mm** | **247 mm** |
-| Bottom quiet zone, white, with the name and a 100 mm ruler | 28 mm |
+| **Empty quiet zone** | **8 mm** |
+| Name again, and the horizontal ruler, outside the quiet zone | 15 mm |
+| Unprinted bottom edge, hidden under the glue flap | 5 mm |
 | Total | **297 mm** |
 
-**CRC.** The six check bits are the remainder of the six data bits on
+The 8 mm bands are white and empty. Text, crosses and rulers sit beyond them. The glue flap is the edge the printer cannot reach, so the visible seam is a trimmed printed edge, not a white stripe.
 
-`x⁶ + x⁴ + x³ + 1`
+**Which 12-bit words.** Two constructions both refuse a run longer than 3, and both have minimum distance 4. Distance 4 means one, two or three flipped bands cannot become another issued ID. Neither construction corrects a bit.
 
-(the width-6 polynomial `0x19`). On the 12-bit word, and also on an 8-data-bit word of 14 bits, the minimum distance is **4**. CRC-6/ITU, `x⁶ + x + 1`, has distance **3** on both of those lengths, so it is not used. One flipped band fails the check. **Do not correct a bit.** A corrected band can name the wrong stick.
+| Code | Issued IDs | Minimum distance | What a 4-band burst does |
+|---|---|---|---|
+| CRC-6 on `x⁶ + x⁴ + x³ + 1` (`0x19`), init 0, xorout 0, six data bits, then drop words that break the run limit | **28** | 4 | About **1.5%** of random 4-band bursts land on another issued ID |
+| Greedy list, below | **61** | 4 | About **3.8%** of those bursts land on another issued ID |
 
-Of the 64 checksummed words, **28** have no run longer than 3. Those are the issued IDs: `05 07 08 0A 0B 0D 0E 11 12 14 17 19 1A 1B 1D 22 23 25 26 29 2E 32 33 34 35 36 39 3B`. `garden.json` maps each one to a name (`A1`, `HSE03`, `FNC01`, …).
+CRC-6/ITU (`x⁶ + x + 1`) is distance 3 at 14 bits (ten weight-3 words), so it is not a candidate. The CRC list is the safer of the two only after four bands have already flipped, because it has fewer targets. Up to three flips they are the same: no wrong ID. The greedy list has the IDs. **Issue the 61.** Acceptance is membership of that list, not a syndrome. A 4-band burst is a damaged sleeve; the projective fit and the run limit still have to pass.
 
-**Is 28 enough?** For the marks you read from across the garden, only just. Six rod sleeves, about ten house corners and four fence discs is 20, with eight left for reprints and a lost sheet. A fuller boundary, eight to twelve posts, uses the rest. Baseline ends are those house corners or those rod marks, not a third set. Bed corners and path pegs are different: a few beds and a path can be fifteen to forty points. Put this sleeve on all of them and 28 is not enough.
+Build the list in numeric order from the 12-bit words with no run longer than 3 and at most two white bands at either end (the sync ends on one white, the stop starts on one white; three more would make a run of four across the join). Keep a word when its distance to every kept word is at least 4 and neither its reverse nor its complement is already kept. That is 61 words. The reverse and the complement of an issued word are not issued.
 
-Those bed and path points are named when you stand on them (`+ Point`). They do not need a code that reads at 5 m. They stay off this sleeve.
+`222 22D 244 24B 271 28E 293 2B4 2DD 2E7 315 31A 36E 389 447 459 46A 474 48B 495 4A6 4CC 4D2 513 51C 525 5B9 637 6BA 6E9 72B 74D 756 88D 896 8A3 8CA 8D1 919 926 94C 952 96B 975 9BA 9C7 A3B A57 B9C BA5 C6D C73 DAC DB7 DC9 DD4 E24 E4E E99 EC5 EE2`
 
-If the long-range set itself goes past about **24** (leave four codes for reprints), add a second bank. Do not shrink the module, and do not stack a second sheet yet.
+`garden.json` maps each one to a name (`A1`, `HSE03`, `FNC01`, …).
+
+**Is 61 enough?** Six rod sleeves, about ten house corners and a fence of eight to twelve posts is about 30, with reprints left over. Baseline ends are those house corners or those rod marks. Bed corners and path pegs are another fifteen to forty if each outline is coded, and 61 does not cover that. Those points are named when you stand on them (`+ Point`). They stay off this sleeve.
+
+If the long-range set passes about **50** (leave about ten codes for reprints), add a second bank. Do not shrink the module, and do not stack a second sheet yet.
 
 | Option | What you get | What it costs |
 |---|---|---|
-| **Second bank (recommended if 28 runs out)** | Sync of **five** blacks instead of four. Same CRC, same run limit, same 13 mm module. Another 28 IDs, **56** in total. A run of five cannot appear in the payload, so the two syncs do not collide. | One extra band. Code height 260 mm, quiet zones about **18 mm** each, down from 22 and 28. Still above the 15 mm margin that was rejected. Module stays 7.9 px at 5 m. |
-| Smaller module, more data bits | Eight data bits is 97 IDs, but that is 21 bands. At 11 mm the quiet zones fit, and 11 mm is 8 px at about **4.2 m**. | The 5 m ID promise moves in. |
-| Two A4 sheets, 594 mm tall | Room for more bands at 13 mm with the current quiet zones. | The sleeve centre moves up, so the same lean is a larger ground error, and the paper catches the wind. |
+| **Second bank (if 61 runs out)** | Sync of **five** blacks instead of four. The same 61 words. **122** IDs. A run of five cannot appear in the payload. | One extra band, code height 260 mm. The empty 8 mm quiet zones stay; the legend above and below shrinks. Module stays 13 mm. |
+| Smaller module, more payload bits | More words, and the 8 px floor moves in from 5 m. At 11 mm a band is 8 px at about **4.2 m**. | The 5 m ID promise goes. |
+| Two A4 sheets, 594 mm tall | Room for a longer payload at 13 mm. | The sleeve centre moves up, so the same lean is a larger ground error, and the paper catches the wind. |
 | A colour prefix | Another bank with no extra height. | Needs a colour printer. A coloured band in sun is the brightness problem this code was built to avoid. |
 
-Use the five-black bank when the long-range count passes about 24. Stack a second sheet only if 56 is still short. A shorter module is the wrong trade while ID at 5 m is the bar.
-
-Decode from the sync, not from a hope that all 19 edges are visible. On the first bank the module height is the four-black run divided by 4, and there are 19 modules. On the second bank it is the five-black run divided by 5, and there are 20. Every other run must be 1, 2 or 3 modules. Same-colour bands are one run; they are not lost, because the sync sets the scale. Reject a second long black run, a module count that is not 19 or 20, a stop that is not white-then-black, or a failed CRC.
+Decode with a **1-D projective fit** from the start of the sync to the black stop edge. Equal bands on the paper are not equal steps in the image once the camera pitches. Do not chop the stack into 19 equal pixel slices, and do not take the whole height divided by 19 as the module. The four-black run checks the clock. Each run must then fall on an integer number of those fitted positions, 1, 2 or 3. Reject a second run of four blacks, a word that is not in the list, a stop that is not white-then-black, or a fit that does not land on the edges. On the five-black bank the fit uses 20 bands and the module check is that run divided by 5.
 
 **Range of the ID.** Promise it at **2 m and 5 m** (20 px and 7.9 px per band). At **8 m** a band is 4.9 px: keep the ID only when the sync, the runs and the CRC all pass; otherwise reject the code. At **15 m** a band is 2.6 px: **no ID**.
 
@@ -157,14 +160,20 @@ With `fx = 3028` and `σ_e = 1 px`, `σ_β = 0.013°`. That **pixel** term is a 
 
 Two larger terms sit on the same ray:
 
-- **`fx`.** A 1% focal-length error moves a bearing by `sin β cos β × 1%`. At 20° off-centre that is 0.18°: **16 mm at 5 m** and **48 mm at 15 m**. Against the pixel term (1.2 mm and 3.5 mm) that is about **13×**. Across the frame the factor runs from about **4×** near the principal point to about **20×** well off it. `fx` is solved per phone and lens inside the adjustment (section 6.3), so the ellipse carries it. Do not quote the pixel row as the ray.
-- **Lean and an off-centre sleeve**, via `sigmaCentringM` (section 3). Unchecked, those two are **8–24 mm**. With a 1° bubble and a tight fit the term is **10 mm**, still several times the pixel row. Sideways lean can be fitted. Along-sight lean stays in `σ_λ`.
+- **`fx`.** A 1% focal-length error moves a bearing by `sin β cos β × 1%`: **0.05° at 5° off-centre, 0.18° at 20°, and 0.26° at the edge**. Centreline noise at 1 px is **0.013°**, so the focal term is **4–20×** larger, and it is the same for every photo from that phone. At 20° off-centre the lateral miss is **6 mm at 2 m, 16 mm at 5 m, 26 mm at 8 m and 48 mm at 15 m**. `fx` is solved per phone and lens inside the adjustment (section 6.3). Do not quote the pixel row as the ray.
+- **Lean and a sleeve off the stick**, via `sigmaCentringM` (section 3). At the marked 0.45 m height that is 8 mm at 1° and 24 mm at 3°. A 64 mm sleeve on a 25 mm cane adds up to 19.5 mm. Fit the sideways lean. The along-sight part stays in the centring term.
 
 The centreline is a valid Phase 1 ray across 2–15 m whenever both edges pass the width check in section 3. Without an ID there is still no point to attach it to, unless this sleeve is the only one in the frame and the user confirms the name.
 
 ### 6.2 Range from the sleeve
 
-Do not use `d = fx · H / h_px`, and do not check the sleeve by its raw pixel height or its raw pixel width. A camera pitched down to frame a sleeve whose centre is 0.5 m below a 1.5 m camera overestimates `d = fx · H / h_px` by **24% at 2 m**, **3.4% (169 mm) at 5 m**, 1.2% at 8 m and 0.2% at 15 m. At 5 m that bias is 2.6 times the noise σ quoted below. Even without that pitch model, the elevation of the sleeve biases a pixel-height check by about **1–2%** at garden ranges, because the camera is above the paper. The width check in section 3 compares **levelled azimuths** with `2 arcsin(R / d)`. It does not compare pixel columns.
+Do not use `d = fx · H / h_px`, and do not check the sleeve by its raw pixel height or its raw pixel width. A camera pitched down to frame a sleeve whose centre is 0.5 m below a 1.5 m camera overestimates `d = fx · H / h_px` by **24% at 2 m**, **3.4% (169 mm) at 5 m**, 1.2% at 8 m and 0.2% at 15 m. At 5 m that bias is 2.6 times the noise σ quoted below.
+
+The silhouette is not the paper height either. With the camera above the sleeve the outline is about
+
+`H cos α + D sin α`,
+
+where `α` is the depression angle to the sleeve middle. Camera at 1.0 m, sleeve middle at 0.3 m, treating that outline as `H` reads **1.5%, 2.0%, 1.5% and 0.9%** high at 2, 5, 8 and 15 m. The levelled-elevation formula stands, and the length it is given is this outline, using the measured `H` and `D` for that sleeve and the `α` from the marked height. The width check in section 3 compares **levelled azimuths** with `2 arcsin(R / d)`. It does not compare pixel columns.
 
 Use the levelled elevation of each end:
 
@@ -200,7 +209,7 @@ Leaning away by 10° is −1.4% at 5 m. This component is invisible in one photo
 
 The pixel term passes the `fx` term at about 8 m. At 15 m with 2 px per end (realistic on a 60 px sleeve) the noise is about **720 mm**. Pitch, rim and lean, if left unmodelled, are larger than this noise at garden ranges. The observation that enters the solver is the elevation form with the rim choice, and its σ includes the edge fit and `σ_λ`. It is a weak distance, not a tape.
 
-**Choosing between the two station candidates.** Two marks and one tape leave two stations on the tape circle (geometry note, §3.3). A range **to the taped mark** is the same from both, so it cannot separate them. The useful number is the range to **another** sleeve (the other baseline end, or a third mark): `Δ = |d(P1) − d(P2)|`. How far apart the stations are in the garden is the wrong test.
+**Choosing between the two station candidates.** Two marks and one tape leave two stations on the tape circle (geometry note, §3.3). A range **to the taped mark** is the same from both, so it cannot separate them. The height range has to come from the **untaped** mark: `Δ = |d(P1) − d(P2)|` on that other sleeve. How far apart the stations are in the garden is the wrong test.
 
 On the 7 m baseline at 20°, a 15 m tape to A, the ranges from the two candidates to B are 18.9 m and 9.3 m. Closer to the far intersection (`r → 2R ≈ 20.5 m`) those two ranges to B converge. Separation in units of the **pixel-and-fx noise** (not yet including lean):
 
@@ -224,8 +233,8 @@ Enter the adjustment with the raw pieces, not a derived range and not a derived 
 
 - The tape as a distance. It is the horizontal distance from the **lens** to the axis (surface reading, slope reduced, then `+R`). A 10 mm mistake in where the lens is costs 0.2% at 5 m.
 - Each sleeve end as a levelled elevation. Equivalently `tan e_top − tan e_bot = H / (d ± R)`, with the rim choice above. σ comes from the edge fit plus `σ_λ`.
-- **One `fx` per phone and per lens**, the 1× lens only, shared by every photo from that phone. The prior is a **checkerboard** of known square size, shot in several orientations, or the taped-rod calibration in [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) §3.5. EXIF `FocalLengthIn35mmFormat` only checks that the photo is 1× (`fx/width` about 0.69–0.75). It is not the prior. A separate `fx` on each photo cannot carry a taped sleeve in photo `k` into photo `j`. The shared value is what the adjustment estimates; it is not a new unknown on every frame.
-- `H` as one constant, or one parameter shared by that batch of paper. In a ratio of two sleeve observations `H` cancels, so the stock does not need an absolute height for ranging. It does for a first calibration. The printed rulers (section 7) are what tell you the sheet was not scaled before you trust `H` or `D`.
+- **One `fx` per phone and per lens**, the 1× lens only, shared by every photo from that phone and solved in the adjustment with a prior. A gate that merely checks `fx` is already within 1% is not that solve. The prior is a **checkerboard** of known square size, several views, repeated on different days, including distortion and focus breathing (about **0.3%** at 2 m). The taped-rod calibration in [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) §3.5 is the other acceptable prior. EXIF `FocalLengthIn35mmFormat` is an integer, about **±1.9%** at 26 mm, and a Pro phone may be 24, 28 or 35 mm, so EXIF only checks that the shot is 1×. It is not the prior. A separate `fx` on each photo cannot carry a taped sleeve in photo `k` into photo `j`.
+- The measured `H` and `D` of **that sleeve**, stored with the mark after the rulers are checked. A shared paper-stock parameter is only a fallback. In a ratio of two observations from the same sleeve, `H` cancels. The rulers (section 7) are what tell you the sheet was not scaled before those measurements are stored.
 
 Ranging photo `k` with an `fx` taken from photo `k` only returns the tape. It is not a new observation. Publishing that range, and also publishing `fx` as a prior while photo `k` is still in the network, counts the same pixels twice. Derived ranges that all share one calibration photo also share that photo’s tape and edge errors; entering them as independent distances hides the correlation.
 
@@ -238,34 +247,40 @@ One A4 portrait page, black and white, **actual size**. The printer must not sca
 ```
 297 mm
 ┌──────────────────────────────────────── 210 mm ─┐
-│ +  20 mm vertical check          top quiet 22 mm│
-│ ████████████████████████████████████████████    │ 52 mm       sync: four blacks
-│                                                 │ 13 mm       sync: white
+│ trim this edge                         5 mm     │
+│ A1 · 222          corner cross         9 mm     │
+│ (empty quiet)                          8 mm     │
+│ ████████████████████████████████████   52 mm    │ sync: four blacks
+│                                        13 mm    │ sync: white
 │  … 12 payload bands, runs of at most 3 …        │
-│                                                 │ 13 mm       stop white
-│ ████████████████████████████████████████████    │ 13 mm       stop black
-│ |--------- 100 mm ruler --------|  A1 · 05      │ 28 mm quiet
+│                                        13 mm    │ stop: white
+│ ████████████████████████████████████   13 mm    │ stop: black
+│ (empty quiet)                          8 mm     │
+│ |---- 200 mm ruler ----|   A1 · 222    15 mm    │
+│ glue flap, unprinted outer 5 mm        5 mm     │
 └─────────────────────────────────────────────────┘
-                                              ↑
-                                    10 mm glue strip
-                                    (copy of the opposite edge)
+         ↑ 250 mm ruler lives in this 10 mm glue flap, measured before it is glued
 ```
 
-- Bands run the full circumference. They stop at the glue strip. The **10 mm overlap is a copy of the first 10 mm** of the pattern, marked “glue under”, so the seam does not delete a bar or shift the rings. Glue it so the paper cannot slide off the stick axis (section 2).
-- Corner crosses sit in the quiet zones, inset about 5 mm.
-- A tick on the overlap edge lines up with a tick on the opposite edge.
-- **Rulers, checked before the sheet is rolled.** A **100 mm** horizontal ruler in the bottom quiet zone, and a **20 mm** vertical pair in the top quiet zone. Both must match a steel rule. The four-black sync must measure **52 mm**. If any of those is short or long, the printer scaled the page. Do not use the sheet: `H` and `D` would enter the solve at the wrong size.
-- Human text is the point name and the issued code, printed **twice** across the bottom quiet zone, clear of the glue strip and of the ruler. Names avoid O and I.
-- **Stock.** Laser print, or pigment ink, on matte synthetic paper (a polyester sheet). Dye ink on copy paper dies in rain and is not acceptable. Gloss laminate is not acceptable either: the profile reader fails on a specular sleeve. A matte pouch is fine if the rulers still measure true after it is sealed.
-- The seam is vertical. The decoder reads a vertical profile, so a thin seam does not change the code. It must not become a dark ridge that splits the silhouette; press it flat.
+- Bands run the full circumference and stop at the glue flap. The flap is a copy of the first 10 mm of the pattern, marked “glue under”, with the printer’s blank outer 3–5 mm on the hidden side. Trim the opposite edge so the visible seam is printed paper, not a white stripe. Glue it so the paper cannot slide off the stick (section 2).
+- The **8 mm** quiet zones are empty. The name and the corner cross sit outside them.
+- **Rulers, checked with a steel rule before the sheet is rolled.** A **250 mm** ruler along the height, in the glue flap. The sheet is only 210 mm wide, so a 250 mm ruler does not fit that way; the wrap-direction ruler is **200 mm**, the longest that clears the unprintable edges. Letter paper with fit-to-page scales A4 to about **94%**, which turns 250 mm into 235 mm and 200 mm into 188 mm. Either miss means the sheet was scaled. Do not use it. The four-black sync must measure **52 mm**.
+- Store the measured `H` and `D` on that sleeve. Nominal 297 mm and 63.7 mm are the design, not the observation.
+- Human text is the point name and the issued code, printed twice, outside the quiet zones. Names avoid O and I.
+- **Stock.** Laser or pigment ink on matte polypropylene or polyester (PP/PET). Plain paper cockles and dye ink runs. Gloss laminate and glossy toner put a specular stripe down the sleeve, parallel to a vertical scan, so the profile reader fails. A matte laminate is acceptable if the rulers still measure true after it is sealed.
+- The seam is vertical. Press it flat so it does not become a ridge that splits the silhouette.
 
 ## 8. Reading it
 
 On the full 1× still, in Safari. No library, and no scan of the whole frame for a stick.
 
-The user **taps the column**. That tap is the seed and, if the code is rejected, it is still the hand click. Around the seed, fit the two silhouette edges on many rows. Use a robust fit: drop outlier rows (a leaf, a shadow edge, the seam) instead of letting one bright edge win. Then the width check in section 3. If the two edges are not stable, reject the code and keep the tap.
+The user **taps the column**, and taps to focus on it. A high-contrast column is also a picket, a cane or a downpipe, and the edges disappear against a hedge or the sky, so the frame is not searched. The tap is the seed and, if the code is rejected, it is still the hand click. The phone is on the pole, not handheld: at 1/60 s a handhold blurs the stick by about 1–4 px. If autofocus locks on leaves at 1 m, a stick at 8 m blurs by about 7–10 px, which is more than a 13 mm band (4.9 px on the 26 mm camera).
 
-The profile follows the fitted axis, not image y. The clock is the four-black sync (section 5). A run that is not an integer module, a second run of four blacks, or a CRC failure is a miss. Sun on a gloss sleeve is why the stock in section 7 is matte.
+Around the seed, fit edges only on rows that have contrast. Sample at least **five columns** across the middle **60%** of the stick’s width and vote. Drop clipped samples and outlier rows (leaf, shadow, seam). Average the two **levelled edge azimuths**, not the pixel columns (section 3). Then the width check. If the edges are not stable, reject the code and keep the tap. Two decodes of the same ID in one photo are a reject.
+
+Stay in the central 60% of the frame. Rolling shutter at about 3°/s across a 15 ms readout adds about **0.045°** to the bearing; at the edge of the frame it is worse.
+
+The profile follows the fitted axis, not image y. Bands are placed by the projective fit in section 5. A run that misses those positions, a second run of four blacks, or a word that is not in the list is a miss. Sun on gloss toner is why the stock in section 7 is matte.
 
 A flat tag is not in this comparison as a thing we might still print. A square fiducial the size of this sheet (about 180 mm) is about 109 px at 5 m and 36 px at 15 m, and it is only usable within about ±45° of straight-on. That is the wrong tool on a stick you walk around. Intrinsics come from the checkerboard, once per phone and lens, not from a tag in the garden.
 
@@ -273,5 +288,5 @@ A flat tag is not in this comparison as a thing we might still print. A square f
 
 Both reviews are applied. What is left is practical, not a second code:
 
-1. Count the long-range marks before printing. Twenty-eight covers rods, the house and a short fence. Past about 24, print the five-black bank (56 IDs) rather than a shorter module. Beds and paths stay unnamed by this sleeve.
+1. Count the long-range marks before printing. Sixty-one covers rods, the house and a fence, with reprints left. Past about 50, print the five-black bank (122 IDs) rather than a shorter module. Beds and paths stay unnamed by this sleeve.
 2. The checkerboard prior and `sigmaCentringM` have to be in the solver when Phase 2 wires detections into it. This note does not change PR #3.
