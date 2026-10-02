@@ -160,8 +160,8 @@ export interface SolveInput {
    */
   behindCameraResolves?: number;
   /**
-   * Test hook. After placement, negate the y of every free seed so a same-cost
-   * mirror is what the adjustment starts from. Default off.
+   * @internal Test hook. After placement, negate the y of every free seed so a
+   * same-cost mirror is what the adjustment starts from. Default off.
    */
   reflectSeed?: boolean;
 }
