@@ -1,8 +1,25 @@
 # Field sheet — circle on a baseline
 
-Print this and take it outside. It is the first real test of the survey: a circle of known size, points on it, a measured baseline, and a few places to stand with the phone. One person, a tape, a laser if you have one, and one iPhone. About an hour. Print the sleeves the day before.
+Print this and take it outside. It is the first real test of the survey: a circle of known size, points on it, a measured baseline, and a few places to stand with the phone. One person, a tape, a laser if you have one, and one iPhone. About an hour once the probe below has passed. Print the sleeves the day before.
 
-The design behind this sheet is [FIELD_FIXTURE_PLAN.md](FIELD_FIXTURE_PLAN.md). You do not need that file in the garden.
+The design behind this sheet is [FIELD_FIXTURE_PLAN.md](FIELD_FIXTURE_PLAN.md). You do not need that file in the garden. You do need the probe page on the phone before the first still.
+
+## 0. Probe, before any still
+
+On the survey iPhone, open the probe page. It has two buttons and it does not upload.
+
+1. **Take photo.** Rear camera, 1×. Accept the picture.
+2. **Choose from library.** Pick a still you just took with the Camera app, rear camera, 1×, not edited.
+
+**Go** for a button means the page shows a focal length, a lens name, a time the camera wrote, and a long side of at least 3000 pixels. **No-go** means that button cannot be used for this test.
+
+Use a path that says go.
+
+- If **Take photo** is go, take the survey stills that way.
+- If **Take photo** is no-go and **Choose from library** is go, take each still in the Camera app (rear, 1×), then choose it from the library. The page’s own camera button drops the lens data on some iPhones. The library keeps it.
+- If both are no-go, stop. This sheet waits. Do not type a focal length in by hand.
+
+Write the result on the sheet: which button was go, the lens name, and whether the page saw a motion reading inside the photo. The time that counts is the time in the photo, not the moment you tap Use Photo.
 
 ## What you are proving
 
@@ -77,7 +94,9 @@ For each cane, CRC01–CRC06, BAS01, BAS02, and the calibration cane:
 2. Measure from the ground to the **middle of the paper**. Write it in the table at the end. Half a metre is a good target. Use whatever it actually is.
 3. Tick `plumb ok` only when the bubble passed.
 
-A lean toward the camera does not show in the photo. At half a metre up, 2° is 17 mm on the ground. That is why the bubble is on this sheet and not left to the picture.
+A lean toward the camera does not show in the picture of the stick. At half a metre up, 2° is 17 mm on the ground. That is why the bubble is on this sheet.
+
+The phone’s own tilt is a separate record. It comes from the photo when the probe saw a motion reading there. Otherwise the app uses motion from just before you open the camera and just after the picture comes back, and only if the phone was still both times. The tap on Use Photo is not that moment.
 
 ## 4. Calibration shot
 
@@ -136,11 +155,12 @@ A laser baseline, if you took one, is a third check on this sheet. The tape mean
 - The calibration photo kept with the capture.
 - Save to OneDrive as usual when you are back on the network.
 
-The original still, the sleeve height, and the bubble are part of the capture record described in the plan. Until the app writes those itself, keep the Camera Roll stills from the system camera (rear, 1×, unedited) and keep this filled sheet. The import uses both.
+Keep this filled sheet. The stills that count are the ones from the path the probe marked go. If that path is the library, the Camera Roll is where they live until you choose them. Leave them unedited. The import uses the sheet and those stills.
 
 ## Checklist
 
-- [ ] Same iPhone, 1×, for the calibration and every station
+- [ ] Probe done. The path you used was go (focal length, lens name, camera time, long side at least 3000 px)
+- [ ] Same iPhone, same lens, 1×, for the calibration and every station
 - [ ] Line marked 4.000 m, six sticks, neighbour chords 4.000 m
 - [ ] Both diameters written; radius σ 10 mm or 15 mm
 - [ ] Baseline 8.000 m, both directions, level, +32 mm per sleeved end
@@ -158,6 +178,12 @@ The original still, the sleeve height, and the bubble are part of the capture re
 ## Sheet to fill
 
 Build / date / phone name:
+
+Probe — Take photo: go / no-go. Choose from library: go / no-go. Path used:
+
+Lens name on the probe:
+
+Motion reading inside the photo: yes / no.
 
 | Cane | Height to sleeve centre (m) | Plumb ok |
 |---|---|---|

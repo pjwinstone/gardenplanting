@@ -2,7 +2,26 @@
 
 **Status:** design only. No app change in this note. `ui.ts` stays as it is. Implementation follows a review of this note.
 
-**Reviewers:** the Photo & Marker Vision Reviewer reviews section 1 (photo format and storage). The Geometry & Maths Advisor reviews section 3 (the circle-fit test). Section 2 is the import that joins them.
+**Reviewers:** the Photo & Marker Vision Reviewer has reviewed section 1. The five blocking items from that review are taken in the table below. The Geometry & Maths Advisor reviews section 3. No comment from that advisor was on PR #4 when this revision was written. Section 2 is the import that joins them.
+
+| Photo review | This revision |
+|---|---|
+| 1. The `capture` file may be transcoded and stripped of EXIF ([WebKit 207088 comment 26](https://bugs.webkit.org/show_bug.cgi?id=207088#c26)) | A probe page is the first implementation step. A still with no `FocalLength` or no `LensModel` is not an archive file. |
+| 2. Gravity cannot be sampled at the shutter | Prefer the MakerNote `AccelerationVector`. Otherwise a stillness-checked pair of motion readings, before the chooser and after the file returns. |
+| 3. The page’s clock is when **Use Photo** was tapped | The capture time is `DateTimeOriginal` plus `SubSecTimeOriginal`. |
+| 4. Intrinsics, pixel centres, click σ, canvas limit | Intrinsics in sensor pixels. Pixel centres at +0.5. Click σ in full-resolution sensor pixels. The click canvas stays inside Safari’s canvas limit. |
+| 5. Uploads can overwrite or vanish | `conflictBehavior=fail`, a `quickXorHash` check, `If-Match` on the manifest, and an IndexedDB queue. |
+
+Notes that travel with those five, and are not separate gates:
+
+- A library JPEG passes when `FocalLength` and `LensModel` are present. The capture does not have to stay HEIC.
+- If **Take photo** is no-go and **Choose from library** is go, the Camera app takes the still and the page receives it from the library. That is the split in comment 26.
+- Two shots in the same second with no `SubSecTimeOriginal` are taken again. The Use Photo clock is not used to order them.
+- `quickXorHash` is the Graph check. SHA-256 stays in the manifest for the import.
+- A 409 is the same still only when the stored `quickXorHash` matches. Otherwise the name collided.
+- The raw MakerNote is not stored. Only the three acceleration numbers.
+- The probe prints GPS as yes or no, not as coordinates.
+- `clickSpace` is `sensor-continuous`, so the half-pixel is applied once.
 
 **Field sheet:** [FIELD_PROTOCOL_CIRCLE.md](FIELD_PROTOCOL_CIRCLE.md).
 
@@ -53,21 +72,78 @@ Two paths, both ending in a canvas JPEG.
 
 **Timestamps.** `exifDateTimeOriginal` is not parsed from EXIF. The canned baseline tie sets it to `new Date().toISOString()`, which is the app clock. The + Point path in `layers.ts` does not set it.
 
-**What “original EXIF and orientation preserved” can mean.**
+**What actually arrives.** Uploading the `File` unchanged is necessary and not sufficient. [WebKit bug 207088 comment 26](https://bugs.webkit.org/show_bug.cgi?id=207088#c26) reports the split that still matters: a photo **chosen from the library** can keep its embedded metadata, and a photo taken through the page’s camera chooser (**Take Photo**, then **Use Photo**) can have that metadata removed before the page ever sees the bytes. iOS may also transcode HEIC to JPEG on the way in. `file.type` does not tell you which happened.
 
-| Path | Original bytes | EXIF | Orientation | Full 1× still | Usable as the archive |
-|---|---|---|---|---|---|
-| In-app `getUserMedia` + canvas | No | No | Pixels only, no tag | No | No. Label `canvas-derived` if a thumb is kept. |
-| File input, then canvas, as today | Thrown away | Stripped | Baked in, tag gone | No | No |
-| File input, upload the `File` unchanged | Yes | Yes, whatever iOS put in the file | Tag preserved | Yes, when iOS did not transcode | Yes |
+| Path | Bytes the page can keep | `FocalLength` and `LensModel` | Usable as the archive |
+|---|---|---|---|
+| In-app `getUserMedia` + canvas | Derived JPEG only | Never | No |
+| File input, then canvas, as today | Derived JPEG | Stripped by us | No |
+| `<input capture>` (new photo in the chooser) | Whatever iOS hands over | **Often missing.** Comment 26. | Only if the probe says go |
+| File input, chosen from the library | Often a JPEG transcode of HEIC, sometimes HEIC | Often present, including after the iOS 16.4 library path | Only if the probe says go |
 
-A library that copies tags onto the canvas JPEG can store an app clock and a gravity vector. It cannot restore the sensor file, the real focal length, or the 4032×3024 frame. Do not call that file the original.
+A library that copies tags onto the canvas JPEG can store an app clock. It cannot restore `FocalLength` or `LensModel`. That file is `canvas-derived`.
 
-**Archive rule.** The file that lands on OneDrive is the `File` from the system camera, bytes unchanged. Accept `image/jpeg,image/heic,image/heif` explicitly so iOS is more likely to hand over HEIC instead of a transcode. Sniff the type. PUT those bytes with that content type. Decode a copy only to make the small thumb the plan already shows, and to give the click UI an upright image.
+**Archive rule.** Keep the `File` bytes, sniff them, and read the EXIF without drawing the archive to a canvas. The still is an archive file only when the probe’s go rule passes for **the same path** the session will use. A missing `FocalLength` or a missing `LensModel` fails closed: the photo is not uploaded as a fixture still, the coach says which path failed, and no focal length is invented. A JPEG that still has both tags is acceptable. HEIC is not required.
 
-The in-app shutter can stay as a preview. Its JPEG is `provenance: canvas-derived`, `exifPreserved: false`, and it is not a fixture photo. Fixture stills come from the system camera at **1×** on the **same phone** for the whole session, including the calibration shot in the field protocol.
+The in-app shutter can stay as a preview. It is not a fixture photo. Fixture stills are 1× on one phone for the whole session, including the calibration shot. Every still in that session must carry the same `LensModel`. A second lens fails the capture.
 
-Clicks are stored in **upright pixels**: the image after the EXIF orientation tag is applied, which is the space the user taps. The manifest stores the tag (1–8), the stored pixel size, and the oriented size, so a later reader can map a click back onto the untouched file. `fx / width` stays a ratio so a resize does not change the angle. A 2 px click σ is on the image that was tapped, which must be this upright full still, not the 360 px thumb.
+### 1.2.1 Probe page — first implementation step
+
+Nothing else in section 1.6 is built until this page has been run on the phone that will do the survey, and the path below has come back **go**. The page does not upload, does not write OneDrive, and does not put the photo in the garden JSON.
+
+Two actions, and no others:
+
+1. **Take photo** — `<input type="file" accept="image/jpeg,image/heic,image/heif" capture="environment">`.
+2. **Choose from library** — the same `accept`, **without** `capture`.
+
+For the chosen file the page sniffs the bytes and reads EXIF from those bytes (a parser that understands JPEG APP1 and HEIC `Exif`, not a canvas). It shows:
+
+| Shown | Why |
+|---|---|
+| Sniffed type, byte length, stored width and height | A resized “Small” or “Medium” is not the 1× still. |
+| `FocalLength`, `FocalLengthIn35mmFilm`, `LensModel` | The go/no-go pair, plus the 35 mm prior. |
+| `DateTimeOriginal`, `SubSecTimeOriginal`, `OffsetTimeOriginal` | The shutter clock. |
+| Orientation, `PixelXDimension`, `PixelYDimension` | Sensor grid for clicks. |
+| MakerNote `AccelerationVector` | Present or absent. The three numbers if present. |
+| GPS | **Yes or no only.** The probe does not print coordinates. |
+
+**Go**, for that button’s path, only when all of these hold:
+
+- `FocalLength` is present and numeric.
+- `LensModel` is present and non-empty.
+- `DateTimeOriginal` is present.
+- The longer stored side is at least **3000 px** (a full 1× still, not a Small/Medium transcode).
+
+**No-go** otherwise. The page says “this path cannot archive a fixture” and does not offer a way to continue with that file. Missing `SubSecTimeOriginal` is not a no-go by itself. It is shown, and two photos that share a `DateTimeOriginal` with no sub-second are not given an invented order (section 1.3).
+
+The field session uses a path that returned **go** on that phone. Comment 26’s practical split is the expected one: **Take photo** may be no-go, and **Choose from library** may be go. In that case the Camera app takes the still (rear camera, 1×) and the page then receives it from the library. If both buttons are no-go, the fixture capture waits. There is no third path.
+
+### 1.2.2 Time, gravity, and sensor coordinates
+
+**Time.** `DateTimeOriginal` plus `SubSecTimeOriginal` is the shutter time, with `OffsetTimeOriginal` when the file has it. The `File`’s `lastModified`, and the moment the `change` event runs, are when **Use Photo** or the library row was tapped. Those go in `appReceivedAt` and are never copied into `exifDateTimeOriginal`. The filename uses the EXIF clock (section 1.3).
+
+**Gravity.** The page cannot see the shutter. `DeviceMotion` at the `change` event is the phone after the system camera UI, not the phone that took the picture.
+
+- If the still has MakerNote `AccelerationVector`, that vector is the gravity record. `gravity.source` is `makernote`. The raw MakerNote blob is not stored. It carries serial numbers. Only the three components are copied, and `gravity.frame` stays `apple-makernote` until the camera-axis map in [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) §9 is checked against a probe still. Do not relabel it `(0, +1, 0)`.
+- If the vector is absent, the fallback is a **bracket**, not a shutter sample. Start `DeviceMotion` when the button is pressed, keep the samples from the half-second before the chooser opens, and take another half-second after the file returns. `gravity.source` is `motion-bracket` only when both windows are still: each window’s gravity direction stays inside **2°**, the two medians agree inside **2°**, and the magnitude stays near 1 g. The stored vector is the mean of the two medians, with both medians and the angle between them kept beside it. If the check fails, `gravityUsable` is false and the rays stay unlevelled. A bracket is never labelled `makernote`.
+- When both exist, keep both and use the MakerNote vector for the solve.
+
+**Coordinates.** Intrinsics and clicks live in the **stored sensor grid**, the pixels in the file before the orientation tag is applied. `fx`, `fy`, `cx`, and `cy` are in those pixels. `fx / width` uses that stored width.
+
+A tap hits a pixel. The measurement is the **centre** of that pixel: stored index `(i, j)` is the continuous point `(i + 0.5, j + 0.5)`. The principal point uses the same continuous frame. The solver reads those continuous values and does not add 0.5 again. `clickSpace` is `sensor-continuous`.
+
+The upright picture the user sees is the sensor grid after the orientation tag. Map the upright pixel back to the stored pixel with the inverse of that tag, then add 0.5. One check from the probe still, before any solve uses the clicks: orientation **1**, tap on the top-left pixel, stored click `(0.5, 0.5)`. Orientation **6** (0th row is the visual right side, 0th column is the visual top): the visual top-left pixel is the stored top-right pixel. That case is checked on a real still. The other six tags use the same EXIF rule and the same corner check.
+
+**Click σ** is in those full-resolution sensor pixels. The geometry note’s about **2 px** is 2 sensor pixels on the 1× still, and only when the tap was placed at that resolution. A tap on a scaled canvas is wider. If the click canvas is downscaled by an integer factor `s`, `σ_sensor = s × σ_tap`, and `σ_tap` is at least half a canvas pixel. That `σ_sensor` is what the ray uses. A 2 px sensor σ is not written for a tap on a 640 px preview.
+
+**Canvas limit.** The archive bytes are never drawn to a canvas. The click surface may use one. Safari’s limit is on the **backing store**, not the CSS box, and `devicePixelRatio` must not multiply it (set the buffer size explicitly, density 1).
+
+| iOS | Max side | Max area |
+|---|---|---|
+| 17 and earlier | 4096 | 16,777,216 |
+| 18 and later | 8192 | 67,108,864 |
+
+A 4032×3024 still fits both. A 48 MP still fits the iOS 18 area and side, and does not fit iOS 17. If the oriented bitmap would exceed the limit on that phone, the click canvas is an integer downsample and `s` scales the click σ. Exceeding the limit fails the canvas; it does not silently clip the still.
 
 ### 1.3 Folder layout and file names
 
@@ -86,9 +162,10 @@ The garden JSON remains the one survey document. Stills sit in a sibling folder 
 
 Legacy `garden.json` uses the folder `garden/`. A later `garden-v2.json` uses `garden-v2/` and does not move the old stills.
 
-**Names.** `{utc}_{photoId}_{stationId}.{ext}`
+**Names.** `{exifUtc}_{photoId}_{stationId}.{ext}`
 
-- `utc` is `YYYYMMDDTHHMMSSZ` from the app shutter instant. No colons, so a downloaded folder survives Windows.
+- `exifUtc` is `DateTimeOriginal` plus `SubSecTimeOriginal`, written `YYYYMMDDTHHMMSS.sssZ` after applying `OffsetTimeOriginal` when the file has it. No colons. This is the camera clock, not the Use Photo tap.
+- If `SubSecTimeOriginal` is missing, the name has no fractional part. A second file with the same `DateTimeOriginal` and no sub-second is a no-go for that pair: the page asks for the shot again. It does not number them from `appReceivedAt`.
 - `photoId` is the id already on the photo record, restricted to letters, digits, and hyphen.
 - `stationId` is `addPointId` (yaw-only photos share it). The calibration shot uses its own id.
 - `ext` comes from the sniff, `.jpg` or `.heic`, not from `file.type`.
@@ -120,17 +197,18 @@ Each photo entry:
 
 | Field | Meaning |
 |---|---|
-| `photoId`, `file`, `sha256`, `byteLength`, `mime` | Identity of the untouched still. |
-| `provenance` | `original-still` or `canvas-derived`. |
-| `exifPreserved` | True only when the bytes were not re-encoded. |
-| `width`, `height` | Stored pixels, sensor order. |
-| `orientedWidth`, `orientedHeight`, `exifOrientation` | After the orientation tag. Clicks use this space (`clickSpace: upright-exif`). |
-| `exifDateTimeOriginal` | From EXIF when present, else null. Never the app clock pretending to be EXIF. |
-| `appShutterAt` | ISO time the page received the file or the shutter. |
+| `photoId`, `file`, `sha256`, `quickXorHash`, `byteLength`, `mime` | Identity of the untouched still. `sha256` is for the repo import. `quickXorHash` is what Graph returns and what the upload check compares. |
+| `provenance` | `original-still` only after a probe **go**. `canvas-derived` is never a fixture still. |
+| `exifPreserved` | True only when the bytes were not re-encoded **and** the go rule passed (`FocalLength` and `LensModel` present). |
+| `lensModel` | EXIF `LensModel`. One value for the whole capture. |
+| `width`, `height` | Stored sensor pixels, before orientation. |
+| `orientedWidth`, `orientedHeight`, `exifOrientation` | The upright view. Clicks are stored after the inverse map, in sensor pixels. `clickSpace` is `sensor-continuous`. |
+| `exifDateTimeOriginal` | `DateTimeOriginal` plus `SubSecTimeOriginal`, and `OffsetTimeOriginal` when present. Null if the probe would have been no-go. |
+| `appReceivedAt` | When the page received the file. This is the Use Photo or library tap. Not the shutter. |
 | `setupId`, `stationId`, `yawOnly`, `sightedBaselineId` | Same meanings as the garden JSON. Yaw-only photos share `stationId`. |
-| `gravity` | `{ x, y, z, frame, sampledAt, screenOrientation }`. Sample `DeviceMotion.accelerationIncludingGravity` at the shutter, not a session average. `frame` is `devicemotion-raw` until the camera-axis map in [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) §9 is verified. A level phone in the camera frame is about `(0, +1, 0)`, y down, z forward. Do not guess that map when writing the file. |
+| `gravity` | `{ x, y, z, source, frame, usable }`. `source` is `makernote` or `motion-bracket`. `frame` is `apple-makernote` or `devicemotion-raw`. `usable` is false when the bracket failed the stillness check. The solver’s camera frame, about `(0, +1, 0)`, is not written until §9 of the geometry note is checked. |
 | `phonePole` | `{ plumbOk, leanBoundDeg, poleHeightM }`. The survey pole, plumbed with a bubble to about 1°. |
-| `clicks[]` | `{ pointId, px, py, sleeveHeightM, sleeveRadiusM, plumbOk, leanBoundDeg }`. |
+| `clicks[]` | `{ pointId, px, py, sigmaPx, sleeveHeightM, sleeveRadiusM, plumbOk, leanBoundDeg }`. `px`, `py` are `sensor-continuous` (pixel centre at +0.5). `sigmaPx` is the click σ in full-resolution sensor pixels. |
 
 **Sleeve height and the bubble live on the click, because they belong to the rod in that photo, and on the photo, because the pole was plumbed for that shutter.**
 
@@ -181,18 +259,25 @@ Roadmap decision 10 and [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) §6: bump to `v
 
 `thumbnailDataUrl` stays the small plan thumb. The archive file is the still. localStorage keeps dropping heavy thumbs.
 
-**Upload order.** Stills first (simple PUT under 4 MB, else an upload session), then `manifest.json`, then the garden JSON. The JSON never points at a file that failed. A failed still does not block the geometry save; the coach names the photos that did not archive. One personal account, so last JSON wins is unchanged. Stills are content-addressed by photo id and are not deleted when the JSON is saved again. Detaching a point marks the manifest entry `detached` and leaves the file, so an import can still see it. A later tidy can delete detached files. That tidy is a deliberate action.
+**Queue.** The still is written to IndexedDB **before** any network call. Database `garden-survey-capture`, store `outbox`, key `photoId`. The value holds the blob, the metadata, `sha256`, `quickXorHash`, and a state `pending`, `uploading`, `uploaded`, or `failed`. Safari may kill the PWA. The queue is what survives. localStorage is not used for the blob. On the next launch, if signed in, the queue drains. A blob is deleted only after the hash check and the manifest update have both succeeded.
+
+**Upload of a still.** Simple PUT under 4 MB, otherwise an upload session. The request uses `@microsoft.graph.conflictBehavior=fail`, so an existing name is a 409 and not a silent replace. On 409, GET the item and compare `file.hashes.quickXorHash` with the hash of the bytes just queued. A match means this still is already there. A mismatch fails closed: the name collided with different bytes, and that photo id is not reused. On a 2xx, GET the item and require the same `quickXorHash` match before the photo is called uploaded. SHA-256 is computed on the device as well and stored in the manifest. It is not the Graph check. Graph does not return SHA-256.
+
+**Manifest.** GET `manifest.json` and keep its `eTag`. PUT with `If-Match` set to that tag. The first create uses `If-None-Match: *`. A 412 means the manifest changed: read it again, union photo entries by `photoId`, and retry. The manifest is not last-upload-wins. The garden JSON stays last-upload-wins, which is roadmap decision 11. The JSON is written after the manifest and never points at a still whose hash check has not passed. A failed still does not block the geometry save. The coach names the photos still in the outbox.
+
+Detaching a point marks the manifest entry `detached` and leaves the file. A later tidy can delete detached files. That tidy is a deliberate action.
 
 ### 1.6 What the first implementation has to add
 
-Not in this change. After review:
+Not in this change. The order is fixed. Step 1 is the gate.
 
-1. Keep the system-camera `File` and PUT it unchanged. Sniff JPEG versus HEIC.
-2. Sample gravity at the shutter and store it as `devicemotion-raw`, with screen orientation.
-3. Write `sleeveHeightM`, `sleeveRadiusM`, and the bubble on the rod and on each click. Write `phonePole` on the photo.
-4. Write the calibration block as raw tape, `Δh`, `R`, `H`, and sleeve height. One `phoneId` per capture.
-5. Clicks in upright full-still pixels. Thumb remains a thumb.
-6. Extend the OneDrive list so the sibling folder is recognised, without making a second garden document.
+1. **Probe page**, as in §1.2.1, on the survey phone. **Go** only with `FocalLength`, `LensModel`, `DateTimeOriginal`, and a longer side of at least 3000 px, on the path the session will use. **No-go** stops that path. No archive code is written until a path has returned go on that phone.
+2. IndexedDB outbox, then PUT with `conflictBehavior=fail`, then the `quickXorHash` check, then the manifest with `If-Match`.
+3. Read `DateTimeOriginal` and `SubSecTimeOriginal` from the bytes. Store `appReceivedAt` separately.
+4. Gravity from MakerNote `AccelerationVector` when present, otherwise the stillness bracket. Never a single reading at the `change` event.
+5. Clicks in `sensor-continuous` pixels, σ in full-resolution sensor pixels, click canvas inside the Safari limit in §1.2.2.
+6. Sleeve height, sleeve radius, and the rod bubble on the point and on each click. `phonePole` on the photo. Calibration block as raw tape, `Δh`, `R`, `H`, and sleeve height. One `LensModel` per capture.
+7. Extend the OneDrive list so the sibling folder is recognised, without making a second garden document.
 
 ## 2. Turn a capture into a fixture
 
@@ -205,7 +290,7 @@ Not in this change. After review:
 | Where it runs | Laptop, after the session | iPhone Safari, during the session |
 | Commit | Writes a folder you commit | Produces a download you still have to commit |
 | Ground truth | Reads a sheet you fill in after you have walked the circle | Would have to ask for the known radius in the field UI |
-| Privacy | Strips GPS before anything is written to the repo | Easy to embed the stills and the EXIF location in a share file |
+| Privacy | Allow-list. Anything not on the list is dropped, including location | Easy to embed the stills and the EXIF location in a share file |
 | App code | None. `ui.ts` is untouched | Another path through the dialog Paul is editing |
 | CI | `npm test` already runs on the Pages workflow | The phone cannot run the solver test |
 
@@ -280,15 +365,23 @@ Written by the surveyor, not fitted by the script. The known radius is not an ob
 
 `slopeM` and `deltaHM` are the fresh pulls from the sheet. The script does not invent them. `radiusSigmaM` is the set-out σ from the protocol (10 mm when both diameters agree). `pegToNearEndM` is the taped distance from the centre peg to the near baseline end, so the “circle approaches this end” check has a number. The peg is not a solved point.
 
-### 2.4 Privacy
+### 2.4 Privacy, and the public repo
 
-The garden is a home. The fixture is a local frame in metres, which is already what the solver stores.
+The garden is a home. The GitHub repo is **public** and has **no licence file**. A committed fixture is a public file. CI never receives the OneDrive token. No account id, no drive path, and no owner name go into the committed JSON.
 
-- The script drops GPS EXIF on any photo it writes. CI never receives the OneDrive token.
-- No account id, no drive path, no owner name in the committed JSON.
-- The protocol asks for camera location off, as a backstop, not as the control.
-- Stills stay in the personal OneDrive folder. `--keep-photos` is a conscious copy.
-- Aim the camera at the sticks. The script cannot review the background; a glance before `--keep-photos` does.
+Photos stay on OneDrive. `--keep-photos` is a local copy. If a later decision commits any image bytes, the script does not strip by a block-list of GPS tags. It **rewrites the file to an allow-list**. A tag that is not on the list is removed, including GPS, serial numbers, owner name, unique IDs, thumbnails, and the raw MakerNote blob.
+
+| Kept, if present | Dropped with everything else |
+|---|---|
+| Orientation | `GPS*` |
+| Stored width and height, `PixelXDimension`, `PixelYDimension` | `BodySerialNumber`, `LensSerialNumber`, camera serials |
+| `FocalLength`, `FocalLengthIn35mmFilm` | `CameraOwnerName`, `Artist`, `Copyright`, `UserComment`, `ImageUniqueID` |
+| `LensModel`, `LensMake` | The raw MakerNote (serials live here) |
+| `DateTimeOriginal`, `SubSecTimeOriginal`, `OffsetTimeOriginal` | Any thumbnail that could carry its own GPS |
+
+The three `AccelerationVector` numbers may be copied into the JSON. The MakerNote itself may not. The same allow-list is applied to JSON fields: no raw EXIF blob, no GPS, no user-agent string that is not needed. Camera location left off on the phone is a backstop. The allow-list is the control.
+
+Whether this public repo should have a licence, and whether a survey of a home belongs in it at all, is a decision for Paul (below). Until that decision, the importer’s default remains observations only, and `--keep-photos` does not `git add` the files.
 
 ## 3. Circle-fit test
 
@@ -298,14 +391,15 @@ One real capture. The synthetic suite already checks ellipse coverage and NEES. 
 
 1. Load `garden.json`, `normalizeDocument`, require `version: 1`.
 2. Completeness, before any fit:
-   - One `phoneId`, `lens` `1x`, `fxShared` true, and the calibration photo present with raw tape, `R`, `H`, `sleeveHeightM`, and `plumbOk`.
-   - Every fixture photo is `original-still`. A `canvas-derived` photo fails the test with that id.
+   - One `phoneId`, one `LensModel`, `lens` `1x`, `fxShared` true, and the calibration photo present with raw tape, `R`, `H`, `sleeveHeightM`, and `plumbOk`.
+   - Every fixture photo is `original-still` from a probe **go** (`FocalLength` and `LensModel` present). A `canvas-derived` photo, or a still with either tag missing, fails the test.
+   - Clicks are `sensor-continuous` and each click has `sigmaPx` in sensor pixels.
    - Every circle point in `circlePointIds` has `sleeveHeightM`, `sleeveRadiusM`, and `plumbOk: true` with `leanBoundDeg` ≤ 2.
    - Every photo that clicks a circle rod copies that rod’s sleeve height and bubble onto the click.
 3. `solveGardenDocument`. Do not read stored `x,y` as measurements. The field sheet’s third station is optional when only an 8 m tape is on site. The test does not require a point named STN03. It requires the circle points.
 4. Append `ground-truth.withheld` as withheld distances using `√(s² − Δh²) + nR`, not `faceOffsetM`.
 5. Fail if the variance test is `high`, if the solve did not converge, or if any circle point is `unset`. `low` is not a failure.
-6. Photos skipped as `no-fx` fail this fixture. The prior may be the EXIF 35 mm equivalent (`fx/width` in the 0.69–0.75 band) with a relative σ, shared by every photo of that phone. The calibration block is present either way. The test does not compute `fx` from the sleeve.
+6. Photos skipped as `no-fx` fail this fixture. The prior may be the EXIF 35 mm equivalent (`fx/width` in the 0.69–0.75 band, width in sensor pixels) with a relative σ, shared by every photo of that phone. Each ray uses that photo’s `sigmaPx` in sensor pixels, not a flat 2 px on a thumbnail. The calibration block is present either way. The test does not compute `fx` from the sleeve.
 
 Checked versus unchecked is reported per point. A circle point does not have to be plantable for the radius test to run. Plantable remains the roadmap rule (95% semi-major ≤ 100 mm, a spare observation, and a withheld distance inside its own limit). This layout’s withheld tapes are the diameter and one chord, so those two lengths carry the plantable distance check. The other points are judged by the circle statistics below.
 
@@ -346,13 +440,14 @@ The radius row is the scale check. The fit can have tiny residuals and a wrong r
 
 ### 3.4 What one capture does not prove
 
-It does not estimate NEES and it does not show that 95% of repeats fall in the ellipse. That remains the synthetic suite. It does not validate the DeviceMotion-to-camera map. Gravity is stored raw until [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) §9 is closed; rays without a mapped gravity vector stay unlevelled, and the station class is judged accordingly. It does not estimate `fx` from the sleeve. It stores the observations that estimation needs.
+It does not estimate NEES and it does not show that 95% of repeats fall in the ellipse. That remains the synthetic suite. It does not validate the DeviceMotion-to-camera map, and it does not treat a MakerNote vector as that map. Rays without a mapped, usable gravity vector stay unlevelled, and the station class is judged accordingly. It does not estimate `fx` from the sleeve. It stores the observations that estimation needs.
 
 ## Decisions
 
-1. **System-camera stills, unchanged bytes, sibling folder.** The canvas shutter is a thumb, not the archive.
+1. **Probe first, then stills.** A path is an archive path only after `FocalLength` and `LensModel` survive on that phone. The canvas shutter is a thumb, not the archive. Stills sit in a sibling folder.
 2. **Stay on document version 1** with optional fields. v2 remains the bump already agreed. The sidecar is not a second garden file.
-3. **Node import script.** Not an in-app export. Photos stay on OneDrive; the repo gets observations and ground truth.
+3. **Node import script.** Not an in-app export. Photos stay on OneDrive. The repo gets observations and ground truth. Any future image bytes are rewritten to the allow-list in §2.4.
 4. **Circle test** as the table in §3.3, geometric and covariance-weighted, 1.96 on the radius, `χ²(n−3)` on the radial residuals, 3.29 on a single point.
 5. **`+R` after horizontal reduction**, stored separately from v1 `offsetMm`. Leave that box at 0.
-6. **One phone, one shared `fx`, one calibration shot at 3–5 m**, raw tape and sleeve height, no derived focal length in the file.
+6. **One phone, one `LensModel`, one shared `fx`, one calibration shot at 3–5 m**, raw tape and sleeve height, no derived focal length in the file.
+7. **Licence and the public repo.** The repo is public and has no licence. Paul decides whether to add one, and whether a survey of this garden should be committed here at all. This note does not pick a licence. Until that decision, fixture photos are not committed.
