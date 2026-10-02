@@ -1,6 +1,6 @@
 # Roadmap — Garden Survey toward a planted garden
 
-**Status:** planning note, 2026-10-02. Grounded in [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md). Does not change the survey method in `AGENTS.md`.
+**Status:** planning note, 2026-10-02. Pass bars updated after the maths review on PR #2. Grounded in [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md). Does not change the survey method in `AGENTS.md`.
 
 The app already coaches a baseline-first field loop, stores a garden JSON, and draws a plan. Coordinates are not yet something to trust at planting scale. **Phase 1 is a geometry prototype.** Layers, plants, and care wait until that prototype has passed the checks below.
 
@@ -8,36 +8,39 @@ Existing docs to keep using, not replace:
 
 - Field method: [plan-baseline-then-house.md](plan-baseline-then-house.md), [stage-2-field-checklist.md](stage-2-field-checklist.md)
 - Layers / + Point: [plan-layers-objects-add-point.md](plan-layers-objects-add-point.md)
-- Solver proposal for the maths review: [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md)
+- Solver proposal, revised after that review: [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md)
 
 ## Phase 1 — Geometry prototype
 
-**Goal:** one local frame in which a baseline, a house corner, a fence post, and a path point are either **solved with a residual** or **left blank on purpose**.
+**Goal:** one local frame in which a baseline, a house corner, a fence post, and a path point are either **solved with a covariance** or **left blank on purpose**. A fix with no spare observation is drawn and labelled **unchecked**. It is not a point you plant from.
 
-Build it behind the current Adjust entry and the current JSON. Keep the phone UI. Do not start a native app for this phase.
+Build it behind the current Adjust entry and the current JSON. Keep the phone UI. Do not start a native app for this phase. The maths review has already landed; this table is the revised bar.
 
 ### What the prototype must prove
 
+Targets are a **95% error-ellipse semi-major** (about 2.45 times the 1σ semi-major), not one noisy trial “within X mm”.
+
 | Claim | Pass |
 |---|---|
-| Datum | Highest-trust baseline fixes translation, rotation, and scale. Other baselines are distance observations in that same frame. |
-| Distances | A taped or laser length is recovered within its σ (20 mm tape, 2 mm laser) when that length is the only noise. |
-| Trilateration | Two distances to a new point, intersection angle 40–140°, side chosen by the user: **within 50 mm** of truth on the synthetic set. |
-| Photo station | Three known marks, subtended baseline 15–40°, focal length known to ~10%: station **within 200 mm**. Two marks only: **no coordinate** unless the centred-baseline shortcut is explicitly accepted and the symmetry check passes. |
-| House corner | A corner with only one taped edge stays unfixed (the 90° turn goes away). A corner fixed by a second distance or by two stations gets a residual in mm. |
-| Close | Misclosure is two estimates of the **same** point. Warn above **50 mm**. A long wall between the first and last corner is not a failure. |
-| Layers share the frame | A bed vertex and a house vertex are both `points` in metres. Fitting a circle does not invent a second coordinate system. |
-| Honesty | Underdetermined, danger-circle, and tiny-angle cases produce a sentence and no invented `x,y`. |
-
-Planting beds do not need 20 mm. **100 mm RMS** against a withheld tape is the bar for a point you would plant from. Structure control stays tighter (50 mm misclosure). Photo-only stations are allowed to be the weak 200 mm class and must be labelled weak.
+| Datum | **A** fixed at `(0, 0)`, **`B_y` fixed at 0**, `B_x` free. The datum tape is an ordinary distance with a residual. Trust chooses which baseline is the datum. Weights come from σ only. |
+| Distances | `σ² = a² + (b L)²`. Tape: `a` about 3–5 mm and `b` about 0.5–1 mm/m, or a flat **20 mm** if that split is not used. Laser: about **5 mm**, plus about **50 mm** when the spot hits the front of a roll (a known offset, not part of σ). Slope reduced to horizontal. |
+| Trilateration | Not “within 50 mm”. At σ = 20 mm and a 40° intersection the 95% semi-major is **101 mm** (about 25% of points miss 50 mm). Pass: Monte Carlo errors sit inside the predicted ellipse about 95% of the time (NEES ≈ 2), and a point is accepted only when that semi-major is inside its class. Early-refuse under 20° and near 180°. Two tapes alone are **unchecked**. |
+| Photo station | 95% semi-major **≤ 200 mm** only if `fx/width` is calibrated to **≤ 1%**, rays are gravity-levelled (or a bubble is enforced and σ is widened), and control has depth or 4+ marks. A 10% focal error moves the 7 m / 20° station by **±1.98 m**, so “fx within 10%” is not a pass. Two marks and no tape: **no coordinate**. Two marks plus one tape from the pole to A, B, or the midpoint: a fix, still unchecked until a further observation. No symmetry test on `β_A + β_B`. |
+| Bearing | Opposite sign to 0.7.25: `β = atan2(cx − px, fx)`, then levelled with gravity and `py`. Check, when the solver exists: camera at the origin facing +X, point `(10, 1)`, bearing positive. |
+| House corner | One taped edge stays unfixed. No 90° turn. A second constraint with nothing spare is unchecked. |
+| Close | Wall lengths alone have **no misclosure** (`n − 3` free bends). A check needs a surplus observation: for 6 corners, the 10th distance, or a chainage/offset, or a surplus ray. When a 6-wall traverse misclosure is real and σ = 20 mm, warn above about **120 mm** (95%), not a flat 50 mm. |
+| Plantable point | 95% semi-major **≤ 100 mm**, at least one spare observation, and a withheld check inside `2.45 √(σ_pred² + σ_check²)`. A 200 mm station does not yield a 100 mm point unless a tape also ties that station. |
+| Blunders | `σ̂₀² = vᵀPv / (n − u)` against `χ²`. Standardised residual `w_i = v_i / (σ_i √r_i)`. Redundancy near 0 labelled unchecked. |
+| Layers share the frame | A bed vertex and a house vertex are both `points` in metres. A circle fit does not invent a second frame. |
+| Honesty | A rank-deficient normal matrix, a danger-circle ellipse over the class, and a baseline that barely subtends an angle produce a sentence and no invented `x,y`. |
 
 ### How to validate
 
-1. **Maths review** of [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) before coding the solver.
-2. **Synthetic recovery**, in CI, importing the real module (not a pasted formula): known garden, Gaussian noise at the stated σ, RMS inside the table above. Include refusal cases (two marks, danger circle, subtended angle under 10°).
-3. **Withheld checks:** extra tapes that do not enter the solve; report miss in mm.
-4. **Field fixture** already specified in [test-case-circle-baseline.md](test-case-circle-baseline.md): real `garden.json` under `fixtures/field-circle-baseline/`. Circle residual and the near baseline end must match the stake notes. Do not invent that file.
-5. Coach lines for this phase stay in `coach.ts` and quote the residual the solver actually computed.
+1. **Maths review** of [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) is in (PR #2). Solver code waits on this revision, not on a second method argument.
+2. **Synthetic recovery**, in CI, importing the real module: known garden, Gaussian noise at the stated σ. About 95% of trials inside the predicted ellipse, NEES ≈ 2. Include refusals (two marks and no tape, danger circle, `θ → 0`, intersection under 20°). Include the bearing-sign case (point `(10, 1)`).
+3. **Withheld checks:** a tape that does not enter the solve. Pass when the miss is within `2.45 √(σ_pred² + σ_check²)`.
+4. **Field fixture** already specified in [test-case-circle-baseline.md](test-case-circle-baseline.md): real `garden.json` under `fixtures/field-circle-baseline/`. Circle residual and the near baseline end must match the stake notes. Do not invent that file. Radius on an arc shorter than about 90° is reported with `σ_R` and not treated as tight.
+5. Coach lines for this phase stay in `coach.ts` and quote the residual, the `w` test, or the unchecked label the solver actually computed.
 
 ### Milestone exit
 
@@ -59,7 +62,7 @@ Rules for this phase:
 
 - One frame from Phase 1. Layers are meaning and draw order, not separate surveys.
 - Shared corners are **shared point ids**, not copied coordinates.
-- A solved circle/square is a **fit** stored on the item, recomputed from selected points. It is not an observation.
+- A solved circle is a geometric fit (orthogonal distance), started from an algebraic guess, stored on the item with `σ_R`. It is not an observation. An arc under about 90° does not pin the radius.
 - + Point keeps the sticky layer / item behaviour from [plan-layers-objects-add-point.md](plan-layers-objects-add-point.md).
 
 **Exit:** a plan that can show boundary, house, path, and one bed from a single adjust, each with its own residual, toggled by layer.
@@ -102,19 +105,19 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
    **Recommendation:** keep Vite + the home-screen PWA through Phase 2.
 
 2. **Do not require LiDAR or ARKit.** GPS on a phone is several metres, which is coarser than a bed. LiDAR is Pro-only and weak across a 20 m garden in sun. The notes you already wrote (tape primary, photo secondary) match the physics.
-   **Recommendation:** tape and two-station angles. Revisit AR only as an experiment after Phase 1 has a number to beat.
+   **Recommendation:** tape and levelled, calibrated bearings. The maths review agrees nothing in the geometry note forces ARKit. Revisit AR only as an experiment after Phase 1 has a number to beat.
 
-3. **Accuracy bars** in the Phase 1 table (50 mm structure misclosure, 100 mm plantable points, 200 mm labelled photo stations).
-   **Recommendation:** accept those three numbers. They are loose enough for shrubs and tight enough to notice a bad tie.
+3. **Accuracy bars.** The first draft’s flat 50 mm / 100 mm RMS / 200 mm-with-10%-focal-length set does not match σ = 20 mm or a 10% focal error (±1.98 m on a 7 m baseline at 20°).
+   **Recommendation:** use the Phase 1 table. Plantable points at a **100 mm** 95% semi-major, with a spare observation. Photo stations at **200 mm** only after `fx` is calibrated to about **1%** (`fx/width` about **0.69–0.75**, not 0.9) and the ray is levelled. Trilateration at a 20 mm tape is about **100 mm** (95%) at a 40° crossing, not 50 mm.
 
-4. **Replace the turn-left chain and the isosceles station** with the solver in the geometry proposal, after the advisor’s review.
-   **Recommendation:** yes. Keep collecting clicks and tapes the way 0.7.25 does; change what Adjust writes into `x,y`.
+4. **Replace the turn-left chain and the isosceles station** with the revised solver: bearing sign flipped, gravity and `py` in the ray, two marks fixed by **arc plus one tape** (no `|β_A + β_B|` test), datum **A and `B_y` only**.
+   **Recommendation:** yes. Keep collecting clicks and tapes as 0.7.25 does, and store gravity with the photo. Change what Adjust writes into `x,y`. The review is done; this is the model to implement when you ask for code.
 
-5. **House close.** Today’s 50 mm check measures the gap between two different corners.
-   **Recommendation:** redefine it as misclosure (geometry proposal) and keep the 50 mm warn threshold.
+5. **House close.** Today’s 50 mm check measures the gap between two different corners. A polygon of wall lengths only is not rigid, so it has no misclosure.
+   **Recommendation:** warn only when a surplus observation exists (for six corners, a 10th distance, a chainage/offset, or a surplus ray). At tape σ = 20 mm the 95% tolerance for six walls is about **120 mm**. Keep 50 mm only if you actually tape to the tighter model (about 3 mm + 1 mm/m), which brings that 95% figure to about 28 mm.
 
-6. **Offset direction.** `offsetMm` has no direction, so the brick arris is not actually solved.
-   **Recommendation:** mm plus a direction (inward normal of a named edge, or a tap). Store it when the schema bumps.
+6. **Offset direction.** `offsetMm` has no direction, so the brick arris is not actually solved. A laser on the front of a roll is about **50 mm** from the centre, and the instrument’s reference is not the pole axis.
+   **Recommendation:** millimetres plus a direction for the mark, and an explicit laser face/reference offset. Laser σ in the solve is about **5 mm**, not the 2 mm constant in the code. Store both when the schema bumps.
 
 7. **When to stop special-casing `polygons` id `house`.** The field loop depends on it.
    **Recommendation:** leave it through Phase 1. Fold it into a `structure` item in Phase 2 with a `normalizeDocument` migration.
@@ -131,8 +134,8 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
 11. **One garden file on personal OneDrive**, last upload wins (PUT, no etag).
     **Recommendation:** stay single-user, no backend. You already pick `garden-v{version}.json` in the Sign in accordion; one active file is enough.
 
-12. **Plan stays 2D.** Camera height (~1 m pole) is a constant, not a stored Z, until a real height observation exists.
-    **Recommendation:** 2D through Phase 3.
+12. **Plan stays 2D.** Camera height (~1 m pole) is not a stored Z. Gravity at the shutter is attitude for levelling the ray, not a height survey. iOS will prompt for motion permission.
+   **Recommendation:** stay 2D through Phase 3. Request the gravity vector. If it is refused, require a level bubble and widen the angle σ so an unlevelled phone cannot pass the 200 mm station bar.
 
 13. **Plant facts.** Spacing, sun, and companions have no source in the repo.
     **Recommendation:** you type them. No catalogue API in Phase 3.
@@ -141,7 +144,7 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
     **Recommendation:** in-app seasonal list in Phase 4. Calendar export only if you still want a buzz. No push notifications on the PWA.
 
 15. **Tests in CI.** Deploy currently runs `tsc` and Vite only. The three `npm run test:*` scripts do not call the TypeScript solver, and the circle fixture is an intentional skip.
-    **Recommendation:** Phase 1 adds a node test of the real solver and runs it in the Pages workflow. Capture the field circle file when you next do that walk; do not synthesise it.
+    **Recommendation:** Phase 1 adds a node test of the real solver and runs it in the Pages workflow: ellipse coverage and NEES, the bearing-sign case, and the refusal cases in the table above. Capture the field circle file when you next do that walk; do not synthesise it.
 
 16. **UI churn vs solver work.** `src/ui.ts` is where almost every 0.7.x commit landed, and you are still editing it.
     **Recommendation:** Phase 1 touches `photoGeometry.ts`, `adjustLayerA.ts`, `adjustLayerB.ts`, and tests. Leave the dialog alone except where a residual sentence has to change (`coach.ts`).

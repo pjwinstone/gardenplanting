@@ -1,228 +1,318 @@
 # Geometry and triangulation — draft for review
 
-**Status:** proposal only. An independent maths advisor should review this before any solver code is written. It does not authorise an implementation, and it does not change `AGENTS.md`.
+**Status:** proposal only. Revised after the maths review on PR #2 (2026-10-02). No solver code in this change. It does not change `AGENTS.md`.
 
-**Context:** [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) describes the 0.7.25 code. [ROADMAP.md](ROADMAP.md) Phase 1 is the prototype that would follow a reviewed version of this note. Field practice (house-edge baseline, mark offsets, leapfrog, both baseline ends in frame) stays as in [plan-baseline-then-house.md](plan-baseline-then-house.md).
+**Context:** [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) describes the 0.7.25 code. [ROADMAP.md](ROADMAP.md) Phase 1 is the prototype that would follow this note. Field practice (house-edge baseline, mark offsets, leapfrog, both baseline ends in frame) stays as in [plan-baseline-then-house.md](plan-baseline-then-house.md).
 
-## 1. Coordinate frame
+The advisor’s direction is accepted in full: one 2D frame, one weighted least-squares adjustment, no assumed 90° turns, points left unsolved when the normal matrix says so. Nothing in the review is set aside. Where a figure below differs from the first draft, the review’s figure is the one that stands.
 
-Local **2D** Cartesian metres. Right-handed. No OS grid and no GPS in the solve.
+## How the review was taken
+
+| Review point | This revision |
+|---|---|
+| `\|β_A + β_B\| ≈ 0` does not place the station | Shortcut dropped. Two marks plus one tape, or a third mark. |
+| Bearing sign is mirrored; `py` and tilt matter | `β = atan2(cx − px, fx)` before levelling. Gravity rotates the ray. `py` is used. |
+| Pinning B at `(L, 0)` over-constrains scale | A fixed, `B_y = 0`, datum tape kept as a normal distance. |
+| Zero redundancy hides blunders | Extra observation required for structure corners and plantable points. `σ̂₀`, standardised residuals, redundancy, MDB, error ellipses. |
+| Numbers | 10% focal error is **±1.98 m** on the 7 m / 20° isosceles station. 200 mm stations need `fx` to about **1%**. `fx/width ≈ 0.69–0.75`, not 0.9. `σ√2 / sin φ` is 2D DRMS, not cross-track. House check ~**120 mm** (95%, 6 walls, σ = 20 mm) and only when a check observation exists. Laser σ ~**5 mm**, plus ~**50 mm** if the spot hits the front of the roll. |
+| Arc wording | The arc passes through A and B. `R = L / (2 sin θ)` (10.23 m for 7 m at 20°). |
+| Distance model, slope, sag | `σ² = a² + (b L)²`, horizontal reduction, sag called out. |
+| Gates | Accept or reject on the **95% error ellipse**. Angle cuts are early warnings only. |
+| Circle fit | Geometric fit, not Kåsa alone. Radius on arcs under ~90° is weak. |
+| ARKit | Not required. |
+
+## 1. Coordinate frame and datum
+
+Local **2D** Cartesian metres. Right-handed. No OS grid and no GPS in the solve. Phone compass does not enter: near a house it is off by about ±5–10°, and a photo only measures angle differences. Heading is the unknown `ψ` on each photo.
 
 | Element | Definition |
 |---|---|
-| Origin | Mark **A** of the **datum baseline** (highest `trust`, default the current house-edge baseline). |
-| +X | From A toward mark **B** of that baseline. |
-| +Y | The garden side, chosen once when the baseline is established (the side you will stand on). This is a stored sign, not “left of the image”. |
-| Scale | The taped or laser length of the datum baseline. |
-| Heights | Out of scope. The pole length (~1 m) is a note, not a Z coordinate. |
+| Origin | Mark **A** of the datum baseline (highest `trust` chooses which baseline; default the house edge). |
+| +X | From A toward mark **B**, with `B_y` held at 0 so the axis lies along A→B. |
+| +Y | Garden side, stored once at setup. Used for **distance-only** intersections. It is not “left in the image”. |
+| Scale | Observed. The datum tape is a weighted distance. It is not a pin. |
+| Heights | The plan has no Z. Pole length (~1 m) is used only to turn a tilt into a horizontal eccentricity (section 3.2). |
 
-**Gauge.** A rigid 2D figure has 3 degrees of freedom (translation, rotation) plus scale. Pinning A to `(0,0)`, pinning B to `(L, 0)`, and storing the garden sign of +Y removes them. Every other baseline is then a **distance observation**, not a new origin. The “active baseline” in the UI chooses which control a new measurement prefers; Adjust still runs in this one frame. If the datum baseline’s trust is later lowered, the pin moves to the new datum and coordinates are rewritten. Old `x,y` are not sacred.
+**Gauge (minimal constraint).** A distance network has a datum defect of **3**: two translations and one rotation. Scale is not a defect.
 
-**Reflection.** Circle intersections and resection arcs have two sides. The stored garden sign picks the side. If both solutions lie on that side, keep the one closer to an existing ray or ask; do not average them.
+- Fix **A = (0, 0)** and **`B_y = 0`**. Leave **`B_x` free**.
+- The baseline length stays an ordinary observation with its own residual.
+- No soft pin on B. Pinning B to `(L, 0)` would be a fourth constraint: it hides the tape residual, pushes that error into every other point, and biases `σ̂₀`.
+
+Shape, residuals, and `σ̂₀` do not depend on which baseline is the datum. Switching datum is a rigid transform. **Trust chooses the datum only. Weights come from σ, not from trust.**
+
+**Which mirror.** Signed bearings from an upright rear camera have no mirror ambiguity: the left/right order of the two marks fixes the side (section 3.2). The garden sign applies to **distance-only** intersections. Those two solutions mirror across the line through the **two known points**, not across the datum baseline. The garden sign resolves them only when both points lie on that baseline. Otherwise use a third observation, agreement with a ray, or ask. Do not average the two sides.
 
 ## 2. Marks and features
 
-A toilet-roll or disc has a **mark centre**. The brick arris or post centre is the **feature**. They differ by an offset.
+A toilet-roll or disc has a **mark centre**. The brick arris or post centre is the **feature**.
 
 Store, per control point:
 
-- `offsetMm` — distance from mark centre to feature, millimetres.
-- `offsetDirection` — one of: inward normal of a named edge, outward normal, or an explicit bearing in the garden frame (radians from +X).
+- `offsetMm` — mark centre to feature, millimetres.
+- `offsetDirection` — inward normal of a named edge, outward normal, or a bearing in the frame (radians from +X).
 
-The **solved feature** is what polygons and beds use. The **mark** is what photos click and what a tape between two rolls measures. A tape along a wall between two arrises is a feature-to-feature distance; the UI must say which.
+The solved feature is what polygons and beds use. The mark is what a photo clicks and what a tape between two rolls measures. The UI says which.
 
-Today `offsetMm` is a scalar and Layer A shoves the same point’s `y`. That cannot represent “roll is 40 mm in front of the brick”. This proposal splits mark and feature before anyone trusts a corner.
+A laser spot on the **front** of a toilet roll is about **50 mm** in front of the mark centre. The instrument’s reference (often its rear edge) is not the pole axis. Both are known offsets, or the shot is taken to a flat target. Leaving them inside a 2 mm σ will bias the point by centimetres.
+
+Today `offsetMm` is a scalar and Layer A shifts that same point’s `y`. That is not an arris.
 
 ## 3. Survey method
 
-Distances first, angles second. Same instruments as the app already assumes: tape or laser, two 4.000 m rods, phone on a plumbed pole, clicks on printed marks.
+Distances first, angles second. Tape or laser, two 4.000 m rods, phone on a pole, clicks on printed marks.
 
 ### 3.1 What fixes a new point
 
-| Observation | Fixes the point? |
+| Observation | Result |
 |---|---|
-| One distance from a known point | No. The point lies on a circle. |
-| Two distances from two known points | Yes, up to the side choice (trilateration), provided the intersection angle is not tiny. |
-| One photo, two known marks | The **camera** lies on an arc. It does not fix a third, unknown mark. |
-| One photo, three known marks, level camera | The **camera** pose `(x, y, yaw)` is determined, except on the danger circle (below). |
-| Bearings to an unknown mark from **two** known camera stations | Yes: ray intersection, with a poor-geometry check. |
-| One bearing and one distance | Yes, up to a noted ambiguity if the distance circle cuts the ray twice. |
-| Wall chain of taped edges and no angles | No. Each new corner swings on a circle. A default 90° turn is an assumption, not a measurement. |
+| One distance from a known point | Circle. Not a point. |
+| Two distances from two known points | A point, up to the mirror across that pair. **Redundancy 0** — fixed but unchecked. |
+| Those two distances plus one more (third tape, diagonal, or a ray) | A checked point. This is the minimum for a structure corner or a plantable point. |
+| One photo, two known marks | Camera lies on an **arc through A and B**. Does not fix a third mark. |
+| Those two marks **plus one tape** from the pole to A, B, or the midpoint | Camera pose `(x, y, ψ)` fixed. Still redundancy 0 until something else sees it. |
+| One photo, three known marks | Pose determined, except near the danger circle. Redundancy 0. |
+| Four or more known marks, or a pose plus an extra distance | Checked station. |
+| Bearings to an unknown mark from two known stations | Ray intersection. Weak when the rays are shallow. Inherits the stations’ covariance. |
+| One bearing and one distance | A point, unless the circle cuts the ray twice. |
+| Wall lengths only, no angles or ties | Not rigid. Each new corner swings. A 90° turn is not a measurement. |
 
-**House corners** you cannot stand on are marks in the photo or ends of a tape. Preferred fixes, in order: a second tape from a known point; or two camera stations that both see the mark and enough control to be solved; or one solved station plus a distance. A single frame that contains the baseline and the corner **records** the rays. It does **not** by itself output the corner’s `x,y`.
+**House corners** you cannot stand on are clicked marks or tape ends. A frame that contains the baseline and the corner **records rays**. It does not, by itself, write the corner’s `x,y`.
 
-**Leapfrog.** Rod A (known length 4.000 m, σ 5 mm) is a short baseline. Photographing rod A and rod B in one frame, with three solved marks or a trilateration, transfers the frame to the far side. Picking A up is legal only after that joint observation exists (the app already gates **Rods moved** on this). Rod B then becomes ordinary control in the same frame.
+**Leapfrog.** Rod A (4.000 m, a few millimetres) is a short baseline. A and B in one frame, with enough control to solve, transfers the frame. **Rods moved** stays gated on that joint photo. Collinear rod marks A1, A0, A2 are allowed: their danger locus is the line itself, not a circle. They are weak (about 1.0 m at 95% at 9 m with 0.1° rays), so the ellipse still has to pass.
 
-**Yaw-only extra photos** are the same station: one `(x, y)`, several `yaw` values. They add rays. They are not new stations.
+**Yaw-only extras** share one `(x, y)` and add rays. They are not new stations.
 
-### 3.2 Camera model (level pole)
+### 3.2 Camera model
 
-Assume the pole is plumbed and the phone is roughly level, so the plan view is a pinhole:
+Unknowns per photo: `Cx`, `Cy`, yaw `ψ`. Focal length is **not** a per-photo unknown (section 3.5).
 
-- Unknowns per photo: `Cx`, `Cy`, yaw `ψ`.
-- Click `(px, py)` → horizontal bearing in the camera frame  
-  `β = atan2(px − cx, fx)` with `cx = width/2`.
-- `py` is ignored for the 2D plan (it would matter for height, which we are not solving).
-- Predicted bearing of a known point `P`: `atan2(Py − Cy, Px − Cx) − ψ`.
+**Sign.** Bearings are positive counter-clockwise, same as `atan2(y, x)`.
 
-`fx` is **not** `0.9 × width` as a fact. Treat `fx` as a per-photo nuisance with a wide prior, or calibrate it in the same frame from a rod of known length that subtends a large angle (15–40°). A 10% `fx` error scales the subtended angle and, on a short baseline seen at 20°, moves the station by on the order of a metre (section 5).
+Image x grows to the right. On an upright phone, image-right is clockwise in plan, so the click bearing is
 
-### 3.3 Two known points do not locate the camera
+`β = atan2(cx − px, fx)`
 
-Let the baseline subtend an angle `θ` at the camera. The inscribed-angle theorem puts the camera on a **circular arc** through nothing else: every point on that arc sees segment AB at angle `θ`. There are two arcs (two sides). Yaw is then fixed **once** a point on the arc is chosen, because absolute bearings are absorbed by `ψ`. So two clicks give **one** constraint on position (which arc-point family) plus yaw, and one degree of freedom remains.
+with `cx = width / 2`. Predicted bearing of a world point:
 
-The current helper `stationFromBaselineSighting` uses
+`β_pred = wrap( atan2(Py − Cy, Px − Cx) − ψ )`
 
-```
-d = (L / 2) / tan(θ / 2)
-```
+The 0.7.25 formula `atan2(px − cx, fx)` has the opposite sign. Camera at the origin, facing +X, a point at `(10, 1)` has world azimuth `+5.7°` and appears **left** of centre, so the old formula returns a negative click and the solve walks to the mirror station. Use one of these fixes, not both: the click formula above, or keep the old click and set the prediction to `ψ − azimuth`.
 
-and steps that distance along the perpendicular bisector. That is the unique point on the arc only when the camera is aimed so the baseline is symmetric about the optical axis (`β_A ≈ −β_B`). It is a **centred-baseline shortcut**, not a resection. The code path that reads which click is left of the other does not change the side.
+When the solver exists, that `(10, 1)` case is the sign check. It is not implemented in this change.
 
-**Proposal:** if only two marks are clicked, leave the station unset and say so. Offer the shortcut only when the user has centred the baseline **and** `|β_A + β_B|` is small (advisor to set the tolerance; a starting suggestion is 2°). Label the result approximate.
+**Side.** With signed bearings and an upright rear camera, resection has no mirror ambiguity. The 0.7.25 path that reads which click is on the left and then ignores it is the bug. The garden sign is only for tapes (section 1).
 
-### 3.4 Three-point resection
+**Tilt.** `py` is part of the ray. `atan(u / fx)` is the horizontal angle only when pitch and roll are both zero. A phone on a 1 m pole pitches down to see ground marks. At `fx = 900` px on a 1200 px frame the horizontal error versus a levelled ray is:
 
-Three known, non-collinear marks give three bearing equations in `(Cx, Cy, ψ)`. Solve by Gauss–Newton from a trilateration or arc initial guess, or by the standard 2D resection construction. Reject or warn when the camera lies near the **danger circle** (the circle through the three marks): the angles stay almost right while the position slides. Also warn when any subtended angle between control is under **10°** (section 5).
+| Pitch, roll | Click `(u, v)` | Error |
+|---|---|---|
+| 15°, 0° | `(400, 200)` | +0.49° |
+| 15°, 0° | `(400, −200)` | **−2.11°** |
+| 0°, 2° | `(0, 300)` | +0.67° |
+| 10°, 2° | `(400, 250)` | +1.20° |
 
-An unknown fourth click is a **ray** from that pose. A second solved station that sees the same mark intersects the ray. Two rays that are almost parallel stay unfixed.
+That is **5–20×** a 0.1° pixel σ.
+
+At the shutter, store the gravity vector (`DeviceMotion.accelerationIncludingGravity`; iOS asks permission). Build the camera ray `((px − cx) / fx, (py − cy) / fy, 1)` with y downward, rotate it to level, and take the horizontal angle with the sign above.
+
+If gravity is missing, require a level bubble and **widen** the bearing σ to the tilt still allowed. An unlevelled phone is not a 0.1° instrument, and it should fail the 200 mm station gate.
+
+**Bearing σ** is per ray. Do not inflate it because a rod subtends less than 15°. Weak geometry belongs in the covariance.
+
+`σ_β² = (σ_px / fx)² + σ_centring² + σ_plumb²`
+
+A 1° pole tilt on a 1 m pole is 17 mm at the ground, which is 0.1° at 10 m range. Pixel σ, mark centring, and that eccentricity are the three terms.
+
+### 3.3 Two marks: an arc, then a tape
+
+Angle `θ` subtended by segment AB puts the camera on a circular arc **through A and B**, radius
+
+`R = L / (2 sin θ)`.
+
+For `L = 7` m and `θ = 20°`, `R = 10.23` m. Yaw is fixed once a point on the arc is chosen, because `ψ` absorbs the absolute orientation. Two clicks and three unknowns `(Cx, Cy, ψ)` leave one degree of freedom.
+
+`|β_A + β_B| ≈ 0` only says the optical axis bisects angle ACB. The user can do that from **any** point on the arc by aiming. On the 20° arc the sum was 0.000° at three tested stations, and the isosceles formula then sat **0 m, 3.55 m, and 7.00 m** off the truth. The image cannot tell you the pole is on the perpendicular bisector.
+
+**The centred-baseline shortcut is dropped.** No symmetry tolerance.
+
+With two marks, either:
+
+- tape from the pole to A, B, or the midpoint (two bearings + one distance), or
+- click a third known mark.
+
+Otherwise the station stays unset. The isosceles formula in `stationFromBaselineSighting` remains a description of the current code, not of this solve.
+
+### 3.4 Three or more marks
+
+Three known marks give three bearing equations in `(Cx, Cy, ψ)`. Start from a closed form (Pierlot & Van Droogenbroeck, ToTal, 2014, or Tienstra, or Collins). That construction’s determinant, or `|ρ − R| / R` with `ρ` the distance from the circumcentre, measures the danger circle. Refine with Levenberg–Marquardt, wrapped residuals, and analytic Jacobians. Stop when the step is under **0.1 mm**.
+
+Warn when `|ρ − R| / R < 0.2`. Accept or reject on the **95% ellipse**, not on the angle alone. With 0.1° rays and stations about 9–14 m out, that 95% semi-major was about 180 mm with the rod in front of the house (depth), 0.75 m with every mark to one side, 1.47 m at 1.2 R from the danger circle, and **4.7 m** at 1.05 R.
+
+A fourth click on an unknown mark is a **ray**. A second solved station intersects it. Shallow crossings stay weak: two perfect stations, 0.1° rays, mark 10 m away, 95% semi-major about 43 mm at 90°, 117 mm at 30°, **231 mm at 15°**, 693 mm at 5°. For a 100 mm plantable point, treat crossings under about **25–30°** as an early fail. The ellipse is the real gate.
+
+Two-station points **inherit station error**. A station in the 200 mm class does not produce a 100 mm point unless a tape also ties that station.
+
+### 3.5 Focal length
+
+`fx` is one constant **per phone and per lens**, stored as **`fx / width`** so a resized image does not change the angle. Same for `fy / height`, the principal point, and radial `k1`.
+
+For the iPhone 1× camera (24–26 mm equivalent, 4:3), `fx / width ≈ 0.69–0.75`. The code’s `0.9 × width` is about 20–30% high. Read EXIF `FocalLengthIn35mmFormat` when it is present, as a prior, not as the calibration. Lock zoom at **1×**. Do not use the 0.5× ultra-wide.
+
+Three marks cannot estimate `fx` (four unknowns). Four marks have redundancy 0 and `σ_fx ≈ 5.9%` at 0.1° bearings. Calibrate once: a 4.000 m rod across most of the frame, phone on the bisector at a taped 5 m, repeated. Two-pixel clicks reach about **0.4%**, so **1% is a fair requirement**.
+
+A 10% error in `fx` is not a 10% error in `θ`. On the symmetric 7 m / 20° case, `θ` moves to 18.21° or 22.17°, and the isosceles range moves by **±1.98 m**. In resection layouts the same 10% moved stations by about 0.7–1.8 m, and by up to 4 m near the danger circle. At 1% / 3% / 5% one layout moved 158 / 466 / 766 mm. **A 200 mm station needs `fx` to about 1%**, gravity-levelled rays, and depth or four or more marks. With four marks (baseline ends plus both rod ends) and a good `fx`, the 95% semi-major in that layout was **58 mm**.
 
 ## 4. Solver
 
-One weighted non-linear least squares over the garden, not two sequential recipes that overwrite each other.
+One weighted non-linear least squares. Not Layer A’s turn, then Layer B’s overwrite.
 
-**Unknowns**
+**Unknowns.** Feature `(x, y)` where the normal matrix has rank for them. Per solved photo: `Cx, Cy, ψ`. Mark = feature + offset vector. `fx` is the calibrated constant, not a free parameter.
 
-- Feature `(x, y)` for every point that has at least two independent constraints. Others stay without coordinates.
-- Per photo with enough control: `Cx, Cy, ψ`, and `fx` if not calibrated.
-- Mark position = feature + offset vector (section 2), so the offset is not a second free point unless the user left the direction unknown.
+**Determinability** is the rank and condition of the global normal matrix. “Two observations pointing at a point” is not enough if those points are themselves free. Two tapes onto undetermined points fix nothing.
 
-**Observations and weights** (variance `σ²`; start from the constants already in `model.ts`)
+**Do not** add a 90° turn, the 3 m fallback pose, or the provisional spiral (`estimatePhotoContribution`). That spiral is drawing only.
 
-| Observation | Residual | `σ` |
-|---|---|---|
-| Tape distance | `‖Pi − Pj‖ − L` | 0.020 m |
-| Laser distance | same | 0.002 m |
-| Rod length | same | 0.005 m |
-| Photo bearing | wrapped angle, predicted minus `β` | `atan(2 px / fx)` as a start (~0.1° if `fx` is honest); loosen when the rod subtends under 15° |
-| Datum pin | A and B held as the gauge (section 1), not as fake zero-residuals | — |
+### 4.1 Distance σ
 
-**Do not** add a term that pulls a corner onto a 90° turn. **Do not** add the 3 m fallback pose. **Do not** average a solved station with the provisional spiral used for drawing (`estimatePhotoContribution`); that spiral is display-only and must not enter the normal equations.
+`σ² = a² + (b L)²`.
 
-**Initialisation**
-
-1. Pin the datum baseline.
-2. Intersect circles for every point with two distances.
-3. Resect photos that see three of those points.
-4. Intersect rays for marks seen from two stations.
-5. Leave the rest undefined.
-
-**House polygon.** Vertices are point ids in order. The closing condition is a distance observation on the last edge if it was taped, plus a **misclosure** report: propagate the chain (or read it off the least squares) and measure how far the recomputed start misses the pinned start. Warn if that miss is above **50 mm**. The distance between corner 1 and corner N is the closing **wall**, not the misclosure. (The 0.7.25 `closeHouse` gap is that wall-length, compared with 50 mm. This proposal replaces that definition.)
-
-**Active baseline and trust.** During capture, the chosen baseline may be held fixed so the UI can show a tentative point. The stored Adjust result is always the global weighted solve. Trust changes the datum pin and the relative weight of that distance; it does not freeze early coordinates.
-
-**Outputs to keep for the coach** (plain language, millimetres): each distance residual, each point’s RMS, misclosure, and a count of points left unfixed with the missing observation named (“second distance” or “second station”).
-
-## 5. Error handling and accuracy
-
-### Sensitivity (for the advisor to check)
-
-Baseline length `L`, subtended angle `θ`, isosceles range `d = (L/2) / tan(θ/2)`:
-
-`|dd/dθ| = L / (4 sin²(θ/2))` with `θ` in radians.
-
-| `L` | `θ` | Range `d` | About 1° on `θ` | About 10% on `θ` (fx-scale error) |
-|---|---|---|---|---|
-| 7 m | 20° | ~20 m | ~1.0 m | ~2 m |
-| 7 m | 40° | ~10 m | ~0.26 m | ~1 m |
-| 4 m rod | 25° | ~9 m | ~0.4 m | ~1 m |
-
-Clicks of 2 px are small beside a bad `fx` or a baseline that only fills a thin angle. **Practical rule:** do not accept a photo station whose control subtends under 10°, and do not quote 20 mm from a photo.
-
-Trilateration with two tapes, `σ = 20 mm`, intersection angle `φ`: the cross-track error is on the order of `σ√2 / sin φ`. Near 90° that is ~30 mm. Near 30° it is ~60 mm. Below 20°, refuse or mark weak.
-
-### Targets the prototype must meet
-
-These are pass/fail for synthetic recovery, not claims about the current code.
-
-| Quantity | Target |
+| Instrument | Suggested figures |
 |---|---|
-| Datum length vs tape/laser | within that observation’s `σ` |
-| Trilaterated point, `φ` 40–140° | within **50 mm** of truth |
-| Photo station, 3 marks, subtended 15–40°, `fx` within 10% | within **200 mm** |
-| Point a bed would use (distances, or two stations) | **100 mm** RMS vs a withheld tape |
-| Traverse misclosure | warn above **50 mm** |
-| Two-mark photo, danger circle, `θ < 10°`, single taped corner | **no coordinate** |
+| Tape | `a ≈ 3–5` mm (read, hook, centring), `b ≈ 0.5–1` mm/m. A flat 20 mm is the conservative stand-in if this split is not used. |
+| Laser | About **5 mm** all in (about 2 mm instrument and 2–3 mm centring at each end), not the 2 mm constant in `model.ts`. Plus the ~50 mm face offset in section 2 when it applies. |
+| Rod | 2–5 mm. |
 
-### Failure behaviour
+The frame is horizontal. A slope distance `s` with height difference `Δh` enters as `h = √(s² − Δh²)`. Over 10 m, a 0.5 m drop is 12.5 mm too long and a 1.0 m drop is **50 mm**, always long. Record `Δh`, use a tilt-sensing laser, or hold the tape level.
 
-- Underdetermined → coordinates omitted, coach says which extra measurement would fix it.
-- Normalised residual `|r|/σ > 3` → flag that observation; do not silently drag the datum to fit it.
-- Two intersection sides → garden sign, else ask.
-- Missing `fx` calibration and no large known rod in frame → photo down-weighted and the station labelled weak even if the iteration converges.
-- Adjust must not report `geometryOk` from a construction that ignored angle-less corners.
+Sag is about 1.5 mm for 10 m at 20 N, and about **48 mm** for 20 m at 10 N. Tension the tape. Slack is not in `σ`.
+
+### 4.2 Redundancy and blunders
+
+A point fixed by exactly two distances, or a three-mark resection, has **redundancy 0**. Residuals are identically zero. A test on `|v| / σ` never fires, and a 1 m blunder is absorbed.
+
+- Global variance factor `σ̂₀² = vᵀ P v / (n − u)`, tested against `χ²` with `n − u` degrees of freedom.
+- Standardised residual `w_i = v_i / (σ_i √r_i)`, where `r_i` is the redundancy number of that observation. Drop **one** blunder at a time and re-solve.
+- Marginal detectable blunder `MDB_i ≈ 4.13 σ_i / √r_i` (α = 0.1%, β = 80%).
+- `r_i ≈ 0`: label the point **fixed but unchecked**. It may be drawn. It is not a structure corner you trust and not a plantable point.
+- **Field rule:** every structure corner and every plantable point needs at least one surplus observation (a third tape, a diagonal, a second station, or a withheld check).
+
+### 4.3 Initialisation
+
+1. Apply the minimal datum (section 1).
+2. Intersect circles where two distances exist. If noise keeps them apart, take the closest point on the line of centres and mark it weak.
+3. Resect photos from the closed form in section 3.4, then LM.
+4. Intersect rays for marks seen from two stations.
+5. Leave everything the normal matrix cannot carry without coordinates.
+
+**House polygon.** Vertices are point ids in order. The distance between corner 1 and corner N is a **wall**, not a misclosure. The 0.7.25 close check compares that wall with 50 mm. This proposal does not.
+
+A ring of `n` wall lengths and no angles or diagonals is not rigid. It has `n − 3` internal degrees of freedom. There is no chain to propagate, so there is **no misclosure to compute**.
+
+What produces a check:
+
+- Enough extra distances to pass rigidity and then one more. A 6-corner house needs `2n − 3 = 9` distances to be rigid (6 walls + 3 diagonals or ties) and a **10th** before any residual can speak.
+- Chainage and offset from the datum baseline.
+- Photo rays from stations that are themselves solved. Surplus rays are the check.
+
+In a simultaneous adjustment the polygon meets by construction. Report the check observations’ residuals and `w`-tests, and `σ̂₀`.
+
+If a traverse-style misclosure is shown because angles exist, its tolerance comes from propagation: `T = 2.45 σ_m`. For 6 walls at σ = 20 mm, `σ_m ≈ σ √6 ≈ 49` mm and **T ≈ 120 mm** (95%). A flat 50 mm would warn on about **31%** of houses that were measured correctly at that σ. With a careful tape (`a = 3` mm, `b = 1` mm/m on 3.5 m walls) `σ_m ≈ 11` mm and T ≈ 28 mm, so 50 mm is then a loose warn. The number on screen is the propagated one for the σ actually used. The default, while tape σ is 20 mm, is about **120 mm** for six walls.
+
+An optional “this corner is square” may be a soft angle observation at about **0.5°** (about 30 mm at the end of a 3.5 m wall). It is **off unless the user turns it on**, and the coach says it is an assumption.
+
+**Coach outputs:** each distance residual in mm, `w` for anything that fails, the 95% semi-major of each accepted point, which points are unchecked, which are unset and what single measurement would fix them, and `σ̂₀` in a sentence.
+
+## 5. Targets
+
+State every target as a **95% error-ellipse semi-major** (`√χ²_{2, 0.95} ≈ 2.45` times the 1σ semi-major). A single noisy trial “within X mm” fails at random. Synthetic tests check two things: about 95% of Monte Carlo errors fall inside the predicted ellipse (NEES ≈ 2), and accepted points meet the class below.
+
+Isosceles sensitivity, confirmed, kept only so the old formula’s danger is visible. It is not a solver:
+
+`d = (L / 2) / tan(θ / 2)`, `|dd / dθ| = L / (4 sin²(θ / 2))`.
+
+| `L`, `θ` | `d` | m per 1° | `fx` ±10% (exact) |
+|---|---|---|---|
+| 7 m, 20° | 19.85 m | 1.013 | **±1.98 m** |
+| 7 m, 40° | 9.62 m | 0.261 | ±0.96 m |
+| 4 m, 25° | 9.02 m | 0.373 | ±0.90 m |
+
+Trilateration at σ = 20 mm. `σ √2 / sin φ` is the **2D DRMS** (28 mm at 90°, 57 mm at 30°), not the cross-track error. The 1σ semi-axes are `σ / (√2 sin(φ / 2))` and `σ / (√2 cos(φ / 2))`: **20 / 20 mm** at 90°, **41 / 15 mm** at 40°. The 95% semi-major at 40° is **101 mm**, and about **25%** of such points land more than 50 mm from truth (about 4% at 90°). A 50 mm class needs a tighter tape (σ ≈ 5 mm gives a 95% semi-major of about 25 mm at 40°; `3 mm + 1 mm/m` at 8 m gives about 43 mm).
+
+Early warnings, with the ellipse still deciding:
+
+| Case | Early warning |
+|---|---|
+| Trilateration | `φ` under 20° (95% semi-major about 199 mm at σ = 20 mm) or near 180° |
+| Photo, `θ → 0` | Reject. Range error blows up. |
+| Danger circle | Warn below 0.2 in `\|ρ − R\| / R`; reject when the ellipse exceeds the class |
+| Ray crossing | Under about 25–30° will not make the 100 mm class |
+| Collinear rod | Allowed, usually weak; ellipse decides |
+
+| Class | Pass |
+|---|---|
+| Datum tape | Its residual and `w`-test. Not “equal to L by construction”. |
+| Trilaterated point, checked | 95% semi-major within the class you asked for. At σ = 20 mm that is about **100 mm** near 40° and about **50 mm** near 90°, not a flat 50 mm everywhere. |
+| Photo station | 95% semi-major **≤ 200 mm**, and only with `fx` calibrated to **≤ 1%**, levelled rays, and depth or 4+ marks. Otherwise unset or labelled weak. |
+| Plantable point | 95% semi-major **≤ 100 mm**, redundancy ≥ 1, and a withheld check with `\|miss\| ≤ 2.45 √(σ_pred² + σ_check²)`. |
+| Six-wall traverse misclosure, σ = 20 mm | Warn above about **120 mm**. No warning at all if the only data are the wall lengths. |
+| Two marks and no tape; rank failure; ellipse over the class | **No coordinate** you would plant from. |
 
 ## 6. Layer data model
 
-Layers do not have their own frames. They classify **features** that reference the same points.
+Layers do not have their own frames. They classify features that share these points.
 
 ```
 GardenDocument (one frame)
   control
-    baselines          distance + σ + trust + which two marks
-    lines              tape / laser / rod
-    photos             clicks, pose (after adjust), fx
+    baselines          distance + σ + trust (datum choice only)
+    lines              tape / laser / rod, optional Δh
+    photos             clicks, pose after adjust, fx/width, gravity at shutter
     setups             time box, rods alive, A+B seen together
-  features  (today: objects / Items)
+  features             (today: objects / Items)
     layerId            boundary | structure | walkway | bed | survey
     geometryType       point | line | circle | square | triangle | irregular_polygon
-    measuredPointIds   observations attached to this feature
-    selectedPointIds   subset the fit is allowed to use
-    solved*            derived: circle, rectangle, or ring — recomputed, never taped
+    measuredPointIds / selectedPointIds
+    solved*            derived fit, recomputed, never an observation
   points
-    id, kind, feature x,y or unset
-    offsetMm + offsetDirection
-    layerId, featureId
+    feature x,y or unset; offsetMm + offsetDirection
+    label: unset | unchecked | checked
 ```
 
 | Layer id | Features | Point kinds already in the file |
 |---|---|---|
-| `survey` | Datum, rods, camera stations | `ROD`, `BL`, station poses on photos |
-| `structure` | House, sheds | `HSE`. The special polygon `house` remains until a migration copies it onto a feature |
-| `boundary` | Fences, railings | `FNC` (new layer id; points already exist) |
+| `survey` | Datum, rods, stations | `ROD`, `BL` |
+| `structure` | House, sheds | `HSE`. Special polygon `house` stays until a migration |
+| `boundary` | Fences, railings | `FNC` |
 | `walkway` | Paths | `OCC` today; keep the id so current JSON loads |
 | `bed` | Beds that will hold plants | `BED` (kind exists; + Point currently writes `OCC`) |
 
-**Relationships**
+- Shared corners are shared point ids.
+- A circle is a **geometric** (orthogonal-distance) fit, started from Kåsa or Taubin. Kåsa alone pulls the radius small on a short arc. Report `σ_R`. Under about a 90° arc the radius is poorly determined.
+- A square is a rotated rectangle, or it is labelled axis-aligned. The current fit forces the axes.
+- Plants, later, store a position in this frame. They are valid only on bed vertices that are **checked** points.
+- This becomes document `version: 2` when offsets, gravity-on-photo, unset-versus-zero, and the new layer ids are stored. v1 loads with offset not applied and no invented `boundary` / `bed` rows.
 
-- A bed vertex may be an existing path or boundary point (same id).
-- A circle fit (Kåsa or a geometric fit) reads selected points and writes `solvedCircle` plus residual mm. It does not move the datum.
-- A “square” must be a **rotated** rectangle (centre, side, yaw) or be labelled axis-aligned. The current fit forces a square onto the coordinate axes; that is a drawing aid, not a shape.
-- Plant instances (later, not in this prototype) store a position in this frame and a spacing radius. They do not carry a private coordinate system. They are valid only when their bed’s vertices are fixed points.
-- `plants` as a layer id can remain as an alias for future plant marks. Bed **outlines** belong on `bed`, not on a second copy of the polygon.
-
-**Versioning.** This is a `version: 2` document once `offsetDirection`, unset coordinates (distinguished from `0,0`), and the new layer ids are real. v1 files load by: treating a missing direction as “offset not applied”, and not inventing `boundary` / `bed` rows until the user creates them.
-
-## 7. Delta from the code an advisor will see
+## 7. Delta from 0.7.25
 
 | Topic | 0.7.25 code | This proposal |
 |---|---|---|
-| Datum | Active baseline written onto the x-axis inside Layer A | Highest-trust baseline is the gauge; others are observations |
-| Next house corner | Left turn of 90° by the taped length | Unfixed until a second constraint exists |
-| Close gap | Distance between first and last corner vs 50 mm | Misclosure of the same point vs 50 mm |
-| Two-mark photo | Isosceles station on a chosen side | Arc only; shortcut only if centred and labelled |
-| Three-mark photo | Rod heuristic or a 3 m push | Bearing least squares; danger circle rejected |
-| Third click | Stored; no world point (this part already matches) | Ray, intersected only with a second station or a distance |
-| `fx` | `0.9 × width` | Calibrate or carry a wide prior and widen `σ` |
+| Datum | Baseline written onto the x-axis; B at `(L, 0)` | A and `B_y` fixed; tape is an observation |
+| Next house corner | Left turn of 90° by the taped length | Unfixed until the normal matrix carries it |
+| Close gap | Distance between first and last corner vs 50 mm | No misclosure on walls alone; ~120 mm when a 6-wall check exists at σ = 20 mm |
+| Two-mark photo | Isosceles station; click order ignored | Arc only, until one tape or a third mark |
+| Bearing | `atan2(px − cx, fx)`; `py` ignored; `fx = 0.9 × width` | Opposite sign, gravity-levelled ray, `fx/width` 0.69–0.75 calibrated to ~1% |
+| Three-mark photo | Rod heuristic or a 3 m push | Closed-form start, then LM; ellipse gate |
+| Laser | σ = 2 mm | ~5 mm, plus ~50 mm face offset when it applies |
 | Extra photos | Centimetre spiral mixed into the average | Same station; rays only |
-| Layers | `walkway`, `structure`, `plants`, `survey` plus a special house polygon | Add `boundary` and `bed`; one frame |
+| Blunders | `\|r\| / σ`, which is blind at redundancy 0 | `σ̂₀`, `w_i`, MDB, “unchecked” label |
 
-## 8. Questions for the maths advisor
+## 8. What the advisor closed
 
-1. Is the gauge (pin A, pin B to `(L,0)`, explicit reflection sign) acceptable, or should the datum baseline be a weighted distance with a soft pin so a bad tape can move?
-2. Tolerance on `|β_A + β_B|` before the centred-baseline shortcut is allowed, and whether that shortcut should exist at all.
-3. Confirm the range derivative in section 5 and the 10° / 200 mm photo gates.
-4. Preferred 2D resection numerical method and the danger-circle test (distance to the circle through the three marks, as a fraction of baseline length).
-5. Whether `fx` should be calibrated per photo from a known rod or held as a global per-phone constant after one calibration.
-6. Geometric circle fit vs the current algebraic (Kåsa) fit for a path, given points that only cover an arc.
-7. Anything here that would force a native ARKit pose instead of tape + bearings. The recommendation in the roadmap is that it should not.
+1. **Datum.** Minimal constraint. Not a soft pin, and not `(L, 0)`.
+2. **Symmetry shortcut.** Dropped. Arc plus one tape, or a third mark.
+3. **Sensitivity table.** Correct, with the ±1.98 m figure for 10% `fx` on 7 m at 20°. The 200 mm station target does not survive a 10% `fx`.
+4. **Resection.** Closed form, then LM. Danger test `|ρ − R| / R`, decision on the ellipse.
+5. **`fx`.** One constant per phone and 1× lens. Not per photo.
+6. **Circle.** Geometric fit. Report `σ_R`. Short arcs do not determine a radius.
+7. **ARKit.** Not required if bearings are levelled and calibrated and the redundancy rules above are kept.
