@@ -6,11 +6,16 @@ import type {
   GardenObject,
   GeometryType,
   LayerDef,
+  PhotoClick,
   Point,
   PointKind,
 } from './model';
 import { fitCircle, fitRectangle, fitTriangleOutline } from './geometryFit';
 import { placeholderThumb } from './model';
+import {
+  photoHasBaselineEnds,
+  stationFromBaselineSighting,
+} from './photoGeometry';
 
 export type { GeometryType, LayerDef, GardenObject };
 
@@ -225,7 +230,12 @@ export function pickActiveBaselineEnd(doc: GardenDocument, pointId: string): Gar
  */
 export function addPhotoMeasurement(
   doc: GardenDocument,
-  opts: { label?: string; thumbnailDataUrl?: string } = {},
+  opts: {
+    label?: string;
+    thumbnailDataUrl?: string;
+    width?: number;
+    height?: number;
+  } = {},
 ): { doc: GardenDocument; point: Point; reason?: string } {
   let next = ensureDefaultLayers(doc);
   const layerId = next.session.stickyLayerId ?? DEFAULT_LAYER_ID;
@@ -302,13 +312,14 @@ export function addPhotoMeasurement(
     id: photoId,
     setupId,
     addPointId: id,
-    width: 1200,
-    height: 900,
-    clicks: [],
+    width: opts.width && opts.width > 0 ? opts.width : 1200,
+    height: opts.height && opts.height > 0 ? opts.height : 900,
+    clicks: [] as PhotoClick[],
+    sightedBaselineId: bl?.id,
     estimate: { x: coords.x, y: coords.y },
     thumbnailDataUrl: hasRealThumb ? opts.thumbnailDataUrl! : placeholderThumb('#1a5f7a'),
     note: hasRealThumb
-      ? `Provisional ${id} off baseline ${bl ? `${bl.a}–${bl.b}` : '(ends)'} — tap marks later`
+      ? `Provisional ${id} off baseline ${bl ? `${bl.a}–${bl.b}` : '(ends)'} — mark A/B on photo`
       : `Provisional ${id} off baseline ${bl ? `${bl.a}–${bl.b}` : '(ends)'}`,
   };
 
@@ -440,7 +451,12 @@ export function deletePointMeasurement(
 export function appendPhotoToPoint(
   doc: GardenDocument,
   pointId: string,
-  opts: { thumbnailDataUrl: string; yawOnly?: boolean },
+  opts: {
+    thumbnailDataUrl: string;
+    yawOnly?: boolean;
+    width?: number;
+    height?: number;
+  },
 ): { doc: GardenDocument; reason?: string } {
   let next = ensureDefaultLayers(doc);
   const point = next.points.find((p) => p.id === pointId);
@@ -456,17 +472,21 @@ export function appendPhotoToPoint(
   const yawOnly = Boolean(opts.yawOnly);
   const priorIds = point.photoIds ?? [];
   const estimate = estimatePhotoContribution(point, priorIds.length);
+  const bl = preferredBaseline(next);
   const photo = {
     id: photoId,
     setupId,
     addPointId: pointId,
     yawOnly,
-    width: 1200,
-    height: 900,
-    clicks: [],
+    width: opts.width && opts.width > 0 ? opts.width : 1200,
+    height: opts.height && opts.height > 0 ? opts.height : 900,
+    clicks: [] as PhotoClick[],
+    sightedBaselineId: bl?.id ?? point.measuredWithBaselineId,
     estimate,
     thumbnailDataUrl: opts.thumbnailDataUrl,
-    note: yawOnly ? `+ Photo (yaw) for ${pointId}` : `Photo for ${pointId}`,
+    note: yawOnly
+      ? `+ Photo (yaw) for ${pointId} — mark A/B on photo`
+      : `Photo for ${pointId} — mark A/B on photo`,
   };
 
   const photoIds = [...priorIds, photoId];
@@ -491,6 +511,161 @@ export function appendPhotoToPoint(
     },
   };
   return { doc: next };
+}
+
+/**
+ * Persist mark clicks on a photo. When both baseline ends are confirmed, place the
+ * linked OCC point as the **camera station** (phone position). A third “target”
+ * click is stored but does not invent world coords (needs distance / 2nd sighting).
+ */
+export function applyPhotoMarks(
+  doc: GardenDocument,
+  photoId: string,
+  clicks: PhotoClick[],
+  opts: { sightedBaselineId?: string; side?: 1 | -1 } = {},
+): {
+  doc: GardenDocument;
+  reason?: string;
+  stationApplied?: boolean;
+  message: string;
+} {
+  let next = ensureDefaultLayers(doc);
+  const photo = next.photos.find((p) => p.id === photoId);
+  if (!photo) {
+    return { doc: next, reason: 'Photo not found.', message: 'Photo not found.' };
+  }
+
+  const bl =
+    next.baselines.find((b) => b.id === (opts.sightedBaselineId ?? photo.sightedBaselineId)) ??
+    preferredBaseline(next);
+  if (!bl) {
+    return {
+      doc: next,
+      reason: 'No baseline to assign marks to.',
+      message: 'Establish a baseline before marking ends on the photo.',
+    };
+  }
+
+  // Normalize role aliases A/B → real end ids; keep TARGET / other ids as-is.
+  const normalized = clicks.map((c) => {
+    const role = c.pointId.trim().toUpperCase();
+    if (role === 'A' || role === 'END-A' || role === 'BL-A') {
+      return { ...c, pointId: bl.a };
+    }
+    if (role === 'B' || role === 'END-B' || role === 'BL-B') {
+      return { ...c, pointId: bl.b };
+    }
+    return c;
+  });
+
+  // One click per mark id (last wins).
+  const byId = new Map<string, PhotoClick>();
+  for (const c of normalized) byId.set(c.pointId, c);
+  const nextClicks = [...byId.values()];
+
+  const hasTarget = nextClicks.some(
+    (c) => c.pointId !== bl.a && c.pointId !== bl.b,
+  );
+
+  let stationApplied = false;
+  let message = `Saved ${nextClicks.length} mark(s) on photo (baseline ${bl.a}–${bl.b}).`;
+  let pose: { x: number; y: number; yawRad: number } | undefined;
+  let estimate = photo.estimate;
+
+  const draftPhoto = { ...photo, clicks: nextClicks, sightedBaselineId: bl.id };
+  if (photoHasBaselineEnds(draftPhoto, bl.a, bl.b)) {
+    const side = opts.side ?? guessStationSide(next, bl);
+    const station = stationFromBaselineSighting(draftPhoto, next.points, bl.a, bl.b, side);
+    if (station) {
+      pose = station;
+      estimate = { x: station.x, y: station.y };
+      stationApplied = true;
+      message = `Station from baseline ${bl.a}–${bl.b} — point is the camera position.`;
+      if (hasTarget) {
+        message +=
+          ' Extra mark saved; a separate object point needs a second sighting or a tape distance.';
+      }
+    } else {
+      message =
+        'A and B marked, but could not solve station (check baseline ends have coordinates).';
+    }
+  } else {
+    message = `Saved marks — tap both baseline ends (${bl.a} and ${bl.b}) to place the camera station.`;
+    if (hasTarget) {
+      message +=
+        ' A third mark alone cannot place a far target from one photo.';
+    }
+  }
+
+  const pointId = photo.addPointId;
+  const updatedPhotos = next.photos.map((p) =>
+    p.id === photoId
+      ? {
+          ...p,
+          clicks: nextClicks,
+          sightedBaselineId: bl.id,
+          estimate,
+          pose,
+          note: stationApplied
+            ? `Station via ${bl.a}–${bl.b} sighting`
+            : (p.note ?? `Marks on ${photoId}`),
+        }
+      : p,
+  );
+
+  let updatedPoints = next.points;
+  if (pointId) {
+    updatedPoints = next.points.map((p) => {
+      if (p.id !== pointId) return p;
+      if (!stationApplied || !estimate) {
+        return { ...p, measuredWithBaselineId: bl.id };
+      }
+      const avg = averageEstimateFromPhotos(updatedPhotos, p.photoIds ?? [], p);
+      return {
+        ...p,
+        x: avg.x,
+        y: avg.y,
+        measuredWithBaselineId: bl.id,
+      };
+    });
+  }
+
+  next = {
+    ...next,
+    photos: updatedPhotos,
+    points: updatedPoints,
+    session: {
+      ...next.session,
+      selectedPhotoId: photoId,
+      currentBaselineId: bl.id,
+      lastAction: message,
+    },
+  };
+
+  return { doc: next, stationApplied, message };
+}
+
+/** Prefer the side already used by OCC points for this baseline / layer. */
+function guessStationSide(doc: GardenDocument, bl: Baseline): 1 | -1 {
+  const a = doc.points.find((p) => p.id === bl.a);
+  const b = doc.points.find((p) => p.id === bl.b);
+  if (a?.x == null || a.y == null || b?.x == null || b.y == null) return 1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  let pos = 0;
+  let neg = 0;
+  for (const p of doc.points) {
+    if (p.kind !== 'OCC' && p.kind !== 'BED' && p.kind !== 'TRK') continue;
+    if (p.x == null || p.y == null) continue;
+    const d = (p.x - a.x) * nx + (p.y - a.y) * ny;
+    if (d > 0.2) pos += 1;
+    else if (d < -0.2) neg += 1;
+  }
+  if (neg > pos) return -1;
+  return 1;
 }
 
 /** Remove one photo from a point; re-average remaining estimates onto the point. */

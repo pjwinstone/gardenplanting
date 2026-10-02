@@ -2,6 +2,8 @@
 
 import type { Photo, PhotoClick, Point } from './model';
 
+export type StationPose = { x: number; y: number; yawRad: number };
+
 export interface PixelRay {
   pointId: string;
   /** Angle from photo centre in radians (approx pinhole, fx ≈ width). */
@@ -83,6 +85,71 @@ export function poseDeterminacy(
     reason:
       'Underdetermined pose: need house or second rod or a third known mark in the frame. I will not invent coordinates.',
   };
+}
+
+/**
+ * Camera station from a confirmed sighting of both baseline ends in one photo.
+ * Uses baseline world length + subtended bearing; places the phone on `side`
+ * of A→B (default left). Does **not** invent a separate far target from one shot.
+ */
+export function stationFromBaselineSighting(
+  photo: Photo,
+  known: Point[],
+  endAId: string,
+  endBId: string,
+  side: 1 | -1 = 1,
+): StationPose | null {
+  const clickA = clickByPoint(photo, endAId);
+  const clickB = clickByPoint(photo, endBId);
+  const pa = known.find((p) => p.id === endAId);
+  const pb = known.find((p) => p.id === endBId);
+  if (!clickA || !clickB || pa?.x == null || pa.y == null || pb?.x == null || pb.y == null) {
+    return null;
+  }
+
+  const dx = pb.x - pa.x;
+  const dy = pb.y - pa.y;
+  const blLen = Math.hypot(dx, dy);
+  if (!(blLen > 1e-4)) return null;
+
+  const ba = clickBearing(photo, clickA);
+  const bb = clickBearing(photo, clickB);
+  let angle = Math.abs(ba - bb);
+  if (angle > Math.PI) angle = 2 * Math.PI - angle;
+  const half = angle / 2;
+  // Distance camera → baseline midpoint from subtended angle.
+  const dist = half > 1e-4 ? blLen / 2 / Math.tan(half) : Math.max(blLen * 1.2, 3);
+
+  const midX = (pa.x + pb.x) / 2;
+  const midY = (pa.y + pb.y) / 2;
+  const ux = dx / blLen;
+  const uy = dy / blLen;
+  const nx = -uy;
+  const ny = ux;
+
+  // Prefer image left/right of A vs B to pick which world side the camera is on.
+  let useSide: 1 | -1 = side;
+  if (clickA.px !== clickB.px) {
+    // If A is left of B in the image, camera is roughly on the side where walking A→B
+    // has the scene "up" — keep caller side unless clicks imply a flip later.
+    void clickA;
+    void clickB;
+    useSide = side;
+  }
+
+  const x = midX + nx * useSide * dist;
+  const y = midY + ny * useSide * dist;
+  const yawRad = Math.atan2(midY - y, midX - x);
+  return { x, y, yawRad };
+}
+
+/** True when both named baseline ends are clicked on the photo. */
+export function photoHasBaselineEnds(
+  photo: Photo,
+  endAId: string,
+  endBId: string,
+): boolean {
+  return Boolean(clickByPoint(photo, endAId) && clickByPoint(photo, endBId));
 }
 
 /** Simple 2D resection from known points + bearings (distance-primary friendly). */

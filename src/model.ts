@@ -153,6 +153,8 @@ export interface Photo {
   width: number;
   height: number;
   clicks: PhotoClick[];
+  /** Baseline whose ends were marked in this frame (sighting). */
+  sightedBaselineId?: string;
   exifDateTimeOriginal?: string;
   note?: string;
   /** Estimated camera pose after adjust (metres, radians). */

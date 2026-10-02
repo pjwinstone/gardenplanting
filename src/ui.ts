@@ -69,6 +69,7 @@ import {
 } from './workflows';
 import {
   appendPhotoToPoint,
+  applyPhotoMarks,
   baselinesByTrust,
   createLayer,
   createObject,
@@ -86,7 +87,8 @@ import {
   stickyObject,
   updatePointMeasurement,
 } from './layers';
-import { GEOMETRY_CHOICES, type GeometryType } from './model';
+import { GEOMETRY_CHOICES, type GeometryType, type PhotoClick } from './model';
+import { imageNaturalSize, suggestTagBlobs, type TagSuggestion } from './tagSuggest';
 
 export type View = 'survey' | 'tags';
 
@@ -126,7 +128,23 @@ export interface UiState {
   pointDialog: PointDialogMode;
   /** Pending camera capture for + Point (not yet attached to a Photo). */
   pendingPointThumb: string | null;
+  /** Photo open in full-screen mark / tag-suggest overlay. */
+  markPhotoId: string | null;
 }
+
+type MarkRole = 'A' | 'B' | 'TARGET';
+
+type MarkDraft = {
+  photoId: string;
+  clicks: PhotoClick[];
+  assignRole: MarkRole;
+  suggestions: TagSuggestion[];
+  hint: string;
+  busy: boolean;
+};
+
+/** Working state for the photo-mark overlay (survives re-renders). */
+let markDraft: MarkDraft | null = null;
 
 type Listener = () => void;
 
@@ -418,13 +436,27 @@ async function applyNewPointThumb(thumb: string): Promise<void> {
         pendingPointThumb: null,
       });
     }
-    const result = workflowAddPoint(state.doc, { thumbnailDataUrl: thumb });
+    let width: number | undefined;
+    let height: number | undefined;
+    try {
+      const nat = await imageNaturalSize(thumb);
+      width = nat.width;
+      height = nat.height;
+    } catch {
+      /* keep defaults in measurement */
+    }
+    const result = workflowAddPoint(state.doc, {
+      thumbnailDataUrl: thumb,
+      width,
+      height,
+    });
     if (!result.ok) {
       surfaceFail(result.reason, 'add-point');
       setDoc(result.doc, result.reason);
       setState({ pointDialog: 'add', menuOpen: false, pendingPointThumb: null });
       return;
     }
+    const photoId = result.doc.session.selectedPhotoId;
     setDoc(result.doc, null);
     setState({
       pointDialog: 'add',
@@ -433,6 +465,7 @@ async function applyNewPointThumb(thumb: string): Promise<void> {
       pendingPointThumb: null,
     });
     speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
+    if (photoId) void openPhotoMark(photoId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not use photo.';
     surfaceFail(msg, 'photo');
@@ -451,14 +484,26 @@ async function handleAgainPhotoCapture(pointId: string, file: File): Promise<voi
 
 async function applyAgainPhotoThumb(pointId: string, thumb: string): Promise<void> {
   try {
+    let width: number | undefined;
+    let height: number | undefined;
+    try {
+      const nat = await imageNaturalSize(thumb);
+      width = nat.width;
+      height = nat.height;
+    } catch {
+      /* defaults */
+    }
     const result = appendPhotoToPoint(state.doc, pointId, {
       thumbnailDataUrl: thumb,
       yawOnly: true,
+      width,
+      height,
     });
     if (result.reason) {
       surfaceFail(result.reason, 'photo');
       return;
     }
+    const photoId = result.doc.session.selectedPhotoId;
     setDoc(result.doc, null);
     setState({
       pointDialog: 'inspect',
@@ -469,9 +514,133 @@ async function applyAgainPhotoThumb(pointId: string, thumb: string): Promise<voi
       result.doc.session.lastAction ?? `+ Photo on ${pointId}.`,
       result.doc.session.speakSteps,
     );
+    if (photoId) void openPhotoMark(photoId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not use photo.';
     surfaceFail(msg, 'photo');
+  }
+}
+
+async function openPhotoMark(photoId: string): Promise<void> {
+  const photo = state.doc.photos.find((p) => p.id === photoId);
+  if (!photo?.thumbnailDataUrl?.startsWith('data:image/')) {
+    surfaceFail('Photo has no image to mark.', 'photo');
+    return;
+  }
+  const bl = preferredBaseline(state.doc);
+  let width = photo.width;
+  let height = photo.height;
+  try {
+    const nat = await imageNaturalSize(photo.thumbnailDataUrl);
+    width = nat.width;
+    height = nat.height;
+    if (photo.width !== width || photo.height !== height) {
+      setDoc(
+        {
+          ...state.doc,
+          photos: state.doc.photos.map((p) =>
+            p.id === photoId ? { ...p, width, height } : p,
+          ),
+        },
+        null,
+      );
+    }
+  } catch {
+    /* keep stored size */
+  }
+
+  const existing: PhotoClick[] = (photo.clicks ?? []).map((c) => {
+    if (bl && c.pointId === bl.a) return { ...c, pointId: 'A' };
+    if (bl && c.pointId === bl.b) return { ...c, pointId: 'B' };
+    if (c.pointId !== 'A' && c.pointId !== 'B') return { ...c, pointId: 'TARGET' };
+    return { ...c };
+  });
+  const hasA = existing.some((c) => c.pointId === 'A');
+  const hasB = existing.some((c) => c.pointId === 'B');
+  const assignRole: MarkRole = !hasA ? 'A' : !hasB ? 'B' : 'TARGET';
+
+  markDraft = {
+    photoId,
+    clicks: existing,
+    assignRole,
+    suggestions: [],
+    hint: bl
+      ? `Mark baseline ${bl.a} (A) then ${bl.b} (B). This point = camera station.`
+      : 'Establish a baseline before marking ends.',
+    busy: true,
+  };
+  setState({
+    markPhotoId: photoId,
+    menuOpen: false,
+    doc: {
+      ...state.doc,
+      session: { ...state.doc.session, selectedPhotoId: photoId },
+    },
+  });
+
+  try {
+    const suggestions = await suggestTagBlobs(photo.thumbnailDataUrl, width, height);
+    if (markDraft?.photoId !== photoId) return;
+    markDraft = {
+      ...markDraft,
+      suggestions,
+      busy: false,
+      hint: suggestions.length
+        ? `${suggestions.length} tag suggestion(s) — tap a dashed ring or the photo. Placing ${markDraft.assignRole}.`
+        : `No auto tags — tap the photo to place ${markDraft.assignRole}.`,
+    };
+    for (const fn of [...listeners]) fn();
+  } catch {
+    if (markDraft?.photoId !== photoId) return;
+    markDraft = {
+      ...markDraft,
+      busy: false,
+      hint: 'Suggest unavailable — tap the photo to place marks.',
+    };
+    for (const fn of [...listeners]) fn();
+  }
+}
+
+function closePhotoMark(): void {
+  markDraft = null;
+  setState({ markPhotoId: null });
+}
+
+function placeMarkAt(px: number, py: number): void {
+  if (!markDraft) return;
+  const role = markDraft.assignRole;
+  const clicks = markDraft.clicks.filter((c) => c.pointId !== role);
+  clicks.push({ pointId: role, px, py });
+  const hasA = clicks.some((c) => c.pointId === 'A');
+  const hasB = clicks.some((c) => c.pointId === 'B');
+  let nextRole: MarkRole = 'TARGET';
+  if (!hasA) nextRole = 'A';
+  else if (!hasB) nextRole = 'B';
+  markDraft = {
+    ...markDraft,
+    clicks,
+    assignRole: nextRole,
+    hint:
+      role === 'TARGET'
+        ? 'Extra mark saved — a separate object point needs a second sighting or tape distance.'
+        : hasA && hasB
+          ? 'A and B set — Confirm to place the camera station (or mark an optional target).'
+          : `Placed ${role}. Next: ${nextRole}.`,
+  };
+  for (const fn of [...listeners]) fn();
+}
+
+function confirmPhotoMarks(): void {
+  if (!markDraft) return;
+  const result = applyPhotoMarks(state.doc, markDraft.photoId, markDraft.clicks);
+  markDraft = null;
+  setDoc(result.doc, null);
+  setState({ markPhotoId: null });
+  speakCoachLine(result.message, result.doc.session.speakSteps);
+  setCloudMessage(result.message);
+  if (result.reason && !result.stationApplied) {
+    // Soft — marks may still have saved; do not block with refuse overlay.
+    logError(result.reason, { source: 'photo' });
   }
 }
 
@@ -507,6 +676,7 @@ let state: UiState = {
   menuFocus: 'recommend',
   pointDialog: null,
   pendingPointThumb: null,
+  markPhotoId: null,
 };
 
 function openMenuSection(section: MenuSection): void {
@@ -1153,6 +1323,93 @@ function onShellClick(e: Event): void {
     );
     return;
   }
+  if (cmd === 'open-photo-mark') {
+    const photoId = target.getAttribute('data-photo-id');
+    if (!photoId) return;
+    void openPhotoMark(photoId);
+    return;
+  }
+  if (cmd === 'close-photo-mark') {
+    closePhotoMark();
+    return;
+  }
+  if (cmd === 'photo-mark-role') {
+    const role = target.getAttribute('data-role') as MarkRole | null;
+    if (!markDraft || !role) return;
+    markDraft = {
+      ...markDraft,
+      assignRole: role,
+      hint: `Placing ${role}${role === 'TARGET' ? ' (optional — needs distance / 2nd sighting)' : ''}.`,
+    };
+    for (const fn of [...listeners]) fn();
+    return;
+  }
+  if (cmd === 'photo-mark-suggest') {
+    if (!markDraft) return;
+    void (async () => {
+      const photo = state.doc.photos.find((p) => p.id === markDraft!.photoId);
+      if (!photo?.thumbnailDataUrl) return;
+      markDraft = { ...markDraft!, busy: true, hint: 'Suggesting tags…' };
+      for (const fn of [...listeners]) fn();
+      try {
+        const suggestions = await suggestTagBlobs(
+          photo.thumbnailDataUrl,
+          photo.width,
+          photo.height,
+        );
+        if (!markDraft) return;
+        markDraft = {
+          ...markDraft,
+          suggestions,
+          busy: false,
+          hint: suggestions.length
+            ? `${suggestions.length} suggestion(s) — tap a dashed ring.`
+            : 'No tags found — tap the photo.',
+        };
+      } catch {
+        if (!markDraft) return;
+        markDraft = { ...markDraft, busy: false, hint: 'Suggest failed — tap to place.' };
+      }
+      for (const fn of [...listeners]) fn();
+    })();
+    return;
+  }
+  if (cmd === 'photo-mark-clear') {
+    if (!markDraft) return;
+    markDraft = {
+      ...markDraft,
+      clicks: [],
+      assignRole: 'A',
+      hint: 'Cleared marks — place A then B.',
+    };
+    for (const fn of [...listeners]) fn();
+    return;
+  }
+  if (cmd === 'photo-mark-confirm') {
+    confirmPhotoMarks();
+    return;
+  }
+  if (cmd === 'photo-mark-accept-suggest') {
+    const px = Number(target.getAttribute('data-px'));
+    const py = Number(target.getAttribute('data-py'));
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return;
+    placeMarkAt(px, py);
+    return;
+  }
+  if (cmd === 'photo-mark-canvas') {
+    const img = (target as HTMLElement).closest('[data-mark-canvas]')?.querySelector('img');
+    const photo = markDraft
+      ? state.doc.photos.find((p) => p.id === markDraft!.photoId)
+      : undefined;
+    if (!img || !photo || !markDraft) return;
+    const me = e as MouseEvent;
+    const rect = img.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return;
+    const px = ((me.clientX - rect.left) / rect.width) * photo.width;
+    const py = ((me.clientY - rect.top) / rect.height) * photo.height;
+    placeMarkAt(px, py);
+    return;
+  }
   if (cmd === 'delete-photo') {
     const pointId =
       state.doc.session.inspectingPointId ?? state.doc.session.currentAddPointId;
@@ -1747,7 +2004,163 @@ function buildSurveyView(): HTMLElement {
     wrap.appendChild(buildMenuDrawer(doc, coach, legal));
   }
 
+  if (state.markPhotoId && markDraft) {
+    wrap.appendChild(buildPhotoMarkOverlay(doc));
+  }
+
   return wrap;
+}
+
+/** Full-screen photo mark UI — suggest white tags, confirm baseline A/B → camera station. */
+function buildPhotoMarkOverlay(doc: GardenDocument): HTMLElement {
+  const draft = markDraft!;
+  const photo = doc.photos.find((p) => p.id === draft.photoId);
+  const bl = preferredBaseline(doc);
+  const overlay = el('div', {
+    className: 'photo-mark',
+    attrs: {
+      role: 'dialog',
+      'aria-label': 'Mark baseline on photo',
+      'data-testid': 'photo-mark',
+    },
+  });
+
+  const head = el('div', { className: 'photo-mark__head' });
+  head.appendChild(
+    el('p', {
+      className: 'photo-mark__title',
+      text: bl ? `Mark ${bl.a}–${bl.b}` : 'Mark photo',
+    }),
+  );
+  head.appendChild(
+    el('p', {
+      className: 'photo-mark__hint',
+      text: draft.busy ? 'Looking for white tags…' : draft.hint,
+      attrs: { 'data-testid': 'photo-mark-hint' },
+    }),
+  );
+  overlay.appendChild(head);
+
+  const stage = el('div', { className: 'photo-mark__stage' });
+  const frame = el('div', {
+    className: 'photo-mark__frame',
+    attrs: {
+      'data-cmd': 'photo-mark-canvas',
+      'data-mark-canvas': '1',
+    },
+  });
+  if (photo?.thumbnailDataUrl) {
+    const img = document.createElement('img');
+    img.className = 'photo-mark__img';
+    img.src = photo.thumbnailDataUrl;
+    img.alt = 'Survey photo';
+    img.draggable = false;
+    frame.appendChild(img);
+  }
+
+  const layer = el('div', { className: 'photo-mark__layer' });
+  const pw = Math.max(1, photo?.width ?? 1);
+  const ph = Math.max(1, photo?.height ?? 1);
+
+  for (const s of draft.suggestions) {
+    const btn = el('button', {
+      className: 'photo-mark__suggest',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'photo-mark-accept-suggest',
+        'data-px': String(s.px),
+        'data-py': String(s.py),
+        'aria-label': 'Accept tag suggestion',
+        style: `left:${(s.px / pw) * 100}%;top:${(s.py / ph) * 100}%;width:${Math.max(6, (s.w / pw) * 100)}%;height:${Math.max(6, (s.h / ph) * 100)}%`,
+      },
+    });
+    layer.appendChild(btn);
+  }
+
+  for (const c of draft.clicks) {
+    const mark = el('div', {
+      className: `photo-mark__pin photo-mark__pin--${c.pointId.toLowerCase()}`,
+      text: c.pointId === 'TARGET' ? 'T' : c.pointId,
+      attrs: {
+        style: `left:${(c.px / pw) * 100}%;top:${(c.py / ph) * 100}%`,
+      },
+    });
+    layer.appendChild(mark);
+  }
+  frame.appendChild(layer);
+  stage.appendChild(frame);
+  overlay.appendChild(stage);
+
+  const roles = el('div', { className: 'photo-mark__roles' });
+  for (const role of ['A', 'B', 'TARGET'] as MarkRole[]) {
+    const label = role === 'TARGET' ? 'Target' : role;
+    roles.appendChild(
+      el('button', {
+        className:
+          'btn btn--util photo-mark__role' +
+          (draft.assignRole === role ? ' photo-mark__role--active' : ''),
+        text: label,
+        attrs: {
+          type: 'button',
+          'data-cmd': 'photo-mark-role',
+          'data-role': role,
+          title:
+            role === 'TARGET'
+              ? 'Optional — needs second sighting or distance'
+              : `Assign next tap as baseline end ${role}`,
+        },
+      }),
+    );
+  }
+  overlay.appendChild(roles);
+
+  const actions = el('div', { className: 'photo-mark__actions' });
+  actions.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Suggest',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'photo-mark-suggest',
+        disabled: draft.busy ? 'true' : undefined,
+      },
+    }),
+  );
+  actions.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Clear',
+      attrs: { type: 'button', 'data-cmd': 'photo-mark-clear' },
+    }),
+  );
+  actions.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Cancel',
+      attrs: { type: 'button', 'data-cmd': 'close-photo-mark' },
+    }),
+  );
+  actions.appendChild(
+    el('button', {
+      className: 'btn btn--suggested',
+      text: 'Confirm',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'photo-mark-confirm',
+        'data-testid': 'photo-mark-confirm',
+      },
+    }),
+  );
+  overlay.appendChild(actions);
+
+  overlay.appendChild(
+    el('p', {
+      className: 'photo-mark__foot',
+      text: 'Point = camera station when A+B confirmed. A separate object mark needs another sighting or a tape distance.',
+    }),
+  );
+
+  return overlay;
 }
 
 function applyPlanTransform(viewport: HTMLElement): void {
@@ -2745,20 +3158,36 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
         className: 'point-dialog__thumb-btn',
         attrs: {
           type: 'button',
-          'data-cmd': 'select-photo',
+          'data-cmd': 'open-photo-mark',
           'data-photo-id': ph.id,
-          'aria-label': `Select ${ph.id}`,
-          title: ph.note ?? ph.id,
+          'aria-label': `Mark tags on ${ph.id}`,
+          title: ph.note ?? `Open ${ph.id} to mark baseline`,
         },
       });
       const img = document.createElement('img');
       img.src = ph.thumbnailDataUrl;
       img.alt = ph.id;
       btn.appendChild(img);
+      if ((ph.clicks?.length ?? 0) >= 2) {
+        li.appendChild(
+          el('span', {
+            className: 'point-dialog__thumb-badge',
+            text: 'A·B',
+            attrs: { title: 'Baseline ends marked' },
+          }),
+        );
+      }
       li.appendChild(btn);
       strip.appendChild(li);
     }
     photosSection.appendChild(strip);
+
+    photosSection.appendChild(
+      el('p', {
+        className: 'point-dialog__mark-hint',
+        text: 'Tap a photo to mark tags (A/B) — station = camera.',
+      }),
+    );
 
     // Compact per-photo offsets from the combined (average) point — outliers readable.
     if (pointPhotos.length > 1 && thumbPoint.x != null && thumbPoint.y != null) {

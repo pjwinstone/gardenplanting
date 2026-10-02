@@ -6,7 +6,7 @@ import { canTransition, applyTransition } from '../toolbox';
 
 export function workflowAddPoint(
   doc: GardenDocument,
-  opts: { thumbnailDataUrl?: string } = {},
+  opts: { thumbnailDataUrl?: string; width?: number; height?: number } = {},
 ): { ok: true; doc: GardenDocument; point: Point } | { ok: false; reason: string; doc: GardenDocument } {
   let next = ensureDefaultLayers(doc);
   if (next.session.mode !== 'ADD_POINT' && next.session.mode !== 'ADD_POINT_EXTRA_YAW') {
@@ -24,7 +24,11 @@ export function workflowAddPoint(
     }
     next = applied.doc;
   }
-  const result = addPhotoMeasurement(next, { thumbnailDataUrl: opts.thumbnailDataUrl });
+  const result = addPhotoMeasurement(next, {
+    thumbnailDataUrl: opts.thumbnailDataUrl,
+    width: opts.width,
+    height: opts.height,
+  });
   if (result.reason) {
     return { ok: false, reason: result.reason, doc: result.doc };
   }
