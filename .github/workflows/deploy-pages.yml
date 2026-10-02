@@ -30,6 +30,9 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Test
+        run: npm test
+
       - name: Build
         env:
           VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}

@@ -144,6 +144,23 @@ export interface PhotoClick {
   py: number;
 }
 
+/** OneDrive upload state for the original camera file. The bytes live in IndexedDB, not here. */
+export type PhotoUploadStatus = 'queued' | 'uploading' | 'verified' | 'failed';
+
+/**
+ * Pointer to the original camera file in `/Garden Survey/photos/`.
+ * Absent on older documents. The thumbnail stays a separate display preview.
+ */
+export interface PhotoOriginalFile {
+  fileName: string;
+  size: number;
+  quickXorHash: string;
+  contentType?: string;
+  capturedAt?: string;
+  uploadStatus?: PhotoUploadStatus;
+  uploadError?: string;
+}
+
 export interface Photo {
   id: string;
   setupId: string;
@@ -156,6 +173,8 @@ export interface Photo {
   /** Baseline whose ends were marked in this frame (sighting). */
   sightedBaselineId?: string;
   exifDateTimeOriginal?: string;
+  /** Original camera file (full resolution). Optional so older garden.json still loads. */
+  originalFile?: PhotoOriginalFile;
   note?: string;
   /** Estimated camera pose after adjust (metres, radians). */
   pose?: { x: number; y: number; yawRad: number };
@@ -199,6 +218,12 @@ export interface SessionState {
   selectedPhotoId?: string;
 }
 
+/** Where the OneDrive photos manifest lives, relative to the garden folder. */
+export interface PhotosManifestLink {
+  /** e.g. `photos/manifest.json` — next to garden-v1.json, not inside it. */
+  path: string;
+}
+
 export interface GardenDocument {
   version: 1;
   name: string;
@@ -213,6 +238,11 @@ export interface GardenDocument {
   layers: LayerDef[];
   objects: GardenObject[];
   session: SessionState;
+  /**
+   * Optional pointer to the photos manifest. Older documents omit it;
+   * readers that don't know the field ignore it.
+   */
+  photosManifest?: PhotosManifestLink;
 }
 
 export const SIGMA = {

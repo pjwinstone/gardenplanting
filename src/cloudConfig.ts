@@ -67,6 +67,19 @@ export function onedrivePathFor(fileName: string): string {
   return `${ONEDRIVE_FOLDER}/${fileName}`;
 }
 
+/** Original camera files, beside the garden JSON. */
+export const ONEDRIVE_PHOTOS_DIR = 'photos';
+/** Path relative to the garden folder. Stored on the document as a manifest link. */
+export const PHOTOS_MANIFEST_RELATIVE = `${ONEDRIVE_PHOTOS_DIR}/manifest.json`;
+
+export function photosFolderPath(): string {
+  return `${ONEDRIVE_FOLDER}/${ONEDRIVE_PHOTOS_DIR}`;
+}
+
+export function photosManifestPath(): string {
+  return `${ONEDRIVE_FOLDER}/${PHOTOS_MANIFEST_RELATIVE}`;
+}
+
 /** True when the user (or a successful Load) has stored a garden filename. */
 export function hasStoredGardenCloudFile(): boolean {
   try {
