@@ -10,11 +10,11 @@ The stored point is the **axis of the stick at the ground**. The paper is a slee
 
 ## 1. Recommendation
 
-Print one **A4 portrait** sheet per mark. Horizontal bands run across the sheet. Roll the sheet into a cylinder and slide it over the stick. Any direction around the stick shows the same code.
+Print one **A4 portrait** sheet per mark. Horizontal bands run across the sheet. Wrap the sheet tight around the dowel and glue it to the wood. Any direction around the stick shows the same code.
 
 Do not print an AprilTag, an ArUco, or any other flat tag. A face-on square code fails at a grazing angle, which is most of a walk around the garden, and it is not the focal-length prior. The sleeve gives a bearing to the axis (section 6). Focal length is one shared value per phone and 1× lens, solved in the adjustment from a checkerboard prior plus the raw sleeve elevations (section 6.3).
 
-The sleeve is a **tight fit** on the stick it was cut for. A loose tube puts the silhouette on the paper, not on the stick.
+The sleeve is glued tight to the 60 mm dowel. A loose tube puts the silhouette on the paper, not on the stick.
 
 Hand clicks stay. The tap is also the seed for where the decoder looks (section 8).
 
@@ -24,30 +24,35 @@ A4 portrait is **210 mm** wide and **297 mm** tall. The short side goes around t
 
 Printers leave an unprintable border of about **3–5 mm**. This template assumes the worse end, **5 mm**, so one sheet works on a typical home printer. Trim that border off every visible edge. It is not part of the finished sleeve.
 
-**Around the stick.** Trim **5 mm** off the visible vertical edge. That leaves **205 mm**. The glue flap is the other vertical edge, **10 mm**, and it runs **down the side seam**. It is not a strip along the bottom. The outer 5 mm of that flap is the other unprintable border, hidden under the glue. Finished circumference:
+**Around the stick.** Trim **5 mm** off the visible vertical edge. That leaves **205 mm** of paper. Wrap that sheet **tight** around a **60 mm** dowel and glue it to the wood. The overlap is whatever is left:
 
-`C = 205 − 10 = 195 mm`,
+`205 − π × 60 = 205 − 188.5 = 16.5 mm`
 
-`D = 195 / π = 62.1 mm`,
+(about **15–17 mm**). That overlap is the glue flap, and it runs **down the side seam**. It is not a strip along the bottom. The outer 5 mm of the flap is the unprintable border, hidden under the glue, so about 11 mm of the overlap is printed paper.
 
-radius **R = 31.0 mm**.
+The outside of the sleeve is the dowel plus the sheet. For matte PP/PET about **0.2 mm** thick the expected outside diameter and radius are
+
+`D = 60 + 2 × 0.2 = 60.4 mm`,
+
+`R = 30 + 0.2 = 30.2 mm`.
+
+**Measure `R` on each finished sleeve and store that value.** Stock and glue move it. The 30.2 mm figure is the expectation, not the observation. The laser offset is the stored `R`.
 
 **Along the stick.** Trim **5 mm** off the top and **5 mm** off the bottom. Finished height:
 
 `H = 297 − 10 = 287 mm`.
 
-There is no glue on those ends. Trimming only the top, and calling the bottom 5 mm a flap, would leave 292 mm, and that is not this sheet. The flap is the side seam, so both ends are cut.
+There is no glue on those ends. The flap is the side seam, so both ends are cut. The band layout below is unchanged.
 
-| Stick (outside diameter) | Circumference | Overlap left on the 205 mm usable width | Radial play in the 62.1 mm sleeve |
+| Stick | Circumference | Overlap on the 205 mm sheet | Expected outside D |
 |---|---|---|---|
-| 25 mm cane | 79 mm | 126 mm | **18.5 mm** — do not publish that bearing |
-| **60 mm dowel** | **188 mm** | **17 mm** | **1.0 mm** |
-| **60.3 mm tube** (2 inch nominal) | **189 mm** | **16 mm** | **0.9 mm** |
-| 63 mm pipe | 198 mm | **7 mm** | does not fit |
+| **60 mm dowel** | **188.5 mm** | **16.5 mm** | **60.4 mm** (0.2 mm sheet) |
+| 60.3 mm tube | 189.4 mm | 15.6 mm | 60.7 mm, same kind of wrap; store its own `R` |
+| 63 mm pipe | 197.9 mm | **7 mm** | does not snug; the seam is too short |
 
-**Print for a 60 mm stick.** A 60 mm dowel, or a 60.3 mm tube, sits inside the sleeve with under **2 mm** of radial play. A **63 mm** pipe does not. It needs 198 mm around it. After the 5 mm trim only 7 mm is left for the overlap, and 5 mm of that is unprinted, so the glued seam would be about 2 mm of printed paper. Shortening the overlap to save the 63 mm pipe is a weaker seam than changing the stick. If a particular printer’s dead zone is only 3 mm, a 63 mm stick can be tried again later. This template is the 5 mm case.
+A **63 mm** pipe does not get this sheet. After the 5 mm trim only 7 mm is left to glue, and 5 mm of that is unprinted. Wrap the 60 mm dowel. A 60.3 mm tube still falls in the 15–17 mm overlap; the expected `R` in the rest of this note is the 60 mm dowel.
 
-Do not slide the 62.1 mm sleeve over a thinner cane. A 25 mm cane can sit `(62.1 − 25) / 2 = 18.5 mm` off the paper axis, and the centreline then follows the paper. Cut a shorter sheet (`πD + 10 mm`) for a thinner stick, or use the 60 mm stick. Reject a tube you can shift.
+Glue the paper down. A loose tube, or a sleeve you can shift on the stick, is not a published bearing: the centreline would follow the paper, not the dowel. Do not wrap this full sheet around a thinner cane. Cut a shorter sheet (`π × dowel + about 16 mm`) for a thinner stick.
 
 ## 3. Where the point is
 
@@ -61,13 +66,13 @@ The sideways part of the lean shows up in the photo. Fit the tilted axis, level 
 
 `σ_β² = (σ_px / fx)² + (sigmaCentringM / d)²`.
 
-It is not the pixel midline. A sleeve that does not fit the stick adds the 18.5 mm cane example above on top of the lean. Do not publish that bearing. The pixel noise stays in `σ_px`.
+It is not the pixel midline. A sleeve that is not glued tight to the dowel adds a shift of the paper axis on top of the lean. Do not publish that bearing. The pixel noise stays in `σ_px`.
 
 **Centreline.** For a plumb rod the two tangent planes are vertical and symmetric about the plane through the axis, so the mean of the two edge **azimuths** is the axis azimuth at any distance and any off-centre angle. Average those levelled azimuths. Averaging pixel columns instead biases the bearing by about `tan β · (R / d)²`: 0.008° (0.3 mm) at 2 m and 30° off-centre. Small, and avoided by using azimuths. The bearing has **no** radial offset. It does not depend on reading the code.
 
-**Surface tape or laser.** Reduce the slope distance to horizontal first, then add `R` (**31.0 mm** on this sleeve). The nearest point on the cylinder is horizontal from the axis. Adding `R` along the slope and reducing afterwards leaves `R cos α`, about 2 mm short at 20°. A tape that hooks a small angle `φ` around the face reads short by about `R (1 − cos φ)`: 4 mm at 30°.
+**Surface tape or laser.** Reduce the slope distance to horizontal first, then add the stored `R`. The expected value on this sleeve is **30.2 mm**. The nearest point on the cylinder is horizontal from the axis. Adding `R` along the slope and reducing afterwards leaves `R cos α`, about 2 mm short at 20°. A tape that hooks a small angle `φ` around the face reads short by about `R (1 − cos φ)`: 4 mm at 30°.
 
-A laser spot a sideways distance `e` from the axis hits `√(R² − e²)` in front of the axis, not `R`. Still add `+R`. The over-correction is 1 mm, 4 mm and 11 mm at `e = R/4`, `R/2` and `3R/4`. Dropping the correction is wrong by 30 mm, 27 mm and 21 mm at those same offsets. Retake only when the spot is more than about **`R/2` (16 mm)** off the centreline.
+A laser spot a sideways distance `e` from the axis hits `√(R² − e²)` in front of the axis, not `R`. Still add `+R`. At the expected 30.2 mm the over-correction is 1 mm, 4 mm and 10 mm at `e = R/4`, `R/2` and `3R/4`. Dropping the correction is wrong by 29 mm, 26 mm and 20 mm at those same offsets. Retake only when the spot is more than about **`R/2` (15 mm)** off the centreline.
 
 When a range is known, reject the bearing if the fitted angular width differs from `2 arcsin(R / d)` by more than about 3σ. That catches an edge that has locked onto a shadow. A 0.5 px difference between the two edge biases moves the midline by about 1 mm at 15 m, which is inside this check.
 
@@ -85,12 +90,12 @@ A 24 mm-equivalent phone is `fx ≈ 2798 px`. On that camera a 13 mm band is **7
 
 Millimetres per pixel = `1000 × d / fx`:
 
-| Distance | mm per pixel | 13 mm band | 287 mm sleeve | 62.1 mm stick width |
+| Distance | mm per pixel | 13 mm band | 287 mm sleeve | 60.4 mm stick width |
 |---|---|---|---|---|
-| 2 m | 0.66 | 20 px | 435 px | 94 px |
-| 5 m | 1.65 | **7.9 px** | 174 px | 38 px |
-| 8 m | 2.64 | 4.9 px | 109 px | 24 px |
-| 15 m | 4.95 | **2.6 px** | **58 px** | **12.5 px** |
+| 2 m | 0.66 | 20 px | 435 px | 91 px |
+| 5 m | 1.65 | **7.9 px** | 174 px | 37 px |
+| 8 m | 2.64 | 4.9 px | 109 px | 23 px |
+| 15 m | 4.95 | **2.6 px** | **58 px** | **12.2 px** |
 
 Stick width in pixels is `fx × D / d`. At these ranges the exact tangent angle `2 arcsin(R / d)` matches that to a pixel.
 
@@ -121,9 +126,9 @@ Vertical budget, on the **finished** sleeve. The module is **13 mm**, not 14 mm,
 | Name again, and the wrap-direction ruler, outside the quiet zone | 15 mm |
 | **Finished height H** | **287 mm** |
 
-The A4 sheet is 297 mm tall. Trim 5 mm off the top and 5 mm off the bottom before the sleeve is rolled. Those offcuts are the unprintable border. They are not part of `H`, and neither of them is a glue flap. The glue flap is the 10 mm side seam in section 2.
+The A4 sheet is 297 mm tall. Trim 5 mm off the top and 5 mm off the bottom before the sleeve is rolled. Those offcuts are the unprintable border. They are not part of `H`, and neither of them is a glue flap. The glue flap is the side seam in section 2, about 16.5 mm where the sheet overlaps on the 60 mm dowel.
 
-The 8 mm bands are white and empty. Text, crosses and rulers sit beyond them. The visible side edge is trimmed printed paper, not a white stripe. The side flap, marked “glue under”, is a copy of the first 10 mm of the pattern, with the printer’s blank outer 5 mm on the hidden side.
+The 8 mm bands are white and empty. Text, crosses and rulers sit beyond them. The visible side edge is trimmed printed paper, not a white stripe. The side flap, marked “glue under”, is a copy of the overlapping 16.5 mm of the pattern, with the printer’s blank outer 5 mm on the hidden side.
 
 **Which 12-bit words.** Two constructions both refuse a run longer than 3, and both have minimum distance 4. Distance 4 means one, two or three flipped bands cannot become another issued ID. Neither construction corrects a bit.
 
@@ -165,12 +170,12 @@ Take the mean of the two levelled edge azimuths (section 3). If each edge is goo
 
 `σ_β = (σ_e / √2) / fx` radians.
 
-With `fx = 3028` and `σ_e = 1 px`, `σ_β = 0.013°`. That **pixel** term is a lateral miss of **0.5 mm at 2 m, 1.2 mm at 5 m, 1.9 mm at 8 m, 3.5 mm at 15 m**. At 2 px on the edge at 15 m (the stick is only 12.5 px wide) it is **7 mm**. These figures are pixel noise only. They are not the precision of the ray.
+With `fx = 3028` and `σ_e = 1 px`, `σ_β = 0.013°`. That **pixel** term is a lateral miss of **0.5 mm at 2 m, 1.2 mm at 5 m, 1.9 mm at 8 m, 3.5 mm at 15 m**. At 2 px on the edge at 15 m (the stick is only 12.2 px wide) it is **7 mm**. These figures are pixel noise only. They are not the precision of the ray.
 
 Two larger terms sit on the same ray:
 
 - **`fx`.** A 1% focal-length error moves a bearing by `sin β cos β × 1%`: **0.05° at 5° off-centre, 0.18° at 20°, and 0.26° at the edge**. Centreline noise at 1 px is **0.013°**, so the focal term is **4–20×** larger, and it is the same for every photo from that phone. At 20° off-centre the lateral miss is **6 mm at 2 m, 16 mm at 5 m, 26 mm at 8 m and 48 mm at 15 m**. `fx` is solved per phone and lens inside the adjustment (section 6.3). Do not quote the pixel row as the ray.
-- **Lean and a sleeve off the stick**, via `sigmaCentringM` (section 3). At the marked 0.45 m height that is 8 mm at 1° and 24 mm at 3°. A 62.1 mm sleeve on a 25 mm cane adds up to 18.5 mm. Fit the sideways lean. The along-sight part stays in the centring term.
+- **Lean and a sleeve off the stick**, via `sigmaCentringM` (section 3). At the marked 0.45 m height that is 8 mm at 1° and 24 mm at 3°. The sleeve is glued to the dowel, so a sleeve that can still shift is not a published bearing. Fit the sideways lean. The along-sight part stays in the centring term.
 
 The centreline is a valid Phase 1 ray across 2–15 m whenever both edges pass the width check in section 3. Without an ID there is still no point to attach it to, unless this sleeve is the only one in the frame and the user confirms the name.
 
@@ -188,8 +193,8 @@ The width check in section 3 compares **levelled azimuths** with `2 arcsin(R / d
 
 **Rims.** The visible end of the paper is not at the axis distance. This is the only place `D` enters the range.
 
-- If the stick runs through the sleeve, the centreline ends are the **front** rims, at `d − R`. The elevation formula then returns the front surface, **31 mm short at every range**. Add `R`.
-- If the top of the sleeve is against the sky, the top silhouette is the **far** rim and the bottom is the **near** rim. Leaving that unmodelled biases the range by about `−2R tan(e_mid) / H`. With the camera 1.0 m above the sleeve middle that is **−4.3% (−216 mm) at 5 m** and **−1.4% (−216 mm) at 15 m**. With the camera 0.5 m above the middle it is **−2.2% at 5 m**.
+- If the stick runs through the sleeve, the centreline ends are the **front** rims, at `d − R`. The elevation formula then returns the front surface, **30.2 mm short at every range** at the expected radius. Add the stored `R`.
+- If the top of the sleeve is against the sky, the top silhouette is the **far** rim and the bottom is the **near** rim. Leaving that unmodelled biases the range by about `−2R tan(e_mid) / H`. With the expected radius and the camera 1.0 m above the sleeve middle that is **−4.2% (−210 mm) at 5 m** and **−1.4% (−210 mm) at 15 m**. With the camera 0.5 m above the middle it is **−2.1% at 5 m**.
 
 Each end is near or far according to the sign of its height relative to the camera. Solve with `d ± R` in that end’s ray.
 
@@ -212,7 +217,7 @@ Leaning away by 10° is −1.4% at 5 m. This component is invisible in one photo
 | 8 m | 109 px | 1.3% | 131 mm | 413 mm |
 | 15 m | 58 px | 2.4% | 396 mm | 835 mm |
 
-The pixel term passes the `fx` term at about 8 m. At 15 m with 2 px per end (realistic on a 58 px sleeve) the noise is about **730 mm**. Pitch, rim and lean, if left unmodelled, are larger than this noise at garden ranges. The observation that enters the solver is the elevation form with the rim choice, and its σ includes the edge fit and `σ_λ`. It is a weak distance, not a tape.
+The pixel term passes the `fx` term at about 8 m. At 15 m with 2 px per end and `fx` to 1% (realistic on a 58 px sleeve) the noise is about **747 mm**. Pitch, rim and lean, if left unmodelled, are larger than this noise at garden ranges. The observation that enters the solver is the elevation form with the rim choice, and its σ includes the edge fit and `σ_λ`. It is a weak distance, not a tape.
 
 **Choosing between the two station candidates.** Two marks and one tape leave two stations on the tape circle (geometry note, §3.3). A range **to the taped mark** is the same from both, so it cannot separate them. The height range has to come from the **untaped** mark: `Δ = |d(P1) − d(P2)|` on that other sleeve. How far apart the stations are in the garden is the wrong test.
 
@@ -232,7 +237,7 @@ On the 7 m baseline at 20°, a 15 m tape to A, the ranges from the two candidate
 
 Do not solve `fx = h_px · d / H` and then reuse it. That misses the 1% bar, and it double-counts.
 
-The noise budget at 5 m is real: sleeve ends 0.8% at 1 px, tape 20 mm is 0.4%, together about 0.9%. ISO 216 allows ±2 mm on the 297 mm sheet, about **0.7%** of the finished 287 mm, unless the trimmed sleeve is measured. The biases are the problem. Pitch (+3.4% at 5 m), rim (−0.6% for the 31 mm front rim at 5 m, or −4.3% for a sky top and a near bottom) and a 2° lean toward the camera (+0.7% at 5 m) all land at full size on a derived `fx`. The formula in the previous draft misses 1% by about three times.
+The noise budget at 5 m is real: sleeve ends 0.8% at 1 px, tape 20 mm is 0.4%, together about 0.9%. ISO 216 allows ±2 mm on the 297 mm sheet, about **0.7%** of the finished 287 mm, unless the trimmed sleeve is measured. The biases are the problem. Pitch (+3.4% at 5 m), rim (−0.6% for the 30.2 mm front rim at 5 m, or −4.2% for a sky top and a near bottom) and a 2° lean toward the camera (+0.7% at 5 m) all land at full size on a derived `fx`. The formula in the previous draft misses 1% by about three times.
 
 Enter the adjustment with the raw pieces, not a derived range and not a derived `fx`:
 
@@ -249,10 +254,10 @@ With the elevation model, the rim model, a plumbed rod, the checkerboard prior a
 
 One A4 portrait page, black and white, **actual size**. The printer must not scale to fit.
 
-Finished sleeve: **H = 287 mm** tall, **195 mm** around, **D = 62.1 mm**, on a **60 mm** stick. The sheet starts at 297 × 210 mm. Trim 5 mm off the top, the bottom, and the visible side. The glue flap is the remaining side, 10 mm, down the seam.
+Finished sleeve: **H = 287 mm** tall, wrapped tight on a **60 mm** dowel. Expected **D = 60.4 mm**, **R = 30.2 mm**, overlap about **16.5 mm**. The sheet starts at 297 × 210 mm. Trim 5 mm off the top, the bottom, and the visible side. The glue flap is the overlap down the seam, glued to the dowel.
 
 ```
-        glue flap, 10 mm, side seam          visible 195 mm (around the stick)
+        glue flap, about 16.5 mm             188.5 mm around the dowel
         ┌──────────────────┬───────────────────────────────────────────┐
  trim   │ unprinted outer  │ A1 · 222              corner cross   9 mm │
  5 mm   │ 5 mm hides under │ (empty quiet)                         8 mm │
@@ -266,10 +271,10 @@ Finished sleeve: **H = 287 mm** tall, **195 mm** around, **D = 62.1 mm**, on a *
         └──────────────────┴───────────────────────────────────────────┘
 ```
 
-- Bands run the full circumference and stop at the side seam. The flap is a copy of the first 10 mm of the pattern, marked “glue under”, with the printer’s blank outer 5 mm on the hidden side. Trim the opposite edge so the visible seam is printed paper, not a white stripe. Glue it so the paper cannot slide off the 60 mm stick (section 2). There is no glue strip on the top or the bottom.
+- Bands run around the dowel and stop at the side seam. The flap is a copy of the first 16.5 mm of the pattern, marked “glue under”, with the printer’s blank outer 5 mm on the hidden side. Trim the opposite edge so the visible seam is printed paper, not a white stripe. Glue the sheet tight to the 60 mm dowel (section 2). There is no glue strip on the top or the bottom.
 - The **8 mm** quiet zones are empty. The name and the corner cross sit outside them. The decoder ignores text beyond the stop: 8 mm is only about 0.6 of a band (section 5).
 - **Rulers, checked with a steel rule before the sheet is rolled.** A **250 mm** ruler along the height, in the side glue flap, measured before it is glued. It fits the 287 mm finished height. It does not fit across the 210 mm sheet, so the wrap-direction ruler is **180 mm**, in the bottom legend, clear of the seam. Letter paper with fit-to-page scales A4 to about **94%**, which turns 250 mm into 235 mm and 180 mm into 169 mm. Either miss means the sheet was scaled. Do not use it. The four-black sync must measure **52 mm**.
-- Store the measured `H` and `D` on that sleeve. Nominal 287 mm and 62.1 mm are the design, not the observation.
+- Store the measured `H`, `D` and `R` on that sleeve. Expected 287 mm, 60.4 mm and 30.2 mm are the design for a 0.2 mm sheet, not the observation. The laser offset is the stored `R`.
 - Human text is the point name and the issued code, printed twice, outside the quiet zones. Names avoid O and I. The decoder does not read that text.
 - **Stock.** Laser or pigment ink on matte polypropylene or polyester (PP/PET). Plain paper cockles and dye ink runs. Gloss laminate and glossy toner put a specular stripe down the sleeve, parallel to a vertical scan, so the profile reader fails. A matte laminate is acceptable if the rulers still measure true after it is sealed.
 - The seam is vertical. Press it flat so it does not become a ridge that splits the silhouette.
