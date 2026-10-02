@@ -58,7 +58,7 @@ The solved feature is what polygons and beds use. The mark is what a photo click
 
 A laser spot on the **front** of a toilet roll is about **50 mm** in front of the mark centre. The instrument’s reference (often its rear edge) is not the pole axis. Both are known offsets, or the shot is taken to a flat target. Leaving them inside a 2 mm σ will bias the point by centimetres.
 
-The A4 sleeve in [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md) is a different mark. Its stored point is the **axis at ground level**. Bearings and surface shots meet the axis at sleeve height, so record that height and plumb the rod to about 1° (`h_s sin λ` is 9 mm at 1° and 17 mm at 2° when the sleeve centre is 0.5 m up). The along-sight part of the lean is invisible in one photo and stays in `σ_λ`. A bearing is the mean of the two levelled edge azimuths and has no radial offset. A tape or laser to the paper is reduced to horizontal **first**, then `+R` (31.8 mm on the full-width stick). An off-centre laser spot still takes `+R`; retake only if it is more than about `R/2` off the axis. The 50 mm figure stays the older toilet-roll example.
+The A4 sleeve in [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md) is a different mark. Its stored point is the **axis at ground level**. Bearings and surface shots meet the axis at sleeve height, so record that height and plumb the rod to about 1° (`h_s sin λ` is 9 mm at 1° and 17 mm at 2° when the sleeve centre is 0.5 m up). The along-sight part of the lean is invisible in one photo and stays in `σ_λ`. The sleeve is glued to the stick; a loose tube is not the mark. Every sleeve bearing carries `sigmaCentringM` (the `σ_centring` in `σ_β² = (σ_px / fx)² + (σ_centring / d)²`): **0.010 m** with a 1° bubble and a tight fit, **0.020 m** if the rod is only known to about 2°. The pixel midline is not this term. Lean plus a sleeve off the stick is 8–24 mm. A bearing is the mean of the two levelled edge azimuths and has no radial offset. A tape or laser to the paper is reduced to horizontal **first**, then `+R` (31.8 mm on the full-width stick). An off-centre laser spot still takes `+R`; retake only if it is more than about `R/2` off the axis. The 50 mm figure stays the older toilet-roll example.
 
 Today `offsetMm` is a scalar and Layer A shifts that same point’s `y`. That is not an arris.
 
@@ -176,7 +176,7 @@ Two-station points **inherit station error**. A station in the 200 mm class does
 
 `fx` is one constant **per phone and per lens**, stored as **`fx / width`** so a resized image does not change the angle. Same for `fy / height`, the principal point, and radial `k1`.
 
-For the iPhone 1× camera (24–26 mm equivalent, 4:3), `fx / width ≈ 0.69–0.75`. The code’s `0.9 × width` is about 20–30% high. Read EXIF `FocalLengthIn35mmFormat` when it is present, as a prior, not as the calibration. Lock zoom at **1×**. Do not use the 0.5× ultra-wide.
+For the iPhone 1× camera (24–26 mm equivalent, 4:3), `fx / width ≈ 0.69–0.75`. The code’s `0.9 × width` is about 20–30% high. Read EXIF `FocalLengthIn35mmFormat` when it is present, and use it only to check that the shot is 1×. Lock zoom at **1×**. Do not use the 0.5× ultra-wide. The prior on the shared `fx` is the taped-rod calibration below, or a checkerboard of known square size for that phone and lens (marker note, §6.3). Not an AprilTag.
 
 Three marks cannot estimate `fx` (four unknowns). Four marks have redundancy 0 and `σ_fx ≈ 5.9%` at 0.1° bearings. Calibrate once: a 4.000 m rod across most of the frame, phone on the bisector at a taped 5 m, repeated. Two-pixel clicks reach about **0.4%**, so **1% is a fair requirement**.
 
@@ -186,7 +186,7 @@ A 10% error in `fx` is not a 10% error in `θ`. On the symmetric 7 m / 20° case
 
 One weighted non-linear least squares. Not Layer A’s turn, then Layer B’s overwrite.
 
-**Unknowns.** Feature `(x, y)` where the normal matrix has rank for them. Per solved photo: `Cx, Cy, ψ`. Mark = feature + offset vector. `fx` is the calibrated constant, not a free parameter.
+**Unknowns.** Feature `(x, y)` where the normal matrix has rank for them. Per solved photo: `Cx, Cy, ψ`. Mark = feature + offset vector. `fx` is one value per phone and lens, with the taped-rod or checkerboard result as its prior. It is not a separate unknown on every photo.
 
 **Determinability** is the rank and condition of the global normal matrix. “Two observations pointing at a point” is not enough if those points are themselves free. Two tapes onto undetermined points fix nothing.
 
