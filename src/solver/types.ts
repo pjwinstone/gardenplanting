@@ -15,7 +15,10 @@ export type UnsetCode =
   | 'danger'
   | 'miss'
   | 'no-observation'
-  | 'parallel-rays';
+  | 'parallel-rays'
+  | 'behind-camera'
+  | 'diverged'
+  | 'sanity';
 
 export type EarlyWarning =
   | 'shallow-intersection'
@@ -85,13 +88,21 @@ export interface SolverPhotoInput {
   gravity?: { x: number; y: number; z: number };
   /** Set when a bubble was required because gravity was refused. */
   bubbleEnforced?: boolean;
+  /**
+   * 1σ residual tilt (pitch and roll), radians, when a bubble stands in for
+   * gravity. Each ray then grows by about ε·v/fx and δ·u·v/(fx²+u²).
+   * Omitted with a bubble uses 0.5°.
+   */
+  bubbleTiltSigmaRad?: number;
   sigmaPx?: number;
   sigmaCentringM?: number;
   /** Replaces the pixel formula for every ray in this photo. */
   bearingSigmaRad?: number;
   /**
-   * Relative 1σ of fx, e.g. 0.01. Omitted means "not calibrated": a resected
-   * station cannot pass the 200 mm class.
+   * Relative 1σ of fx, e.g. 0.01. When set, fx is a parameter with this prior
+   * and every ray from the photo carries it into the ellipses. Omitted means
+   * fx is treated as exact (the caller already folded it into bearing σ, or
+   * the rays must not check a point).
    */
   fxRelativeUncertainty?: number;
   /** Hold yaw (radians). The station position may still be free. */
@@ -110,6 +121,11 @@ export interface SolverDatumInput {
   gardenSign?: 1 | -1;
   /** Default true. The tape is a normal distance, not a pin on the axis point. */
   observeLength?: boolean;
+  /**
+   * Eliminate B_x as well: B is held at (length, 0) and the tape is not an
+   * observation. Use this instead of a tiny σ when a test needs a fixed base.
+   */
+  fixScale?: boolean;
 }
 
 export interface SolverBranchChoice {
@@ -125,7 +141,10 @@ export interface SolveInput {
   angles?: SolverAngleInput[];
   photos?: SolverPhotoInput[];
   branchChoices?: SolverBranchChoice[];
-  /** Drop the worst |w| > 3.29 observation and re-solve, one at a time. */
+  /**
+   * Drop one observation and re-solve, up to three times, only when its |w|
+   * stands clear of the next flagged residual and the variance test then passes.
+   */
   dropBlunders?: boolean;
 }
 
@@ -147,9 +166,27 @@ export interface SolvePoint {
   method?: FixMethod;
   rejected?: { x: number; y: number; semiMajor95M?: number; dangerRatio?: number };
   meetsStationClass?: boolean;
-  stationClassBlock?: 'fx' | 'level' | 'control' | 'ellipse' | 'ambiguous' | 'branch' | 'danger';
+  stationClassBlock?:
+    | 'fx'
+    | 'level'
+    | 'ellipse'
+    | 'ambiguous'
+    | 'branch'
+    | 'danger'
+    | 'unchecked';
   plantable?: boolean;
-  plantableBlock?: 'unchecked' | 'ellipse' | 'no-withheld' | 'withheld-fail' | 'datum' | 'unset';
+  plantableBlock?:
+    | 'unchecked'
+    | 'ellipse'
+    | 'no-withheld'
+    | 'withheld-fail'
+    | 'datum'
+    | 'unset'
+    | 'variance';
+  /** Observation that keeps this point unchecked, when there is one. */
+  uncheckedObservationId?: string;
+  /** Variance factor is high, so checked and plantable are withheld. */
+  varianceHold?: boolean;
   candidates?: { x: number; y: number }[];
   candidateSeparationM?: number;
   thetaRad?: number;
@@ -160,7 +197,7 @@ export interface SolvePoint {
 
 export interface SolveObservation {
   id: string;
-  kind: 'distance' | 'bearing' | 'angle';
+  kind: 'distance' | 'bearing' | 'angle' | 'focal';
   /** Observed minus computed. Metres or radians. Meaningless when used is false. */
   residual: number;
   sigma: number;
@@ -197,7 +234,13 @@ export interface SolveResult {
   unknownCount: number;
   observationCount: number;
   varianceTest: VarianceTest;
+  /** True when a high variance factor scaled the published covariances by σ̂₀². */
+  covarianceScaled: boolean;
+  /** Levenberg–Marquardt reached the 0.1 mm step. False means coordinates were not published. */
+  converged: boolean;
   droppedObservationIds: string[];
+  /** Flagged observations that were not isolated enough to drop. */
+  inseparableObservationIds: string[];
   /** Photos the document adapter refused to resect. */
   skippedPhotos: { id: string; code: 'no-fx' }[];
   datum: { originId: string; axisPointId: string; gardenSign: 1 | -1 };

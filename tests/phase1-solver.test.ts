@@ -21,6 +21,7 @@ import {
   distanceSigma,
   fitCircleGeometric,
   horizontalDistance,
+  angleSumCheck,
   houseTolerance,
   isoscelesRange,
   levelledBearing,
@@ -34,7 +35,7 @@ import {
   trilaterationEllipse,
 } from '../src/solver/index.ts';
 import type { SolveInput, SolverPhotoInput } from '../src/solver/types.ts';
-import { clickBearingUnlevelled, wrap } from '../src/solver/bearing.ts';
+import { clickBearingUnlevelled, tiltBearingSigma, wrap } from '../src/solver/bearing.ts';
 import { invertSpd } from '../src/solver/linalg.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -182,7 +183,7 @@ test('two tapes are unchecked; 40° semi-major is about 101 mm; shallow angle wa
   const truth = { x: L / 2, y: d };
   const range = Math.hypot(L / 2, d);
   const fixed = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: L, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: L, fixScale: true },
     distances: [
       { id: 'AP', a: 'A', b: 'P', slopeM: range, sigmaM: 0.02 },
       { id: 'BP', a: 'B', b: 'P', slopeM: range, sigmaM: 0.02 },
@@ -199,7 +200,7 @@ test('two tapes are unchecked; 40° semi-major is about 101 mm; shallow angle wa
   assert.ok(Math.abs(sumR - fixed.degreesOfFreedom) < 1e-6);
 
   const shallow = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: L, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: L, fixScale: true },
     distances: [
       { id: 'AP', a: 'A', b: 'P', slopeM: Math.hypot(L / 2, 26.584), sigmaM: 0.02 },
       { id: 'BP', a: 'B', b: 'P', slopeM: Math.hypot(L / 2, 26.584), sigmaM: 0.02 },
@@ -210,7 +211,7 @@ test('two tapes are unchecked; 40° semi-major is about 101 mm; shallow angle wa
   assert.ok((S.semiMajor95M ?? 0) > 0.2);
 
   const flat = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: L, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: L, fixScale: true },
     distances: [
       { id: 'AP', a: 'A', b: 'P', slopeM: Math.hypot(L / 2, 0.15), sigmaM: 0.02 },
       { id: 'BP', a: 'B', b: 'P', slopeM: Math.hypot(L / 2, 0.15), sigmaM: 0.02 },
@@ -235,7 +236,7 @@ test('Monte Carlo: 40° errors sit in the predicted ellipse, NEES ≈ 2, about 2
     const ap = range + gaussian(rng) * 0.02;
     const bp = range + gaussian(rng) * 0.02;
     const result = solve({
-      datum: { originId: 'A', axisPointId: 'B', lengthM: L, sigmaM: 1e-8 },
+      datum: { originId: 'A', axisPointId: 'B', lengthM: L, fixScale: true },
       distances: [
         { id: 'AP', a: 'A', b: 'P', slopeM: ap, sigmaM: 0.02 },
         { id: 'BP', a: 'B', b: 'P', slopeM: bp, sigmaM: 0.02 },
@@ -410,7 +411,7 @@ test('two marks and no tape: no coordinate. One tape: two candidates about 20 m 
   assert.equal(bare.unsetCode, 'arc-only');
 
   const oneTape = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: 7, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 7, fixScale: true },
     photos: [photo(clicks)],
     distances: [{ id: 'SA', a: 'S', b: 'A', slopeM: 15, sigmaM: 0.02 }],
   });
@@ -423,7 +424,7 @@ test('two marks and no tape: no coordinate. One tape: two candidates about 20 m 
   assert.ok(solverCoachLines(oneTape).some((l) => l.includes('two candidates')));
 
   const chosen = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: 7, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 7, fixScale: true },
     photos: [photo(clicks)],
     distances: [{ id: 'SA', a: 'S', b: 'A', slopeM: 15, sigmaM: 0.02 }],
     branchChoices: [{ id: 'S', candidateIndex: 0 }],
@@ -468,13 +469,17 @@ test('tapes to both ends fix one station; bearings check it', () => {
   assert.notEqual(station.status, 'unset');
   assert.ok(Math.abs((station.x ?? 0) - S.x) < 1e-3);
   assert.ok(Math.abs((station.y ?? 0) - S.y) < 1e-3);
-  assert.equal(station.meetsStationClass, true);
+  // 63 mm meets the 200 mm precision. The bearings have r < 0.1 and the
+  // tape's MDB shift exceeds 200 mm, so the class stays unchecked (N5).
+  assert.equal(station.status, 'unchecked');
+  assert.equal(station.meetsStationClass, false);
+  assert.equal(station.stationClassBlock, 'unchecked');
   assert.ok((station.semiMajor95M ?? 1) <= 0.2);
-  // Focal length did not have to be declared: the tapes set the coordinate.
+  assert.equal(station.uncheckedObservationId, 'SA');
   assert.ok(result.degreesOfFreedom >= 1);
 });
 
-test('resection recovers the station, meets 200 mm only with fx ≤ 1% and levelled rays', () => {
+test('resection recovers the station; class needs a check, level, and the ellipse', () => {
   const marks = [
     { id: 'A', x: 0, y: 0 },
     { id: 'B', x: 8, y: 0 },
@@ -487,7 +492,7 @@ test('resection recovers the station, meets 200 mm only with fx ≤ 1% and level
   const fx = 0.72;
   const clicks = marks.map((m) => ({ pointId: m.id, ...projectClick(S, yaw, m, width, fx) }));
   const input = (fxOverWidth: number, uncertainty: number | undefined, gravity: boolean): SolveInput => ({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, sigmaM: 1e-6 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
     points: [
       { id: 'C', held: { x: 1, y: 3 } },
       { id: 'D', held: { x: 7, y: 3 } },
@@ -512,15 +517,19 @@ test('resection recovers the station, meets 200 mm only with fx ≤ 1% and level
   assert.ok(Math.abs((station.x ?? 99) - S.x) < 1e-3, `x ${station.x}`);
   assert.ok(Math.abs((station.y ?? 99) - S.y) < 1e-3, `y ${station.y}`);
   assert.ok((station.semiMajor95M ?? 1) <= 0.2, `semi ${station.semiMajor95M}`);
-  assert.equal(station.meetsStationClass, true);
-  assert.equal(station.status, 'checked');
+  // cam:C has r ≈ 0.1 and its MDB shift exceeds 200 mm, so precision is met
+  // and the class is not. A declared 10% prior below absorbs the station shift.
+  assert.equal(station.status, 'unchecked');
+  assert.equal(station.meetsStationClass, false);
+  assert.equal(station.stationClassBlock, 'unchecked');
+  assert.equal(station.uncheckedObservationId, 'cam:C');
 
   const badFx = solve(input(fx * 1.1, 0.1, true));
   const moved = point(badFx, 'S');
   const shift = Math.hypot((moved.x ?? 0) - S.x, (moved.y ?? 0) - S.y);
-  assert.ok(shift > 0.2, `10% fx shift ${shift}`);
+  assert.ok(shift < 0.02, `10% fx absorbed, shift ${shift}`);
   assert.equal(moved.meetsStationClass, false);
-  assert.equal(moved.stationClassBlock, 'fx');
+  assert.equal(moved.stationClassBlock, 'unchecked');
 
   const unlevelled = solve(input(fx, 0.005, false));
   assert.equal(point(unlevelled, 'S').meetsStationClass, false);
@@ -550,7 +559,7 @@ test('photo-station Monte Carlo NEES ≈ 2', () => {
       return { pointId: m.id, px: width / 2 - fx * Math.tan(beta), py: 450 };
     });
     const result = solve({
-      datum: { originId: 'A', axisPointId: 'B', lengthM: 8, sigmaM: 1e-8 },
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
       points: [
         { id: 'C', held: { x: 1, y: 3 } },
         { id: 'D', held: { x: 7, y: 3 } },
@@ -562,7 +571,6 @@ test('photo-station Monte Carlo NEES ≈ 2', () => {
           width,
           height: 900,
           fxOverWidth: fxOver,
-          fxRelativeUncertainty: 0.005,
           gravity: { x: 0, y: 1, z: 0 },
           bearingSigmaRad: sigma,
           clicks,
@@ -630,7 +638,7 @@ test('θ → 0 and the danger circle publish no coordinate', () => {
   const fx = 0.72;
   const ids = ['A', 'B', 'C'];
   const result = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: 6, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 6, fixScale: true },
     points: [{ id: 'C', held: { x: 3, y: 1 } }],
     photos: [
       {
@@ -669,7 +677,7 @@ test('collinear rod uses distance-to-line / range, not |ρ − R| / R', () => {
   const width = 1200;
   const fx = 0.72;
   const result = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
     points: marks.map((m, i) => ({ id: ['A1', 'A0', 'A2'][i], held: m })),
     photos: [
       {
@@ -702,7 +710,7 @@ test('ray crossing: about 43 mm at 90° and about 231 mm at 15°', () => {
   function run(s1: { x: number; y: number }, s2: { x: number; y: number }, mark: { x: number; y: number }) {
     const az = (s: { x: number; y: number }) => Math.atan2(mark.y - s.y, mark.x - s.x);
     return solve({
-      datum: { originId: 'A', axisPointId: 'B', lengthM: 30, sigmaM: 1e-8 },
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 30, fixScale: true },
       points: [
         { id: 'S1', held: s1 },
         { id: 'S2', held: s2 },
@@ -761,7 +769,7 @@ test('one taped edge stays unfixed — no 90° turn', () => {
   assert.ok(solverCoachLines(result).some((l) => l.includes('will not turn 90')));
 
   const checked = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: 7, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 7, fixScale: true },
     points: [{ id: 'C', held: { x: 0, y: 4 } }],
     distances: [
       { id: 'AP', a: 'A', b: 'P', slopeM: 5, sigmaM: 0.02 },
@@ -810,6 +818,25 @@ test('demo shed Q_m is 93 mm and 144 mm, and a flat 50 mm gate false-alarms abou
   assert.match(sentence, /no traverse misclosure/i);
   assert.match(sentence, /93 mm/);
   assert.match(houseCoachLine(angled), /144 mm/);
+
+  // All six interior angles. A 1° error at one corner fails 1.96 σ √n
+  // and is invisible to the 2D test when it sits on the datum azimuth.
+  const interior = SHED.map((_, i) => {
+    const prev = SHED[(i + SHED.length - 1) % SHED.length];
+    const next = SHED[(i + 1) % SHED.length];
+    const here = SHED[i];
+    return Math.abs(
+      wrap(Math.atan2(prev.y - here.y, prev.x - here.x) - Math.atan2(next.y - here.y, next.x - here.x)),
+    );
+  });
+  const exactAngles = angleSumCheck(interior, 0.2 * DEG);
+  assert.equal(exactAngles.pass, true);
+  assert.ok(Math.abs(exactAngles.limitRad - 1.96 * 0.2 * DEG * Math.sqrt(6)) < 1e-12);
+  const kicked = interior.slice();
+  kicked[0] += DEG;
+  const badAngles = angleSumCheck(kicked, 0.2 * DEG);
+  assert.equal(badAngles.pass, false);
+  assert.ok(Math.abs(badAngles.misclosureRad) > badAngles.limitRad);
 });
 
 test('plantable point: ≤ 100 mm, a spare observation, and a withheld distance inside 1.96 σ', () => {
@@ -823,7 +850,7 @@ test('plantable point: ≤ 100 mm, a spare observation, and a withheld distance 
   const fp = Math.hypot(truth.x - F.x, truth.y - F.y);
   const sigma = 0.005;
   const exact = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: L, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: L, fixScale: true },
     points: [
       { id: 'C', held: C },
       { id: 'F', held: F },
@@ -849,7 +876,7 @@ test('plantable point: ≤ 100 mm, a spare observation, and a withheld distance 
   // Two 20 mm tapes at 40° are about 101 mm. A withheld tape does not
   // enter the adjustment, so the point stays unchecked and is not plantable.
   const coarse = solve({
-    datum: { originId: 'A', axisPointId: 'B', lengthM: L, sigmaM: 1e-8 },
+    datum: { originId: 'A', axisPointId: 'B', lengthM: L, fixScale: true },
     points: [{ id: 'F', held: F }],
     distances: [
       { id: 'AP', a: 'A', b: 'P', slopeM: range, sigmaM: 0.02 },
@@ -867,7 +894,7 @@ test('plantable point: ≤ 100 mm, a spare observation, and a withheld distance 
   const trials = 200;
   for (let i = 0; i < trials; i++) {
     const result = solve({
-      datum: { originId: 'A', axisPointId: 'B', lengthM: L, sigmaM: 1e-8 },
+      datum: { originId: 'A', axisPointId: 'B', lengthM: L, fixScale: true },
       points: [
         { id: 'C', held: C },
         { id: 'F', held: F },
@@ -885,7 +912,7 @@ test('plantable point: ≤ 100 mm, a spare observation, and a withheld distance 
   assert.ok(rate > 0.88 && rate < 0.995, `withheld pass ${rate}`);
 });
 
-test('blunders: two-sided χ², |w| > 3.29, MDB, drop one and re-solve', () => {
+test('blunders: upper-tail χ², |w| > 3.29, drop only an isolated residual', () => {
   const truth = { x: 3, y: 4 };
   const C = { x: 0, y: 5 };
   const D = { x: 6, y: 5 };
@@ -909,6 +936,7 @@ test('blunders: two-sided χ², |w| > 3.29, MDB, drop one and re-solve', () => {
     ],
   });
   assert.equal(clean.varianceTest, 'low');
+  assert.ok(solverCoachLines(clean).some((l) => l.includes('not a warning')));
   assert.ok((clean.sigma0 ?? 1) < 0.01);
   for (const o of clean.observations.filter((q) => q.used && q.redundancy > 0.1)) {
     assert.ok(o.mdb != null);
@@ -951,9 +979,37 @@ test('blunders: two-sided χ², |w| > 3.29, MDB, drop one and re-solve', () => {
     ],
     dropBlunders: true,
   });
-  assert.ok(dropped.droppedObservationIds.includes('AP'));
-  assert.ok(Math.abs((point(dropped, 'P').x ?? 0) - truth.x) < 0.02);
-  assert.ok(Math.abs((point(dropped, 'P').y ?? 0) - truth.y) < 0.02);
+  // |w| on AP, BP, DP and the datum tape move together (ratio under 2),
+  // so the correct tapes stay and P is not "repaired" by deleting one.
+  assert.deepEqual(dropped.droppedObservationIds, []);
+  assert.ok(dropped.inseparableObservationIds.includes('AP'));
+  assert.ok(dropped.inseparableObservationIds.includes('BP'));
+  assert.equal(dropped.varianceTest, 'high');
+  assert.equal(point(dropped, 'P').varianceHold, true);
+  assert.equal(point(dropped, 'P').plantable, false);
+  assert.ok(solverCoachLines(dropped).some((l) => l.includes('have not dropped one')));
+
+  // Lasers pin P. One loose tape is then the only |w| over 3.29, and dropping
+  // it makes the variance test pass.
+  const isolated = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 6, fixScale: true },
+    points: [
+      { id: 'C', held: C },
+      { id: 'D', held: D },
+    ],
+    distances: [
+      { id: 'BP', a: 'B', b: 'P', slopeM: dists.BP, sigmaM: 0.002 },
+      { id: 'CP', a: 'C', b: 'P', slopeM: dists.CP, sigmaM: 0.002 },
+      { id: 'DP', a: 'D', b: 'P', slopeM: dists.DP, sigmaM: 0.002 },
+      { id: 'AP', a: 'A', b: 'P', slopeM: dists.AP + 0.5, sigmaM: 0.02 },
+    ],
+    dropBlunders: true,
+  });
+  assert.deepEqual(isolated.droppedObservationIds, ['AP']);
+  assert.deepEqual(isolated.inseparableObservationIds, []);
+  assert.notEqual(isolated.varianceTest, 'high');
+  assert.ok(Math.abs((point(isolated, 'P').x ?? 0) - truth.x) < 0.01);
+  assert.ok(Math.abs((point(isolated, 'P').y ?? 0) - truth.y) < 0.01);
 });
 
 test('noisy redundant network passes the variance test about 95% of the time', () => {
@@ -1044,7 +1100,7 @@ test('schema v1 still loads, offsets are not applied, and a house corner is not 
     { id: 'P', kind: 'OCC', offsetMm: 50 },
   ];
   garden.baselines = [
-    { id: 'BL', a: 'A', b: 'B', lengthM: 4, sigmaM: 1e-8, kind: 'tape', trust: 80 },
+    { id: 'BL', a: 'A', b: 'B', lengthM: 4, sigmaM: 0.02, kind: 'tape', trust: 80 },
   ];
   garden.lines = [
     { id: 'AP', a: 'A', b: 'P', lengthM: 3, sigmaM: 0.001, kind: 'tape' },
@@ -1092,6 +1148,450 @@ test('trust chooses the datum; a second baseline does not change weights', () =>
   assert.equal(point(result, 'A').datumRole, 'origin');
   assert.equal(point(result, 'B').datumRole, 'axis');
   assert.equal(point(result, 'C').status, 'unset');
+});
+
+test('B1: a zero-redundancy tape is named, and a 0.3 m blunder is not a check', () => {
+  // Advisor probe: P(5,5) from A(0,0), C(10,10) collinear with A and P, and B(7,0). σ = 5 mm.
+  const P = { x: 5, y: 5 };
+  const C = { x: 10, y: 10 };
+  const sigma = 0.005;
+  const input = (bp: number): SolveInput => ({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 7, fixScale: true },
+    points: [{ id: 'C', held: C }],
+    distances: [
+      { id: 'AP', a: 'A', b: 'P', slopeM: Math.hypot(P.x, P.y), sigmaM: sigma },
+      { id: 'CP', a: 'C', b: 'P', slopeM: Math.hypot(P.x - C.x, P.y - C.y), sigmaM: sigma },
+      { id: 'BP', a: 'B', b: 'P', slopeM: bp, sigmaM: sigma },
+    ],
+  });
+  const clean = solve(input(Math.hypot(P.x - 7, P.y)));
+  const cleanP = point(clean, 'P');
+  const r = (id: string) => clean.observations.find((o) => o.id === id)?.redundancy ?? -1;
+  assert.ok(Math.abs(r('AP') - 0.5) < 1e-6, `r AP ${r('AP')}`);
+  assert.ok(Math.abs(r('CP') - 0.5) < 1e-6, `r CP ${r('CP')}`);
+  assert.ok(r('BP') <= 0.1, `r BP ${r('BP')}`);
+  assert.equal(cleanP.status, 'unchecked');
+  assert.equal(cleanP.uncheckedObservationId, 'BP');
+  assert.ok(Math.abs((cleanP.semiMajor95M ?? 0) - 0.0141) < 0.001, `semi ${cleanP.semiMajor95M}`);
+  assert.equal(cleanP.plantable, false);
+
+  const blunder = solve(input(Math.hypot(P.x - 7, P.y) + 0.3));
+  const moved = point(blunder, 'P');
+  const shift = Math.hypot((moved.x ?? 0) - P.x, (moved.y ?? 0) - P.y);
+  assert.ok(Math.abs(shift - 0.324) < 0.01, `shift ${shift}`);
+  assert.equal(moved.status, 'unchecked');
+  assert.equal(moved.uncheckedObservationId, 'BP');
+  const worst = Math.max(...blunder.observations.map((o) => Math.abs(o.standardised ?? 0)));
+  assert.ok(worst < 3.29, `|w| ${worst}`);
+});
+
+test('B2: focal length enters the ellipse, including rays from a both-tapes station', () => {
+  const width = 1200;
+  const fxOver = 0.72;
+  const fx = fxOver * width;
+  const cam = { x: 3.5, y: 14 };
+  const marks = [
+    { id: 'A', x: 0, y: 0 },
+    { id: 'B', x: 7, y: 0 },
+    { id: 'R', x: 3.5, y: 10 },
+  ];
+  const yaw = -Math.PI / 2;
+  const clicksAt = (scale: number) =>
+    marks.map((m) => {
+      const beta = wrap(Math.atan2(m.y - cam.y, m.x - cam.x) - yaw);
+      return { pointId: m.id, px: width / 2 - fx * scale * Math.tan(beta), py: 450 };
+    });
+  const rod = (uncertainty: number | undefined, scale = 1) =>
+    solve({
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 7, fixScale: true },
+      points: [{ id: 'R', held: { x: 3.5, y: 10 } }],
+      photos: [
+        {
+          id: 'cam',
+          stationId: 'S',
+          width,
+          height: 900,
+          fxOverWidth: fxOver,
+          fxRelativeUncertainty: uncertainty,
+          gravity: { x: 0, y: 1, z: 0 },
+          bearingSigmaRad: 0.1 * DEG,
+          clicks: clicksAt(scale),
+        },
+      ],
+    });
+  const bare = point(rod(undefined), 'S');
+  const carried = point(rod(0.01), 'S');
+  assert.ok(Math.abs((bare.semiMajor95M ?? 0) - 0.18) < 0.01, `bare ${bare.semiMajor95M}`);
+  assert.ok(Math.abs((carried.semiMajor95M ?? 0) - 0.387) < 0.02, `with fx ${carried.semiMajor95M}`);
+  assert.equal(carried.meetsStationClass, false);
+  assert.equal(carried.stationClassBlock, 'ellipse');
+  assert.notEqual(carried.status, 'checked');
+
+  const rng = mulberry32(11);
+  let inside = 0;
+  let insideBare = 0;
+  let meets = 0;
+  const trials = 200;
+  for (let t = 0; t < trials; t++) {
+    const scale = 1 + gaussian(rng) * 0.01;
+    const clicks = marks.map((m) => {
+      const beta = wrap(Math.atan2(m.y - cam.y, m.x - cam.x) - yaw) + gaussian(rng) * 0.1 * DEG;
+      return { pointId: m.id, px: width / 2 - fx * scale * Math.tan(beta), py: 450 };
+    });
+    const photo = {
+      id: 'cam',
+      stationId: 'S',
+      width,
+      height: 900,
+      fxOverWidth: fxOver,
+      gravity: { x: 0, y: 1, z: 0 } as const,
+      bearingSigmaRad: 0.1 * DEG,
+      clicks,
+    };
+    const withFx = solve({
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 7, fixScale: true },
+      points: [{ id: 'R', held: { x: 3.5, y: 10 } }],
+      photos: [{ ...photo, fxRelativeUncertainty: 0.01 }],
+    });
+    const without = solve({
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 7, fixScale: true },
+      points: [{ id: 'R', held: { x: 3.5, y: 10 } }],
+      photos: [photo],
+    });
+    const P = point(withFx, 'S');
+    const Q = point(without, 'S');
+    if (P.meetsStationClass) meets++;
+    if (P.q && P.x != null && P.y != null && nees2(P.x - cam.x, P.y - cam.y, P.q[0], P.q[1], P.q[2]) <= CHI2_2_95) {
+      inside++;
+    }
+    if (Q.q && Q.x != null && Q.y != null && nees2(Q.x - cam.x, Q.y - cam.y, Q.q[0], Q.q[1], Q.q[2]) <= CHI2_2_95) {
+      insideBare++;
+    }
+  }
+  assert.ok(inside / trials > 0.85 && inside / trials < 0.995, `fx coverage ${inside / trials}`);
+  assert.ok(insideBare / trials < 0.85, `unpropagated coverage ${insideBare / trials}`);
+  assert.equal(meets, 0);
+
+  // S1 is taped to both baseline ends. A mark 20° off axis, also seen from a
+  // held camera, moves about 0.3 m when S1's fx is 10% high and fx is not a
+  // parameter. That must not be published as checked on a ~60 mm ellipse, and
+  // the correct tape must not be the observation that is dropped.
+  const S1 = { x: 4, y: 6 };
+  const azM = -Math.PI / 2 + 20 * DEG;
+  const mark = { x: S1.x + 10 * Math.cos(azM), y: S1.y + 10 * Math.sin(azM) };
+  const S2 = { x: mark.x + 8, y: mark.y };
+  const yaw2 = Math.atan2(mark.y - S2.y, mark.x - S2.x);
+  const click = (scale: number) =>
+    [
+      { id: 'A', x: 0, y: 0 },
+      { id: 'B', x: 8, y: 0 },
+      { id: 'M', ...mark },
+    ].map((m) => {
+      const beta = wrap(Math.atan2(m.y - S1.y, m.x - S1.x) + Math.PI / 2);
+      return { pointId: m.id, px: width / 2 - fx * scale * Math.tan(beta), py: 450 };
+    });
+  const tied = (scale: number, prior: number | undefined) =>
+    solve({
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
+      points: [{ id: 'S2', held: S2 }],
+      distances: [
+        { id: 'S1A', a: 'S1', b: 'A', slopeM: Math.hypot(S1.x, S1.y), sigmaM: 0.005 },
+        { id: 'S1B', a: 'S1', b: 'B', slopeM: Math.hypot(S1.x - 8, S1.y), sigmaM: 0.005 },
+      ],
+      photos: [
+        {
+          id: 'p1',
+          stationId: 'S1',
+          width,
+          height: 900,
+          fxOverWidth: fxOver,
+          gravity: { x: 0, y: 1, z: 0 },
+          bearingSigmaRad: 0.1 * DEG,
+          fxRelativeUncertainty: prior,
+          clicks: click(scale),
+        },
+        {
+          id: 'p2',
+          stationId: 'S2',
+          width,
+          height: 900,
+          fxOverWidth: fxOver,
+          gravity: { x: 0, y: 1, z: 0 },
+          bearingSigmaRad: 0.1 * DEG,
+          yawHeldRad: yaw2,
+          fxRelativeUncertainty: 0.005,
+          clicks: [{ pointId: 'M', px: width / 2, py: 450 }],
+        },
+      ],
+      dropBlunders: true,
+    });
+  const exact = tied(1, undefined);
+  const exactM = point(exact, 'M');
+  assert.ok(Math.abs((exactM.semiMajor95M ?? 0) - 0.058) < 0.008, `tied semi ${exactM.semiMajor95M}`);
+  assert.notEqual(exactM.status, 'checked');
+
+  const wrong = tied(1.1, undefined);
+  const wrongM = point(wrong, 'M');
+  const shift = Math.hypot((wrongM.x ?? 0) - mark.x, (wrongM.y ?? 0) - mark.y);
+  assert.ok(shift > 0.25, `10% fx shift ${shift}`);
+  assert.notEqual(wrongM.status, 'checked');
+  assert.ok((wrongM.semiMajor95M ?? 0) > 0.2, `scaled semi ${wrongM.semiMajor95M}`);
+  assert.equal(wrong.varianceTest, 'high');
+  assert.ok(!wrong.droppedObservationIds.includes('S1A'));
+  assert.ok(wrong.inseparableObservationIds.includes('S1A'));
+
+  const absorbed = tied(1.1, 0.1);
+  const absorbedM = point(absorbed, 'M');
+  const left = Math.hypot((absorbedM.x ?? 0) - mark.x, (absorbedM.y ?? 0) - mark.y);
+  assert.ok(left < 0.01, `absorbed shift ${left}`);
+  assert.notEqual(absorbed.varianceTest, 'high');
+  assert.deepEqual(absorbed.droppedObservationIds, []);
+  assert.notEqual(absorbedM.status, 'checked');
+});
+
+test('B3: a mislabelled click behind the camera is not published', () => {
+  const width = 1200;
+  const fxOver = 0.72;
+  const fx = fxOver * width;
+  const S1 = { x: 0, y: 10 };
+  const S2 = { x: 10, y: 10 };
+  const R1 = { x: 3, y: 4 };
+  const R2 = { x: 8, y: 4 };
+  const seen = { x: 16, y: 11 };
+  const other = { x: 16, y: 9 };
+  const yawOf = (station: { x: number; y: number }, marks: { x: number; y: number }[]) => {
+    let x = 0;
+    let y = 0;
+    for (const m of marks) {
+      const az = Math.atan2(m.y - station.y, m.x - station.x);
+      x += Math.cos(az);
+      y += Math.sin(az);
+    }
+    return Math.atan2(y, x);
+  };
+  const click = (station: { x: number; y: number }, yaw: number, id: string, mark: { x: number; y: number }) => {
+    const beta = wrap(Math.atan2(mark.y - station.y, mark.x - station.x) - yaw);
+    assert.ok(Math.abs(beta) < Math.PI / 2 - 0.05, `${id} beta ${beta}`);
+    return { pointId: id, px: width / 2 - fx * Math.tan(beta), py: 450 };
+  };
+  const yaw1 = yawOf(S1, [R1, R2, seen]);
+  const yaw2 = yawOf(S2, [R1, R2, other]);
+  const result = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 20, fixScale: true },
+    points: [
+      { id: 'S1', held: S1 },
+      { id: 'S2', held: S2 },
+      { id: 'R1', held: R1 },
+      { id: 'R2', held: R2 },
+    ],
+    photos: [
+      {
+        id: 'p1',
+        stationId: 'S1',
+        width,
+        height: 900,
+        fxOverWidth: fxOver,
+        gravity: { x: 0, y: 1, z: 0 },
+        bearingSigmaRad: 0.1 * DEG,
+        clicks: [click(S1, yaw1, 'R1', R1), click(S1, yaw1, 'R2', R2), click(S1, yaw1, 'M', seen)],
+      },
+      {
+        id: 'p2',
+        stationId: 'S2',
+        width,
+        height: 900,
+        fxOverWidth: fxOver,
+        gravity: { x: 0, y: 1, z: 0 },
+        bearingSigmaRad: 0.1 * DEG,
+        clicks: [click(S2, yaw2, 'R1', R1), click(S2, yaw2, 'R2', R2), click(S2, yaw2, 'M', other)],
+      },
+    ],
+  });
+  const M = point(result, 'M');
+  assert.equal(M.status, 'unset');
+  assert.equal(M.x, undefined);
+  assert.equal(M.unsetCode, 'behind-camera');
+  assert.ok(solverCoachLines(result).some((l) => l.includes('behind a camera')));
+});
+
+test('N1: two yaws at one station are not averaged into one ray', () => {
+  const width = 1200;
+  const fxOver = 0.72;
+  const fx = fxOver * width;
+  const S1 = { x: 0, y: 0 };
+  const S2 = { x: 6, y: 1 };
+  const K1 = { x: 8, y: -1 };
+  const K2 = { x: 9, y: -6 };
+  const M = { x: 15, y: -10 };
+  const click = (station: { x: number; y: number }, yaw: number, id: string, mark: { x: number; y: number }) => {
+    const beta = wrap(Math.atan2(mark.y - station.y, mark.x - station.x) - yaw);
+    return { pointId: id, px: width / 2 - fx * Math.tan(beta), py: 450 };
+  };
+  const yawA = Math.atan2(K1.y - S1.y, K1.x - S1.x);
+  const yawB = Math.atan2(K2.y - S1.y, K2.x - S1.x);
+  const yawS = Math.atan2(M.y - S2.y, M.x - S2.x);
+  const result = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 12, fixScale: true },
+    points: [
+      { id: 'S1', held: S1 },
+      { id: 'S2', held: S2 },
+      { id: 'K1', held: K1 },
+      { id: 'K2', held: K2 },
+    ],
+    photos: [
+      {
+        id: 'left',
+        stationId: 'S1',
+        width,
+        height: 900,
+        fxOverWidth: fxOver,
+        gravity: { x: 0, y: 1, z: 0 },
+        bearingSigmaRad: 0.1 * DEG,
+        clicks: [click(S1, yawA, 'K1', K1), click(S1, yawA, 'M', M)],
+      },
+      {
+        id: 'right',
+        stationId: 'S1',
+        width,
+        height: 900,
+        fxOverWidth: fxOver,
+        gravity: { x: 0, y: 1, z: 0 },
+        bearingSigmaRad: 0.1 * DEG,
+        clicks: [click(S1, yawB, 'K2', K2), click(S1, yawB, 'M', M)],
+      },
+      {
+        id: 'far',
+        stationId: 'S2',
+        width,
+        height: 900,
+        fxOverWidth: fxOver,
+        gravity: { x: 0, y: 1, z: 0 },
+        bearingSigmaRad: 0.1 * DEG,
+        clicks: [click(S2, yawS, 'M', M), click(S2, yawS, 'K1', K1)],
+      },
+    ],
+  });
+  const got = point(result, 'M');
+  assert.notEqual(got.unsetCode, 'parallel-rays');
+  assert.ok(Math.abs((got.x ?? 99) - M.x) < 1e-3, `x ${got.x} ${got.unsetCode}`);
+  assert.ok(Math.abs((got.y ?? 99) - M.y) < 1e-3, `y ${got.y}`);
+});
+
+test('N2: a concyclic first triple does not hide a resectable station', () => {
+  const width = 1200;
+  const fxOver = 0.72;
+  const S = { x: 9, y: 6 };
+  const onCircle = [
+    { id: 'C1', x: 4, y: 11 },
+    { id: 'C2', x: 4, y: 1 },
+    { id: 'C3', x: -1, y: 6 },
+  ];
+  const off = { id: 'D', x: 6, y: 8 };
+  const yaw = Math.PI;
+  const click = (mark: { id: string; x: number; y: number }) => {
+    const beta = wrap(Math.atan2(mark.y - S.y, mark.x - S.x) - yaw);
+    assert.ok(Math.abs(beta) < Math.PI / 2 - 0.05, `${mark.id} ${beta}`);
+    return {
+      pointId: mark.id,
+      px: width / 2 - fxOver * width * Math.tan(beta),
+      py: 450,
+    };
+  };
+  const run = (order: { id: string; x: number; y: number }[]) =>
+    solve({
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
+      points: order.map((m) => ({ id: m.id, held: { x: m.x, y: m.y } })),
+      photos: [
+        {
+          id: 'cam',
+          stationId: 'S',
+          width,
+          height: 900,
+          fxOverWidth: fxOver,
+          gravity: { x: 0, y: 1, z: 0 },
+          bearingSigmaRad: 0.1 * DEG,
+          fxRelativeUncertainty: 0.01,
+          clicks: order.map(click),
+        },
+      ],
+    });
+  for (const order of [
+    [...onCircle, off],
+    [off, ...onCircle],
+  ]) {
+    const station = point(run(order), 'S');
+    assert.notEqual(station.unsetCode, 'flat-angle', order.map((m) => m.id).join(','));
+    assert.ok(Math.abs((station.x ?? 99) - S.x) < 1e-2, `x ${station.x} ${station.unsetCode}`);
+    assert.ok(Math.abs((station.y ?? 99) - S.y) < 1e-2, `y ${station.y}`);
+  }
+
+  // A and R1 lie on the ray through the station. They are the first clicks.
+  const saved = { x: 4, y: 8 };
+  const look = -Math.PI / 2;
+  const extra = [
+    { id: 'A', x: 0, y: 0 },
+    { id: 'R1', x: 2, y: 4 },
+    { id: 'B', x: 8, y: 0 },
+    { id: 'C', x: 1, y: 3 },
+    { id: 'D', x: 7, y: 3 },
+  ];
+  const rescued = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
+    points: extra.filter((m) => m.id !== 'A' && m.id !== 'B').map((m) => ({ id: m.id, held: { x: m.x, y: m.y } })),
+    photos: [
+      {
+        id: 'cam',
+        stationId: 'S',
+        width,
+        height: 900,
+        fxOverWidth: fxOver,
+        gravity: { x: 0, y: 1, z: 0 },
+        bearingSigmaRad: 0.1 * DEG,
+        clicks: extra.map((m) => {
+          const beta = wrap(Math.atan2(m.y - saved.y, m.x - saved.x) - look);
+          return { pointId: m.id, px: width / 2 - fxOver * width * Math.tan(beta), py: 450 };
+        }),
+      },
+    ],
+  });
+  const got = point(rescued, 'S');
+  assert.notEqual(got.unsetCode, 'flat-angle');
+  assert.ok(Math.abs((got.x ?? 99) - saved.x) < 1e-2, `rescued ${got.x} ${got.unsetCode}`);
+  assert.ok(Math.abs((got.y ?? 99) - saved.y) < 1e-2, `rescued y ${got.y}`);
+});
+
+test('circle gap is 3 √(σ₀² + σ₁²), and bubble tilt is per ray', () => {
+  // 20 mm tapes: the limit is about 85 mm. A 50 mm gap is not a miss.
+  // On this baseline the closest point has no cross-track, so the normal
+  // matrix leaves it unset as rank rather than calling the tape a blunder.
+  const close = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 10, fixScale: true },
+    distances: [
+      { id: 'AP', a: 'A', b: 'P', slopeM: 6, sigmaM: 0.02 },
+      { id: 'BP', a: 'B', b: 'P', slopeM: 3.95, sigmaM: 0.02 },
+    ],
+  });
+  assert.notEqual(point(close, 'P').unsetCode, 'miss');
+
+  const open = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 10, fixScale: true },
+    distances: [
+      { id: 'AP', a: 'A', b: 'P', slopeM: 6, sigmaM: 0.02 },
+      { id: 'BP', a: 'B', b: 'P', slopeM: 3.85, sigmaM: 0.02 },
+    ],
+  });
+  assert.equal(point(open, 'P').status, 'unset');
+  assert.equal(point(open, 'P').unsetCode, 'miss');
+
+  const tilt = tiltBearingSigma({
+    tiltSigmaRad: 2 * DEG,
+    px: 600,
+    py: 450 + 300,
+    cx: 600,
+    cy: 450,
+    fx: 900,
+  });
+  assert.ok(Math.abs(tilt - (2 * DEG * 300) / 900) < 1e-12, `tilt ${tilt}`);
 });
 
 const fieldFixture = join(root, 'fixtures/field-circle-baseline/garden.json');

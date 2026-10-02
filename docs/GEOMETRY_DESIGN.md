@@ -1,6 +1,6 @@
 # Geometry and triangulation — draft for review
 
-**Status:** proposal only. Revised again after the follow-up maths review on PR #2 (2026-10-02). No solver code in this change. It does not change `AGENTS.md`.
+**Status:** the phase 1 solver in `src/solver/` follows this note, including the PR #3 maths review (2026-10-02). The sections below keep the approved method. Where that review changed a gate, the change is in the section and again in section 8. It does not change `AGENTS.md`.
 
 **Context:** [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md) describes the 0.7.25 code. [ROADMAP.md](ROADMAP.md) Phase 1 is the prototype that would follow this note. Field practice (house-edge baseline, mark offsets, leapfrog, both baseline ends in frame) stays as in [plan-baseline-then-house.md](plan-baseline-then-house.md).
 
@@ -124,7 +124,7 @@ Sample the gravity vector at the shutter (`DeviceMotion.accelerationIncludingGra
 
 Any yaw left in that rotation is absorbed by `ψ`. Which device axis is camera x, in portrait and in landscape, is a follow-up (section 9): do not guess it when writing the solver.
 
-If gravity is missing, require a level bubble and **widen** the bearing σ to the tilt still allowed. An unlevelled phone is not a 0.1° instrument, and it should fail the 200 mm station gate.
+If gravity is missing, require a level bubble and widen **each ray** by the tilt still allowed. A roll ε adds about ε·v/fx (2° at v = 300 px and fx = 900 is 0.67°). A pitch δ adds about δ·u·v/(fx²+u²). The default tilt σ is 0.5° when the caller does not give one. An unlevelled resection does not meet the 200 mm station class.
 
 **Bearing σ** is per ray. Do not inflate it because a rod subtends less than 15°. Weak geometry belongs in the covariance.
 
@@ -164,7 +164,7 @@ Do not average the two candidates, and do not pick the one closer to the perpend
 
 Three known marks give three bearing equations in `(Cx, Cy, ψ)`. Start from a closed form (Pierlot & Van Droogenbroeck, ToTal, 2014, or Tienstra, or Collins). That construction’s determinant, or `|ρ − R| / R` with `ρ` the distance from the circumcentre, measures the danger circle. Refine with Levenberg–Marquardt, wrapped residuals, and analytic Jacobians. Stop when the step is under **0.1 mm**.
 
-For marks that are not collinear, warn when `|ρ − R| / R < 0.2`. That ratio is undefined when the marks are collinear (`R` infinite); use the station’s distance from their line as a fraction of range instead (section 3.1). Accept or reject on the **95% ellipse**, not on the angle alone. With 0.1° rays and stations about 9–14 m out, that 95% semi-major was about 180 mm with the rod in front of the house (depth), 0.75 m with every mark to one side, 1.47 m at 1.2 R from the danger circle, and **4.7 m** at 1.05 R.
+For marks that are not collinear, warn when `|ρ − R| / R < 0.2`. That ratio is undefined when the marks are collinear (`R` infinite); use the station’s distance from their line as a fraction of range instead (section 3.1). Accept or reject on the **95% ellipse**, not on the angle alone. With 0.1° rays and stations about 9–14 m out, the bearing-only 95% semi-major was about 180 mm with the rod in front of the house, 0.75 m with every mark to one side, 1.47 m at 1.2 R from the danger circle, and **4.7 m** at 1.05 R. Those figures do not include `fx`. Section 3.5 puts `fx` in the ellipse; the same rod-in-front station is 387 mm at a 1% prior.
 
 A fourth click on an unknown mark is a **ray**. A second solved station intersects it. Shallow crossings stay weak: two perfect stations, 0.1° rays, mark 10 m away, 95% semi-major about 43 mm at 90°, 117 mm at 30°, **231 mm at 15°**, 693 mm at 5°. For a 100 mm plantable point, treat crossings under about **25–30°** as an early fail. The ellipse is the real gate.
 
@@ -178,13 +178,13 @@ For the iPhone 1× camera (24–26 mm equivalent, 4:3), `fx / width ≈ 0.69–0
 
 Three marks cannot estimate `fx` (four unknowns). Four marks have redundancy 0 and `σ_fx ≈ 5.9%` at 0.1° bearings. Calibrate once: a 4.000 m rod across most of the frame, phone on the bisector at a taped 5 m, repeated. Two-pixel clicks reach about **0.4%**, so **1% is a fair requirement**.
 
-A 10% error in `fx` is not a 10% error in `θ`. On the symmetric 7 m / 20° case, `θ` moves to 18.21° or 22.17°, and the isosceles range moves by **±1.98 m**. In resection layouts the same 10% moved stations by about 0.7–1.8 m, and by up to 4 m near the danger circle. At 1% / 3% / 5% one layout moved 158 / 466 / 766 mm. **A 200 mm station needs `fx` to about 1%**, gravity-levelled rays, and depth or four or more marks. With four marks (baseline ends plus both rod ends) and a good `fx`, the 95% semi-major in that layout was **58 mm**.
+A 10% error in `fx` is not a 10% error in `θ`. On the symmetric 7 m / 20° case, `θ` moves to 18.21° or 22.17°, and the isosceles range moves by **±1.98 m**. In resection layouts the same 10% moved stations by about 0.7–1.8 m, and by up to 4 m near the danger circle. At 1% / 3% / 5% one layout moved 158 / 466 / 766 mm. **A 200 mm station needs the 95% ellipse, after `fx` has been carried into it, to be ≤ 200 mm**, with gravity-levelled rays. Depth and “four or more marks” are not a separate gate. The rod-in-front layout (camera at (3.5, 14), marks A, B, and (3.5, 10), 0.1° rays) is **180 mm** with `fx` exact and **387 mm** with a 1% `fx` prior, so that station does not meet the class once focal error is in the ellipse. A both-tapes station’s own coordinate does not depend on `fx`, but every ray from it does, and those rays carry the same prior.
 
 ## 4. Solver
 
 One weighted non-linear least squares. Not Layer A’s turn, then Layer B’s overwrite.
 
-**Unknowns.** Feature `(x, y)` where the normal matrix has rank for them. Per solved photo: `Cx, Cy, ψ`. Mark = feature + offset vector. `fx` is the calibrated constant, not a free parameter.
+**Unknowns.** Feature `(x, y)` where the normal matrix has rank for them. Per solved photo: `Cx, Cy, ψ`. Mark = feature + offset vector. When a relative σ is given, `fx` is a scale parameter `fx = fx₀(1+s)` with a prior residual `−s` of that σ, and every ray from the photo uses it. The same prior applies to a both-tapes station’s rays. Omitted, `fx` is exact only when the caller has already folded it into the bearing σ; otherwise those rays must not check a point. Do not replace this with a 1e-8 m pseudo-fix. A fixed base is `fixScale` (eliminate `B_x`) or `observeLength: false`.
 
 **Determinability** is the rank and condition of the global normal matrix. “Two observations pointing at a point” is not enough if those points are themselves free. Two tapes onto undetermined points fix nothing.
 
@@ -208,18 +208,19 @@ Sag is about 1.5 mm for 10 m at 20 N, and about **48 mm** for 20 m at 10 N. Tens
 
 A point fixed by exactly two distances, or a three-mark resection, has **redundancy 0**. Residuals are identically zero. A test on `|v| / σ` never fires, and a 1 m blunder is absorbed.
 
-- Global variance factor `σ̂₀² = vᵀ P v / (n − u)`. Here `u` is the count of free unknowns **after** the datum constraints, so `n − u` equals `n − rank`. Test it with a **two-sided** `χ²` on those degrees of freedom.
-- Standardised residual `w_i = v_i / (σ_i √r_i)`, where `r_i` is the redundancy number of that observation. Flag it when `|w_i| > 3.29` (α = 0.1%, two-sided). Drop **one** blunder at a time and re-solve.
-- Marginal detectable blunder `MDB_i ≈ 4.13 σ_i / √r_i` (α = 0.1%, β = 80%). The 4.13 is `3.29 + 0.84`, the same tail as the `w` test.
-- Label the point **fixed but unchecked** when any observation that determines it has `r_i ≲ 0.1`, not only when `r_i` is exactly 0. It may be drawn. It is not a structure corner you trust and not a plantable point.
+- Global variance factor `σ̂₀² = vᵀ P v / (n − u)`. Here `u` is the count of free unknowns **after** the datum constraints, so `n − u` equals `n − rank`. Test it **one-sided, upper tail, α = 5%**. `low` (below the lower 5% point) means the σ’s may be conservative. It is information only, not a warning, so exact data stays quiet. A pass at small redundancy is not a verification.
+- Standardised residual `w_i = v_i / (σ_i √r_i)`, where `r_i` is the redundancy number of that observation. Flag it when `|w_i| > 3.29` (α = 0.1%, two-sided). Drop one observation only when its `|w|` is at least twice the next flagged residual **and** the re-solve is not `high`. Otherwise report the inseparable set and drop nothing. Correlations between `w` can reach 1.
+- On `high` with no isolated blunder, scale the published covariance by `σ̂₀²` for display and withhold checked and plantable. Redundancy, `w`, MDB, and the gates below stay on the a-priori `Q`.
+- Marginal detectable blunder `MDB_i ≈ 4.13 σ_i / √r_i` (α = 0.1%, β = 80%). The 4.13 is `3.29 + 0.84`, the same tail as the `w` test. External reliability is the shift of the point under that blunder, `∇P = Q Jᵀ P ∇l`. It must stay inside the class (200 mm for a station, 100 mm for a plantable point).
+- Label the point **fixed but unchecked** when any observation that moves it has `r_i ≲ 0.1`, or that MDB shift exceeds the class. Name the observation. The maximum redundancy is not the test. The point may be drawn. It is not a structure corner you trust and not a plantable point. A station meets its class only when it is also checked.
 - **Field rule:** every structure corner and every plantable point needs at least one surplus observation (a third tape, a diagonal, a second station, or a withheld check).
 
 ### 4.3 Initialisation
 
 1. Apply the minimal datum (section 1).
-2. Intersect circles where two distances exist. If noise keeps them apart, take the closest point on the line of centres and mark it weak.
+2. Intersect circles where two distances exist. If they miss by at most `3 √(σ₀²+σ₁²)` (about 85 mm for two 20 mm tapes), take the closest point on the line of centres and mark it weak. A larger gap is a miss, not a weak point. A weak point that then has a null direction (the line of centres) stays unset as rank rather than as a blunder.
 3. Resect photos from the closed form in section 3.4, then LM.
-4. Intersect rays for marks seen from two stations.
+4. Intersect rays for marks seen from two stations. Both ray parameters must be positive. After adjustment, every predicted bearing must lie in front of its camera (`|β| < 90°`) and at least 0.5 m from it, or the free mark (else the free station) is unset as `behind-camera`. Do not publish a coordinate whose a-priori 95% semi-major exceeds 5 m (`sanity`). Levenberg–Marquardt that does not reach the 0.1 mm step unsets free points as `diverged`. The resection seed tries every triple, not the first three clicks, and `flat-angle` is only the θ → 0 guard. Yaw is estimated per photo.
 5. Leave everything the normal matrix cannot carry without coordinates.
 
 **House polygon.** Vertices are point ids in order. The distance between corner 1 and corner N is a **wall**, not a misclosure. The 0.7.25 close check compares that wall with 50 mm. This proposal does not.
@@ -240,7 +241,11 @@ When angles do exist, propagate the 2×2 misclosure covariance `Q_m` from the di
 
 `mᵀ Q_m⁻¹ m ≤ χ²(2, 0.95) = 5.99`
 
-and show **2.45 times the semi-major of `Q_m`**. There is no fixed millimetre threshold.
+and show **2.45 times the semi-major of `Q_m`**. There is no fixed millimetre threshold. Keep that 2D test. When all `n` interior angles are measured, also require
+
+`|Σα − (n−2)·180°| ≤ 1.96 σ √n`
+
+(`σ√n` is 0.49° for six angles at 0.2°). Do not replace the two tests with one joint χ²(3) at 7.81: a 1° error at one vertex can fail the 2D test and still pass the joint test, and a 1° error at another vertex is invisible to the 2D test alone. Angles that enter the global adjustment already have `w`-tests.
 
 For the synthetic shed (HSE01–HSE06) that semi-major is:
 
@@ -287,7 +292,7 @@ Early warnings, with the ellipse still deciding:
 |---|---|
 | Datum tape | Its residual and `w`-test. Not “equal to L by construction”. |
 | Trilaterated point, checked | 95% semi-major within the class you asked for. At σ = 20 mm that is about **100 mm** near 40° and about **50 mm** near 90°, not a flat 50 mm everywhere. |
-| Photo station | 95% semi-major **≤ 200 mm**, and only with `fx` calibrated to **≤ 1%**, levelled rays, and depth or 4+ marks, after the station is unique (both-end tapes, a third mark, or an explicit branch choice). Two marks plus one tape is two candidates, not this class. |
+| Photo station | 95% semi-major **≤ 200 mm** after `fx` is in the ellipse, levelled rays, and the station **checked**, once it is unique (both-end tapes, a third mark, or an explicit branch choice). A both-tapes coordinate does not itself depend on `fx`. Two marks plus one tape is two candidates, not this class. Precision without a check is “meets precision, unchecked”. |
 | Plantable point | 95% semi-major **≤ 100 mm**, redundancy at least 1 (`r_i ≲ 0.1` is still unchecked), and a withheld **distance** inside `1.96 √(gᵀ Q_xx g + σ_check²)`. The 1.96 is the 1D 95% factor. `gᵀ Q_xx g` is the variance of the predicted length, including correlation of the two ends, not a point’s ellipse. |
 | House check | No fixed millimetre gate. Distances only: no traverse misclosure. With angles: `mᵀ Q_m⁻¹ m ≤ 5.99`, and show 2.45 times the semi-major of `Q_m`. On the demo shed that is **93 mm** (tapes, σ = 20 mm) or **144 mm** (plus 0.2° angles). A flat 50 mm gate false-alarms on **35%** of correct distance-only sheds at σ = 20 mm. |
 | Two marks and one tape, in the usual range; rank failure; ellipse over the class | **Two candidates or none.** Not a coordinate you would plant from. |
@@ -350,12 +355,17 @@ GardenDocument (one frame)
 5. **`fx`.** One constant per phone and 1× lens. Not per photo.
 6. **Circle.** Geometric fit. Report `σ_R`. Short arcs do not determine a radius.
 7. **ARKit.** Not required if bearings are levelled and calibrated and the redundancy rules above are kept.
+8. **PR #3 review.** One-sided variance test; hard datum by elimination plus per-parameter Marquardt, never a 1e-8 m σ; rank threshold 1e-10 on the equilibrated normal matrix, with “too weak” decided by the ellipse and the 5 m sanity cap; θ < 1° is only a numeric guard; the gap, bubble, `fx`, and angle-sum rules above; arc∩arc then the global adjustment, trying every triple. DeviceMotion stays unlevelled when the photo has no camera-frame gravity vector. SVD of the whitened `A` was left optional.
 
 ## 9. Follow-ups
 
 Applied from the follow-up review, in the sections above: `w` critical value 3.29, unchecked at `r_i ≲ 0.1`, the levelled bearing `atan2(−x_level, z_level)`, bearing σ without a per-ray plumb term, ellipses depending on the datum, collinear marks not using `|ρ − R| / R`, and the old sign described as a wrong station rather than “the mirror”.
 
-Still to pin down when the camera code is written, not in this note:
+Still open after the phase 1 solver:
 
-1. Map `DeviceMotion` axes onto the camera for portrait and landscape, including EXIF orientation and WebKit’s sign for `accelerationIncludingGravity`.
-2. A unit test with a known pitch and roll, and a field check with the phone level on a table.
+1. Map `DeviceMotion` axes onto the camera for portrait and landscape, including whether the browser pre-rotates pixels, EXIF orientation, rear/front mirroring and the principal point, and the WebKit versus Chrome sign of `accelerationIncludingGravity`. A phone flat on a level table should read about `(0, +1, 0)` in the camera frame. Sample gravity at the shutter, not a session average. Field-test at known tilts.
+2. `pickByBearings` does not choose a side for a distance-fixed point, and it compares bearings across photos. The garden-sign fallback covers the cases tried so far.
+3. A tighter field-of-view margin than `|β| < 90°`.
+4. One `fx` parameter per phone, shared by yaw-only extras, rather than one per photo.
+5. The UI must not offer a 1e-8 m σ as a way to pin a coordinate. The solver does not turn a tiny JSON σ into `fixScale`.
+6. When a resection fails and a mark then has no solved station, the coach still says `no-observation`.

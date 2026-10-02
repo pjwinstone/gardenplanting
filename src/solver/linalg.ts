@@ -124,9 +124,10 @@ export function jacobiEigen(matrix: number[][]): Eigen {
 }
 
 /**
- * Diagonal equilibration. A datum tape at 1e-8 m and a 0.1° bearing put
+ * Diagonal equilibration. A very tight distance beside a 0.1° bearing puts
  * diagonals many orders apart; Jacobi and a global eigenvalue test then
  * call a healthy network singular. Scale each unknown by 1/√Nᵢᵢ first.
+ * A fixed coordinate is eliminated. It is not a 1e-8 m pseudo-observation.
  */
 export function equilibrate(matrix: number[][]): { scaled: number[][]; scale: number[] } {
   const n = matrix.length;

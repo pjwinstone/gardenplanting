@@ -117,6 +117,32 @@ export function houseTolerance(
   };
 }
 
+export interface AngleSumCheck {
+  /** Σα − (n−2)π, radians. */
+  misclosureRad: number;
+  /** 1.96 σ √n, radians. */
+  limitRad: number;
+  pass: boolean;
+}
+
+/**
+ * Interior-angle condition when all n corners were measured.
+ * |Σα − (n−2)π| ≤ 1.96 σ √n. This sits beside the 2D Q_m test; it is not
+ * replaced by it. A 1° error on the datum corner is invisible to Q_m.
+ */
+export function angleSumCheck(interiorAnglesRad: number[], sigmaRad: number): AngleSumCheck {
+  const n = interiorAnglesRad.length;
+  const expect = (n - 2) * Math.PI;
+  const sum = interiorAnglesRad.reduce((s, a) => s + a, 0);
+  const misclosureRad = wrap(sum - expect);
+  const limitRad = 1.96 * sigmaRad * Math.sqrt(n);
+  return {
+    misclosureRad,
+    limitRad,
+    pass: Math.abs(misclosureRad) <= limitRad + 1e-15,
+  };
+}
+
 export function misclosureChi2(q: [[number, number], [number, number]], m: Xy): number {
   const det = q[0][0] * q[1][1] - q[0][1] * q[1][0];
   if (!(Math.abs(det) > 0)) return Infinity;

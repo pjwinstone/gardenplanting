@@ -1,21 +1,27 @@
 /**
  * Phase-1 geometry prototype.
  *
- * Assumptions the geometry note left open, so they are named here rather than
- * folded into a formula:
- * - The global variance-factor test is two-sided at 5%.
- * - A subtended angle under 1° is treated as θ → 0 and publishes no station.
- * - Two distance circles that miss by more than 0.2 m do not get a weak point.
- * - With no gravity vector, a bubble counts as levelled only when bearing σ
- *   is at least 0.5°.
- * - "Depth" means the nearest control mark is at most 75% of the farthest.
- * - A station trilaterated by tapes to both baseline ends does not need the
- *   1% focal-length rule: fx does not set that coordinate. The rule still
- *   applies to a resected station.
- * - House Q_m holds the first wall's azimuth (the datum) and puts angle noise
- *   on the other n−1 turning angles. That is what reproduces 93 mm and 144 mm.
+ * Choices confirmed by the maths review of PR #3, named here so they stay
+ * visible:
+ * - The variance-factor test is one-sided, upper tail, at 5%. 'low' is
+ *   information only and is not a warning.
+ * - A subtended angle under 1° is only a numeric guard for θ → 0.
+ * - Two distance circles that miss by more than 3 √(σ₀²+σ₁²) are a miss.
+ *   A smaller gap is a weak point.
+ * - A bubble with no gravity widens each ray by the tilt σ (default 0.5°):
+ *   about ε·v/fx for roll and δ·u·v/(fx²+u²) for pitch.
+ * - fx, when a relative σ is supplied, is a parameter with that prior. Rays
+ *   from a both-tapes station carry it. Depth and "four marks" are not a class.
+ * - A point is checked only when every observation that moves it has r > 0.1
+ *   and an MDB-sized shift inside the class. A high variance factor withholds
+ *   checked and plantable, and scales the published covariance by σ̂₀².
+ * - One blunder is dropped only when its |w| is at least twice the next
+ *   flagged residual and the variance test then passes.
+ * - House Q_m holds the first azimuth and puts angle noise on the other n−1
+ *   turnings. All n interior angles also face |Σα−(n−2)π| ≤ 1.96 σ √n.
  * - v1 offsetMm is not applied. A constant frame offset is used only when the
  *   caller supplies markOffsetM.
+ * - fixScale eliminates B_x. A 1e-8 m σ is not a substitute for that.
  */
 
 export { ELLIPSE_95, CHI2_2_95, W_CRITICAL, MDB_FACTOR, Z_95 } from './constants';
@@ -25,6 +31,7 @@ export { levelledBearing, predictedBearing, clickBearingUnlevelled, bearingSigma
 export {
   arcStation,
   resectThree,
+  resectFromMarks,
   trilaterationEllipse,
   isoscelesRange,
   horizontalDistance,
@@ -32,7 +39,7 @@ export {
   dangerAssessment,
   intersectRays,
 } from './geometry';
-export { houseTolerance, openTraverse, traverseGeometry, misclosureChi2 } from './house';
+export { houseTolerance, openTraverse, traverseGeometry, misclosureChi2, angleSumCheck } from './house';
 export { fitCircleGeometric, kasaSeed } from './circleFit';
 export { chi2Cdf, chi2Ppf, nees2, ellipseFrom2x2 } from './stats';
 export type {

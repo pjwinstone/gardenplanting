@@ -85,6 +85,60 @@ export function levelRay(ray: Vec3, gravity: Vec3): Vec3 {
 }
 
 /**
+ * ∂β/∂fx for the unlevelled click, β = atan2(cx − px, fx).
+ */
+export function clickBearingFxDerivative(px: number, cx: number, fx: number): number {
+  const u = cx - px;
+  return -u / (fx * fx + u * u);
+}
+
+/**
+ * ∂β/∂s where fx = fx₀(1+s) and fy = fy₀(1+s). Pass the current fx and fy.
+ */
+export function levelledBearingScaleDerivative(opts: {
+  px: number;
+  py: number;
+  cx: number;
+  cy: number;
+  fx: number;
+  fy: number;
+  gravity?: Vec3 | null;
+}): number {
+  const fx = opts.fx;
+  const fy = opts.fy;
+  if (!opts.gravity) return clickBearingFxDerivative(opts.px, opts.cx, fx) * fx;
+  const up = opts.px - opts.cx;
+  const vp = opts.py - opts.cy;
+  const { pitch, roll } = pitchRollFromGravity(opts.gravity);
+  const R = mulMat(rx(pitch), rz(roll));
+  const ray = mul3(R, { x: up / fx, y: vp / fy, z: 1 });
+  const drdx = mul3(R, { x: -up / (fx * fx), y: 0, z: 0 });
+  const drdy = mul3(R, { x: 0, y: -vp / (fy * fy), z: 0 });
+  const n2 = ray.x * ray.x + ray.z * ray.z || 1e-18;
+  const dBeta = (dRay: Vec3) => (-ray.z / n2) * dRay.x + (ray.x / n2) * dRay.z;
+  return dBeta(drdx) * fx + dBeta(drdy) * fy;
+}
+
+/**
+ * Extra bearing σ from a residual tilt.
+ * Roll ε contributes about ε·v/fx. Pitch δ contributes about δ·u·v/(fx²+u²).
+ */
+export function tiltBearingSigma(opts: {
+  tiltSigmaRad: number;
+  px: number;
+  py: number;
+  cx: number;
+  cy: number;
+  fx: number;
+}): number {
+  const u = opts.px - opts.cx;
+  const v = opts.py - opts.cy;
+  const roll = opts.tiltSigmaRad * (v / opts.fx);
+  const pitch = (opts.tiltSigmaRad * u * v) / (opts.fx * opts.fx + u * u);
+  return Math.hypot(roll, pitch);
+}
+
+/**
  * Horizontal bearing of one click.
  * Without gravity this is the unlevelled atan2(cx − px, fx), which is only
  * honest when a bubble has already forced the phone level.

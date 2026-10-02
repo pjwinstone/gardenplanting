@@ -228,11 +228,26 @@ export function solverCoachLines(result: SolveResult): string[] {
     );
   }
   if (result.degreesOfFreedom > 0 && result.sigma0 != null) {
-    lines.push(
-      `Variance factor σ̂₀ is ${result.sigma0.toFixed(2)} on ${result.degreesOfFreedom} degrees of freedom. The variance test is ${result.varianceTest}.`,
-    );
+    if (result.varianceTest === 'low') {
+      lines.push(
+        `Variance factor σ̂₀ is ${result.sigma0.toFixed(2)}. That is low, so the σ's may be conservative. This is not a warning.`,
+      );
+    } else if (result.varianceTest === 'high') {
+      lines.push(
+        `Variance factor σ̂₀ is ${result.sigma0.toFixed(2)} on ${result.degreesOfFreedom} degrees of freedom. That is high, so nothing is checked or plantable.`,
+      );
+    } else {
+      lines.push(
+        `Variance factor σ̂₀ is ${result.sigma0.toFixed(2)} on ${result.degreesOfFreedom} degrees of freedom. The upper-tail test does not reject it. That is not a verification.`,
+      );
+    }
   } else {
     lines.push('Nothing is spare yet, so σ̂₀ is not defined.');
+  }
+  if (result.inseparableObservationIds.length > 1) {
+    lines.push(
+      `These residuals move together, so I have not dropped one: ${result.inseparableObservationIds.join(', ')}.`,
+    );
   }
   for (const o of result.observations) {
     if (!o.used || o.kind !== 'distance') continue;
@@ -293,6 +308,15 @@ function pointCoach(p: SolvePoint): string[] {
     if (p.unsetCode === 'rank') {
       return [`${p.id} is unset. The normal matrix cannot carry it.`];
     }
+    if (p.unsetCode === 'behind-camera') {
+      return [`${p.id} is unset. A ray places it behind a camera, or closer than half a metre.`];
+    }
+    if (p.unsetCode === 'diverged') {
+      return [`${p.id} is unset. The adjustment did not converge, so I have not published it.`];
+    }
+    if (p.unsetCode === 'sanity') {
+      return [`${p.id} is unset. Its 95% semi-major is too large to publish.`];
+    }
     if (p.unsetCode === 'miss') {
       return [`${p.id} is unset. Those distances do not meet.`];
     }
@@ -300,11 +324,19 @@ function pointCoach(p: SolvePoint): string[] {
   }
   const lines: string[] = [];
   if (p.status === 'unchecked') {
-    lines.push(
-      p.branchChoice
-        ? `${p.id} is an explicit branch choice, so it is fixed but unchecked.`
-        : `${p.id} is fixed but unchecked. Nothing spare is checking it.`,
-    );
+    if (p.varianceHold) {
+      lines.push(`${p.id} is not checked. The variance factor is high.`);
+    } else if (p.uncheckedObservationId) {
+      lines.push(
+        `${p.id} is fixed but unchecked. ${p.uncheckedObservationId} does not check it.`,
+      );
+    } else {
+      lines.push(
+        p.branchChoice
+          ? `${p.id} is an explicit branch choice, so it is fixed but unchecked.`
+          : `${p.id} is fixed but unchecked. Nothing spare is checking it.`,
+      );
+    }
   }
   if (p.semiMajor95M != null && p.x != null) {
     lines.push(`${p.id} 95% semi-major ${mm(p.semiMajor95M)}.`);

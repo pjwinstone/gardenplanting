@@ -249,6 +249,52 @@ export function resectThree(
   };
 }
 
+/**
+ * Try every triple. The first three clicks are not special: a concyclic
+ * triple is skipped in favour of a better-conditioned one. Failure is
+ * `danger` when a finite arc still will not resect, and `flat-angle` only
+ * when a subtended angle is the numeric θ → 0 guard.
+ */
+export function resectFromMarks(marks: { x: number; y: number; bearing: number }[]): {
+  start: ResectionStart | null;
+  failure: 'flat-angle' | 'danger' | 'miss' | null;
+} {
+  if (marks.length < 3) return { start: null, failure: 'miss' };
+  let best: ResectionStart | null = null;
+  let sawFlat = false;
+  let sawOther = false;
+  for (let i = 0; i < marks.length; i++) {
+    for (let j = i + 1; j < marks.length; j++) {
+      for (let k = j + 1; k < marks.length; k++) {
+        const triple = [marks[i], marks[j], marks[k]];
+        const attempt = resectThree(triple);
+        if (!attempt) {
+          const ab = arcStation({
+            a: triple[0],
+            b: triple[1],
+            bearingA: triple[0].bearing,
+            bearingB: triple[1].bearing,
+          });
+          const ac = arcStation({
+            a: triple[0],
+            b: triple[2],
+            bearingA: triple[0].bearing,
+            bearingB: triple[2].bearing,
+          });
+          if (!Number.isFinite(ab.radiusM) || !Number.isFinite(ac.radiusM)) sawFlat = true;
+          else sawOther = true;
+          continue;
+        }
+        if (!best || attempt.danger.ratio > best.danger.ratio) best = attempt;
+      }
+    }
+  }
+  if (best) return { start: best, failure: null };
+  if (sawOther) return { start: null, failure: 'danger' };
+  if (sawFlat) return { start: null, failure: 'flat-angle' };
+  return { start: null, failure: 'miss' };
+}
+
 function yawFromBearings(station: Xy, marks: { x: number; y: number; bearing: number }[]): number {
   return circularMean(
     marks.map((m) => wrap(Math.atan2(m.y - station.y, m.x - station.x) - m.bearing)),
@@ -264,17 +310,28 @@ function bearingCost(station: Xy, yaw: number, marks: { x: number; y: number; be
   return s;
 }
 
-/** Absolute-azimuth ray intersection. Parallel rays return null. */
-export function intersectRays(s1: Xy, az1: number, s2: Xy, az2: number): Xy | null {
+export interface RayHit {
+  point: Xy;
+  /** True when the crossing is behind either camera. Not a seed. */
+  behind: boolean;
+}
+
+/**
+ * Absolute-azimuth ray intersection.
+ * Parallel rays return null. A crossing with t ≤ 0 on either ray is behind
+ * that camera and is returned with `behind` set, not as a point to publish.
+ */
+export function intersectRays(s1: Xy, az1: number, s2: Xy, az2: number): RayHit | null {
   const d1x = Math.cos(az1);
   const d1y = Math.sin(az1);
   const d2x = Math.cos(az2);
   const d2y = Math.sin(az2);
   const det = d1x * d2y - d1y * d2x;
   if (Math.abs(det) < 1e-10) return null;
-  const t = ((s2.x - s1.x) * d2y - (s2.y - s1.y) * d2x) / det;
-  if (t < 0) return null;
-  return { x: s1.x + t * d1x, y: s1.y + t * d1y };
+  const t1 = ((s2.x - s1.x) * d2y - (s2.y - s1.y) * d2x) / det;
+  const t2 = ((s2.x - s1.x) * d1y - (s2.y - s1.y) * d1x) / det;
+  const point = { x: s1.x + t1 * d1x, y: s1.y + t1 * d1y };
+  return { point, behind: t1 <= 1e-6 || t2 <= 1e-6 };
 }
 
 /** Crossing angle of two directions, in (0, π/2]. */

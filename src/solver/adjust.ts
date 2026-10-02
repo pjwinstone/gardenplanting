@@ -5,16 +5,20 @@
  */
 
 import {
-  FX_RELATIVE_MAX,
+  BUBBLE_TILT_RAD,
+  GAP_SIGMA_FACTOR,
   LM_STEP_M,
   MDB_FACTOR,
+  MIN_RAY_RANGE_M,
   PLANTABLE_CLASS_M,
   RAY_CROSS_WARN_DEG,
+  SANITY_SEMI_MAJOR_M,
   STATION_CLASS_M,
   TRI_ANGLE_WARN_MAX_DEG,
   TRI_ANGLE_WARN_MIN_DEG,
   UNCHECKED_REDUNDANCY,
   W_CRITICAL,
+  W_ISOLATION_RATIO,
   Z_95,
 } from './constants';
 import {
@@ -30,11 +34,18 @@ import {
   intersectionAngle,
   intersectCircles,
   intersectRays,
-  resectThree,
+  resectFromMarks,
   type Xy,
 } from './geometry';
 import { invertSpd, scaledEigen, solveEquilibrated, zeros } from './linalg';
-import { bearingSigma, levelledBearing, predictedBearing, wrap } from './bearing';
+import {
+  bearingSigma,
+  levelledBearing,
+  levelledBearingScaleDerivative,
+  predictedBearing,
+  tiltBearingSigma,
+  wrap,
+} from './bearing';
 import { ellipseFrom2x2, varianceFactorTest } from './stats';
 import type {
   EarlyWarning,
@@ -51,7 +62,7 @@ import type {
 
 interface Param {
   owner: string;
-  kind: 'x' | 'y' | 'yaw';
+  kind: 'x' | 'y' | 'yaw' | 'fx';
   photoId?: string;
 }
 
@@ -64,9 +75,13 @@ interface DistPrep {
 interface BearingPrep {
   photo: SolverPhotoInput;
   pointId: string;
+  px: number;
+  py: number;
   bearing: number;
   sigma: number;
   levelled: boolean;
+  /** 1σ tilt added in quadrature when a bubble stands in for gravity. */
+  tiltSigmaRad: number;
 }
 
 interface PointState {
@@ -85,23 +100,39 @@ interface PointState {
   dangerKind?: 'circle' | 'line';
   markCount?: number;
   levelled?: boolean;
-  fxOk?: boolean;
-  controlOk?: boolean;
 }
 
-const BUBBLE_MIN_SIGMA_RAD = (0.5 * Math.PI) / 180;
-const CIRCLE_GAP_WEAK_M = 0.2;
+interface ObsFn {
+  id: string;
+  kind: 'distance' | 'bearing' | 'angle' | 'focal';
+  sigma: number;
+  pointIds: string[];
+  residual: (x: number[]) => number;
+  jacobian: (x: number[]) => number[];
+  predict?: (x: number[]) => number;
+}
 
 export function solve(input: SolveInput): SolveResult {
   const dropped: string[] = [];
+  const inseparable: string[] = [];
   let current = input;
   let result = solveOnce(current);
   if (input.dropBlunders) {
     for (let n = 0; n < 3; n++) {
-      const worst = result.observations
-        .filter((o) => o.used && o.flagged && o.standardised != null)
-        .sort((a, b) => Math.abs(b.standardised ?? 0) - Math.abs(a.standardised ?? 0))[0];
-      if (!worst) break;
+      const flagged = result.observations
+        .filter((o) => o.used && o.flagged && o.standardised != null && o.kind !== 'focal')
+        .sort((a, b) => Math.abs(b.standardised ?? 0) - Math.abs(a.standardised ?? 0));
+      const worst = flagged[0];
+      if (!worst?.standardised) break;
+      const second = flagged[1];
+      const ratio = second?.standardised
+        ? Math.abs(worst.standardised) / Math.abs(second.standardised)
+        : Infinity;
+      if (second && ratio < W_ISOLATION_RATIO) {
+        for (const o of flagged) if (!inseparable.includes(o.id)) inseparable.push(o.id);
+        break;
+      }
+      const previous = result;
       dropped.push(worst.id);
       const datumDropped = worst.id.startsWith('datum:');
       current = {
@@ -110,16 +141,25 @@ export function solve(input: SolveInput): SolveResult {
         distances: (current.distances ?? []).filter((d) => d.id !== worst.id),
         angles: (current.angles ?? []).filter((d) => d.id !== worst.id),
         photos: (current.photos ?? []).map((p) =>
-          p.id === worst.id ? { ...p, clicks: [] } : {
-            ...p,
-            clicks: p.clicks.filter((c) => `${p.id}:${c.pointId}` !== worst.id),
-          },
+          p.id === worst.id
+            ? { ...p, clicks: [] }
+            : {
+                ...p,
+                clicks: p.clicks.filter((c) => `${p.id}:${c.pointId}` !== worst.id),
+              },
         ),
       };
       result = solveOnce(current);
+      if (result.varianceTest === 'high') {
+        for (const o of flagged) if (!inseparable.includes(o.id)) inseparable.push(o.id);
+        dropped.pop();
+        result = previous;
+        break;
+      }
     }
   }
   result.droppedObservationIds = dropped;
+  result.inseparableObservationIds = inseparable;
   return result;
 }
 
@@ -127,6 +167,7 @@ function solveOnce(input: SolveInput): SolveResult {
   const gardenSign = input.datum.gardenSign ?? 1;
   const originId = input.datum.originId;
   const axisId = input.datum.axisPointId;
+  const scaleFixed = input.datum.fixScale === true;
   const pointInputs = new Map((input.points ?? []).map((p) => [p.id, p]));
   for (const id of [originId, axisId]) {
     if (!pointInputs.has(id)) pointInputs.set(id, { id });
@@ -247,11 +288,6 @@ function solveOnce(input: SolveInput): SolveResult {
     const knownMarks = uniqueMarks(photoBearings.filter((b) => known(b.pointId) && b.pointId !== stationId));
     s.markCount = knownMarks.length;
     s.levelled = photos.every((p) => photoLevelled(p));
-    s.fxOk = photos.every(
-      (p) => p.fxRelativeUncertainty != null && p.fxRelativeUncertainty <= FX_RELATIVE_MAX,
-    );
-    // Depth is filled in once a pose exists. Four marks already satisfy the control bar.
-    s.controlOk = knownMarks.length >= 4;
 
     if (held.has(stationId)) {
       s.x = held.get(stationId)!.x;
@@ -339,22 +375,22 @@ function solveOnce(input: SolveInput): SolveResult {
     }
 
     if (knownMarks.length >= 3) {
-      const triple = knownMarks.slice(0, 3).map((id) => {
+      const aimed = knownMarks.map((id) => {
         const p = xyOf(id)!;
         const b = photoBearings.find((br) => br.pointId === id)!;
         return { x: p.x, y: p.y, bearing: b.bearing };
       });
-      const resect = resectThree(triple);
-      if (!resect) {
-        s.unsetCode = 'flat-angle';
+      const resect = resectFromMarks(aimed);
+      if (!resect.start) {
+        s.unsetCode = resect.failure === 'flat-angle' ? 'flat-angle' : 'danger';
         continue;
       }
-      s.x = resect.position.x;
-      s.y = resect.position.y;
+      s.x = resect.start.position.x;
+      s.y = resect.start.position.y;
       s.method = 'resection';
-      s.dangerRatio = resect.danger.ratio;
-      s.dangerKind = resect.danger.kind;
-      if (resect.danger.warn) s.earlyWarning = 'danger';
+      s.dangerRatio = resect.start.danger.ratio;
+      s.dangerKind = resect.start.danger.kind;
+      if (resect.start.danger.warn) s.earlyWarning = 'danger';
       s.unsetCode = undefined;
       classifyControl(s, knownMarks, xyOf);
       continue;
@@ -391,8 +427,8 @@ function solveOnce(input: SolveInput): SolveResult {
     const s2 = stations[1];
     const b1 = sightings.find((b) => b.photo.stationId === s1)!;
     const b2 = sightings.find((b) => b.photo.stationId === s2)!;
-    const yaw1 = initialYaw(s1, bearings, xyOf, input);
-    const yaw2 = initialYaw(s2, bearings, xyOf, input);
+    const yaw1 = initialYaw(s1, bearings, xyOf, input, b1.photo.id);
+    const yaw2 = initialYaw(s2, bearings, xyOf, input, b2.photo.id);
     if (yaw1 == null || yaw2 == null) continue;
     const az1 = wrap(yaw1 + b1.bearing);
     const az2 = wrap(yaw2 + b2.bearing);
@@ -403,8 +439,14 @@ function solveOnce(input: SolveInput): SolveResult {
       s.unsetCode = 'parallel-rays';
       continue;
     }
-    s.x = hit.x;
-    s.y = hit.y;
+    if (hit.behind) {
+      s.unsetCode = 'behind-camera';
+      s.x = undefined;
+      s.y = undefined;
+      continue;
+    }
+    s.x = hit.point.x;
+    s.y = hit.point.y;
     s.method = 'rays';
     s.unsetCode = undefined;
     if (cross < RAY_CROSS_WARN_DEG) s.earlyWarning = 'shallow-rays';
@@ -414,6 +456,7 @@ function solveOnce(input: SolveInput): SolveResult {
   let free = new Set<string>();
   for (const s of state.values()) {
     if (s.id === originId || held.has(s.id)) continue;
+    if (scaleFixed && s.id === axisId) continue;
     if (s.x == null || s.y == null) continue;
     free.add(s.id);
   }
@@ -451,6 +494,17 @@ function solveOnce(input: SolveInput): SolveResult {
     s.y = y;
   }
 
+  if (!adjusted.converged) {
+    for (const s of state.values()) {
+      if (!free.has(s.id)) continue;
+      s.x = undefined;
+      s.y = undefined;
+      s.unsetCode = 'diverged';
+    }
+  } else {
+    rejectBehindCamera(bearings, built, adjusted, state, free, held, originId, axisId);
+  }
+
   const stats = finishStats(built, adjusted);
   const withheld = withheldChecks(input, distances, built, adjusted, offsets, originId, axisId, state, held);
 
@@ -470,33 +524,41 @@ function solveOnce(input: SolveInput): SolveResult {
     if (phi > TRI_ANGLE_WARN_MAX_DEG) s.earlyWarning = s.earlyWarning ?? 'straight-intersection';
   }
 
-  const incident = incidentRedundancy(stats.observations);
+  const dof = stats.observations.filter((o) => o.used).length - built.params.length;
+  const vPv = stats.vPv;
+  const test = varianceFactorTest(vPv, Math.max(0, dof));
+  const sigma0 = dof > 0 ? Math.sqrt(Math.max(0, vPv / dof)) : null;
+  const covarianceScaled = test.result === 'high' && sigma0 != null && sigma0 > 0;
+  const qScale = covarianceScaled && sigma0 != null ? sigma0 * sigma0 : 1;
   const points = publishPoints(
     state,
     built,
     adjusted,
-    incident,
     withheld,
     originId,
     axisId,
     free,
     held,
+    bearings,
+    test.result === 'high',
+    qScale,
+    scaleFixed,
   );
 
-  const dof = stats.observations.filter((o) => o.used).length - built.params.length;
-  const vPv = stats.vPv;
-  const test = varianceFactorTest(vPv, Math.max(0, dof));
   return {
     points,
     observations: stats.observations,
     withheld,
-    sigma0: dof > 0 ? Math.sqrt(Math.max(0, vPv / dof)) : null,
+    sigma0,
     vPv: stats.observations.some((o) => o.used) ? vPv : null,
     degreesOfFreedom: Math.max(0, dof),
     unknownCount: built.params.length,
     observationCount: stats.observations.filter((o) => o.used).length,
     varianceTest: test.result,
+    covarianceScaled,
+    converged: adjusted.converged,
     droppedObservationIds: [],
+    inseparableObservationIds: [],
     skippedPhotos: [],
     datum: { originId, axisPointId: axisId, gardenSign },
   };
@@ -518,7 +580,7 @@ function prepareDistances(input: SolveInput): DistPrep[] {
   }
   // The datum length is its own observation, even when another instrument
   // has measured the same pair. Skipping it would pin B on that other tape.
-  if (input.datum.observeLength !== false) {
+  if (!input.datum.fixScale && input.datum.observeLength !== false) {
     const horizontalM = input.datum.lengthM;
     const sigma = distanceSigma({
       lengthM: horizontalM,
@@ -561,12 +623,26 @@ function prepareBearings(photos: SolverPhotoInput[]): BearingPrep[] {
         fy,
         gravity: photo.gravity,
       });
+      const tiltSigmaRad =
+        photo.gravity || photo.bearingSigmaRad != null
+          ? 0
+          : photo.bubbleEnforced
+            ? (photo.bubbleTiltSigmaRad ?? BUBBLE_TILT_RAD)
+            : 0;
+      const base = photo.bearingSigmaRad ?? bearingSigma({ sigmaPx: photo.sigmaPx ?? 2, fx });
+      const tilt =
+        tiltSigmaRad > 0
+          ? tiltBearingSigma({ tiltSigmaRad, px: click.px, py: click.py, cx, cy, fx })
+          : 0;
       out.push({
         photo,
         pointId: click.pointId,
+        px: click.px,
+        py: click.py,
         bearing,
-        sigma: photo.bearingSigmaRad ?? bearingSigma({ sigmaPx: photo.sigmaPx ?? 2, fx }),
+        sigma: Math.hypot(base, tilt),
         levelled,
+        tiltSigmaRad,
       });
     }
   }
@@ -574,11 +650,7 @@ function prepareBearings(photos: SolverPhotoInput[]): BearingPrep[] {
 }
 
 function photoLevelled(photo: SolverPhotoInput): boolean {
-  if (photo.gravity) return true;
-  if (!photo.bubbleEnforced) return false;
-  const fx = photo.fxOverWidth * photo.width;
-  const sigma = photo.bearingSigmaRad ?? bearingSigma({ sigmaPx: photo.sigmaPx ?? 2, fx });
-  return sigma >= BUBBLE_MIN_SIGMA_RAD;
+  return photo.gravity != null || photo.bubbleEnforced === true;
 }
 
 function uniqueMarks(bearings: BearingPrep[]): string[] {
@@ -589,14 +661,6 @@ function uniqueMarks(bearings: BearingPrep[]): string[] {
 
 function classifyControl(s: PointState, marks: string[], xyOf: (id: string) => Xy | null): void {
   if (s.x == null || s.y == null) return;
-  const ranges = marks
-    .map((id) => {
-      const m = xyOf(id);
-      return m ? hypot2(m, { x: s.x!, y: s.y! }) : 0;
-    })
-    .filter((r) => r > 0);
-  const depth = ranges.length >= 2 && Math.min(...ranges) / Math.max(...ranges) <= 0.75;
-  s.controlOk = marks.length >= 4 || depth;
   s.markCount = marks.length;
   if (marks.length >= 3) {
     const pts = marks.slice(0, 3).map((id) => xyOf(id)!).filter(Boolean);
@@ -635,7 +699,8 @@ function placeFromDistances(
   let weak = false;
   if (hits.length === 0) {
     const close = closestOnLineOfCentres(c0, d0.horizontalM, c1, d1.horizontalM);
-    if (!close || close.gapM > CIRCLE_GAP_WEAK_M) return { code: 'miss' };
+    const gapLimit = GAP_SIGMA_FACTOR * Math.hypot(d0.sigma, d1.sigma);
+    if (!close || close.gapM > gapLimit) return { code: 'miss' };
     hits = [close.point];
     weak = true;
   }
@@ -756,16 +821,6 @@ interface Built {
   unused: SolveObservation[];
 }
 
-interface ObsFn {
-  id: string;
-  kind: 'distance' | 'bearing' | 'angle';
-  sigma: number;
-  pointIds: string[];
-  residual: (x: number[]) => number;
-  jacobian: (x: number[]) => number[];
-  predict?: (x: number[]) => number;
-}
-
 function assemble(
   input: SolveInput,
   free: Set<string>,
@@ -795,9 +850,23 @@ function assemble(
       yawPhotos.add(key);
     }
   }
+  const ready = (id: string) =>
+    id === originId ||
+    held.has(id) ||
+    free.has(id) ||
+    (state.get(id)?.x != null && state.get(id)?.y != null);
+  const fxSeen = new Set<string>();
+  for (const b of bearings) {
+    const rel = b.photo.fxRelativeUncertainty;
+    if (rel == null || !(rel > 0) || fxSeen.has(b.photo.id)) continue;
+    if (!ready(b.photo.stationId) || !ready(b.pointId)) continue;
+    params.push({ owner: b.photo.stationId, kind: 'fx', photoId: b.photo.id });
+    fxSeen.add(b.photo.id);
+  }
   const index = new Map<string, number>();
   params.forEach((p, i) => index.set(paramKey(p), i));
   const x0 = params.map((p) => {
+    if (p.kind === 'fx') return 0;
     if (p.kind === 'yaw') {
       return (
         initialYaw(
@@ -883,14 +952,22 @@ function assemble(
     if (b.photo.bearingSigmaRad == null) {
       const range = hypot2(stationOk, markOk);
       const fx = b.photo.fxOverWidth * b.photo.width;
-      sigma = bearingSigma({
+      const cx = b.photo.cx ?? b.photo.width / 2;
+      const cy = b.photo.cy ?? b.photo.height / 2;
+      const base = bearingSigma({
         sigmaPx: b.photo.sigmaPx ?? 2,
         fx,
         sigmaCentringM: b.photo.sigmaCentringM,
         rangeM: range,
       });
+      const tilt =
+        b.tiltSigmaRad > 0
+          ? tiltBearingSigma({ tiltSigmaRad: b.tiltSigmaRad, px: b.px, py: b.py, cx, cy, fx })
+          : 0;
+      sigma = Math.hypot(base, tilt);
     }
     const yawIndex = b.photo.yawHeldRad != null ? null : index.get(`yaw:${b.photo.id}`);
+    const fxIndex = index.get(`fx:${b.photo.id}`);
     obs.push({
       id: `${b.photo.id}:${b.pointId}`,
       kind: 'bearing',
@@ -900,7 +977,8 @@ function assemble(
         const c = coord(x, b.photo.stationId)!;
         const m = mark(x, b.pointId)!;
         const yaw = b.photo.yawHeldRad != null ? b.photo.yawHeldRad : yawIndex == null ? 0 : x[yawIndex];
-        return wrap(b.bearing - predictedBearing(m.x, m.y, c.x, c.y, yaw));
+        const scale = fxIndex == null ? 0 : x[fxIndex];
+        return wrap(observedBearing(b, scale) - predictedBearing(m.x, m.y, c.x, c.y, yaw));
       },
       jacobian: (x) => {
         const c = coord(x, b.photo.stationId)!;
@@ -912,6 +990,24 @@ function assemble(
         add(j, index, b.photo.stationId, -dy / r2, dx / r2, axisId);
         add(j, index, b.pointId, dy / r2, -dx / r2, axisId);
         if (yawIndex != null) j[yawIndex] = 1;
+        if (fxIndex != null) j[fxIndex] = observedBearingScaleDerivative(b, x[fxIndex]);
+        return j;
+      },
+    });
+  }
+
+  for (const photo of input.photos ?? []) {
+    const fxIndex = index.get(`fx:${photo.id}`);
+    if (fxIndex == null || photo.fxRelativeUncertainty == null) continue;
+    obs.push({
+      id: `fx:${photo.id}`,
+      kind: 'focal',
+      sigma: photo.fxRelativeUncertainty,
+      pointIds: [photo.stationId],
+      residual: (x) => -x[fxIndex],
+      jacobian: () => {
+        const j = Array<number>(params.length).fill(0);
+        j[fxIndex] = -1;
         return j;
       },
     });
@@ -952,7 +1048,41 @@ function assemble(
 }
 
 function paramKey(p: Param): string {
-  return p.kind === 'yaw' ? `yaw:${p.photoId}` : `${p.owner}:${p.kind}`;
+  if (p.kind === 'yaw') return `yaw:${p.photoId}`;
+  if (p.kind === 'fx') return `fx:${p.photoId}`;
+  return `${p.owner}:${p.kind}`;
+}
+
+function observedBearing(b: BearingPrep, scale: number): number {
+  const photo = b.photo;
+  const fx0 = photo.fxOverWidth * photo.width;
+  const fy0 = photo.fyOverHeight != null ? photo.fyOverHeight * photo.height : fx0;
+  const cx = photo.cx ?? photo.width / 2;
+  const cy = photo.cy ?? photo.height / 2;
+  return levelledBearing({
+    px: b.px,
+    py: b.py,
+    cx,
+    cy,
+    fx: fx0 * (1 + scale),
+    fy: fy0 * (1 + scale),
+    gravity: photo.gravity,
+  });
+}
+
+function observedBearingScaleDerivative(b: BearingPrep, scale: number): number {
+  const photo = b.photo;
+  const fx0 = photo.fxOverWidth * photo.width;
+  const fy0 = photo.fyOverHeight != null ? photo.fyOverHeight * photo.height : fx0;
+  return levelledBearingScaleDerivative({
+    px: b.px,
+    py: b.py,
+    cx: photo.cx ?? photo.width / 2,
+    cy: photo.cy ?? photo.height / 2,
+    fx: fx0 * (1 + scale),
+    fy: fy0 * (1 + scale),
+    gravity: photo.gravity,
+  });
 }
 
 function add(j: number[], index: Map<string, number>, id: string, dx: number, dy: number, axisId: string): void {
@@ -991,16 +1121,18 @@ interface LmResult {
   rankDeficient: boolean;
   nullVector: number[] | null;
   q: number[][] | null;
+  converged: boolean;
 }
 
 function runLm(built: Built): LmResult {
   const n = built.params.length;
   const x = built.x0.slice();
   if (n === 0 || built.obs.length === 0) {
-    return { x, rankDeficient: false, nullVector: null, q: n === 0 ? [] : null };
+    return { x, rankDeficient: false, nullVector: null, q: n === 0 ? [] : null, converged: true };
   }
   let lambda = 1e-3;
   let cost = costOf(built, x);
+  let converged = false;
   for (let iter = 0; iter < 40; iter++) {
     const { N, g } = normal(built, x);
     const damped = N.map((row) => row.slice());
@@ -1020,7 +1152,10 @@ function runLm(built: Built): LmResult {
       const improvement = cost - next;
       cost = next;
       lambda = Math.max(1e-8, lambda * 0.3);
-      if (pos < LM_STEP_M && improvement < 1e-12) break;
+      if (pos < LM_STEP_M && improvement < 1e-12) {
+        converged = true;
+        break;
+      }
     } else {
       lambda *= 4;
       if (lambda > 1e12) break;
@@ -1029,9 +1164,9 @@ function runLm(built: Built): LmResult {
   const { N } = normal(built, x);
   const q = invertSpd(N);
   if (!q) {
-    return { x, rankDeficient: true, nullVector: nullVectorOf(N), q: null };
+    return { x, rankDeficient: true, nullVector: nullVectorOf(N), q: null, converged };
   }
-  return { x, rankDeficient: false, nullVector: null, q };
+  return { x, rankDeficient: false, nullVector: null, q, converged };
 }
 
 function costOf(built: Built, x: number[]): number {
@@ -1062,7 +1197,7 @@ function normal(built: Built, x: number[]): { N: number[][]; g: number[] } {
 function maxPositionStep(params: Param[], step: number[]): number {
   let m = 0;
   for (let i = 0; i < params.length; i++) {
-    if (params[i].kind === 'yaw') continue;
+    if (params[i].kind === 'yaw' || params[i].kind === 'fx') continue;
     m = Math.max(m, Math.abs(step[i]));
   }
   return m;
@@ -1084,7 +1219,7 @@ function worstNullPoint(vec: number[] | null, params: Param[], originId: string,
   const score = new Map<string, number>();
   for (let i = 0; i < params.length; i++) {
     const p = params[i];
-    if (p.kind === 'yaw') continue;
+    if (p.kind === 'yaw' || p.kind === 'fx') continue;
     if (p.owner === axisId && p.kind === 'x' && params.filter((q) => q.owner === axisId).length === 1) {
       // Keep the datum scale unknown unless a free point shares the null space.
     }
@@ -1141,15 +1276,56 @@ function finishStats(built: Built, adjusted: LmResult): { observations: SolveObs
   return { observations, vPv };
 }
 
-function incidentRedundancy(observations: SolveObservation[]): Map<string, number> {
-  const maxR = new Map<string, number>();
-  for (const o of observations) {
-    if (!o.used) continue;
-    for (const id of o.pointIds) {
-      maxR.set(id, Math.max(maxR.get(id) ?? 0, o.redundancy));
-    }
+function rejectBehindCamera(
+  bearings: BearingPrep[],
+  built: Built,
+  adjusted: LmResult,
+  state: Map<string, PointState>,
+  free: Set<string>,
+  held: Map<string, Xy>,
+  originId: string,
+  axisId: string,
+): void {
+  const place = (id: string): Xy | null => xyOfState(id, state, held, originId, axisId);
+  for (const b of bearings) {
+    const camera = place(b.photo.stationId);
+    const mark = place(b.pointId);
+    if (!camera || !mark) continue;
+    const yawIndex = built.index.get(`yaw:${b.photo.id}`);
+    const yaw = b.photo.yawHeldRad != null ? b.photo.yawHeldRad : yawIndex == null ? 0 : adjusted.x[yawIndex];
+    const predicted = predictedBearing(mark.x, mark.y, camera.x, camera.y, yaw);
+    const range = hypot2(camera, mark);
+    if (Math.abs(predicted) < Math.PI / 2 && range >= MIN_RAY_RANGE_M) continue;
+    const victim = free.has(b.pointId) ? b.pointId : free.has(b.photo.stationId) ? b.photo.stationId : null;
+    if (!victim) continue;
+    const s = state.get(victim);
+    if (!s) continue;
+    s.x = undefined;
+    s.y = undefined;
+    s.unsetCode = 'behind-camera';
+    free.delete(victim);
   }
-  return maxR;
+}
+
+function parameterGain(
+  j: number[],
+  q: number[][],
+  sigma: number,
+  index: Map<string, number>,
+  id: string,
+): number {
+  const p = 1 / (sigma * sigma);
+  const n = j.length;
+  let hx = 0;
+  let hy = 0;
+  const ix = index.get(`${id}:x`);
+  const iy = index.get(`${id}:y`);
+  for (let col = 0; col < n; col++) {
+    const jp = j[col] * p;
+    if (ix != null) hx += q[ix][col] * jp;
+    if (iy != null) hy += q[iy][col] * jp;
+  }
+  return Math.hypot(hx, hy);
 }
 
 function withheldChecks(
@@ -1294,12 +1470,15 @@ function publishPoints(
   state: Map<string, PointState>,
   built: Built,
   adjusted: LmResult,
-  incident: Map<string, number>,
   withheld: WithheldCheck[],
   originId: string,
   axisId: string,
   free: Set<string>,
   held: Map<string, Xy>,
+  bearings: BearingPrep[],
+  varianceHigh: boolean,
+  qScale: number,
+  scaleFixed: boolean,
 ): SolvePoint[] {
   const points: SolvePoint[] = [];
   for (const s of state.values()) {
@@ -1316,14 +1495,15 @@ function publishPoints(
       });
       continue;
     }
-    const isHeldControl = held.has(s.id) && !free.has(s.id);
+    const isHeldControl = (held.has(s.id) && !free.has(s.id)) || (scaleFixed && s.id === axisId);
     if (isHeldControl) {
-      const h = held.get(s.id)!;
+      const h = held.get(s.id);
       points.push({
         id: s.id,
         status: 'checked',
-        x: h.x,
-        y: h.y,
+        x: h ? h.x : (s.x ?? 0),
+        y: h ? h.y : 0,
+        datumRole: s.id === axisId ? 'axis' : undefined,
         method: 'datum',
         plantable: false,
         plantableBlock: 'datum',
@@ -1349,11 +1529,15 @@ function publishPoints(
       continue;
     }
 
-    const q = marginalQ(s.id, built, adjusted.q, axisId);
-    let ell = q ? ellipseFrom2x2(q[0], q[1], q[2]) : null;
-    const maxR = incident.get(s.id) ?? 0;
-    let status: SolvePoint['status'] = maxR <= UNCHECKED_REDUNDANCY || s.branchChoice ? 'unchecked' : 'checked';
-    if (s.id === axisId && maxR <= UNCHECKED_REDUNDANCY) status = 'unchecked';
+    const qPrior = marginalQ(s.id, built, adjusted.q, axisId);
+    let ellPrior = qPrior ? ellipseFrom2x2(qPrior[0], qPrior[1], qPrior[2]) : null;
+    const gate = checkedGate(s, built, adjusted, bearings, s.id === axisId);
+    let status: SolvePoint['status'] = gate.ok ? 'checked' : 'unchecked';
+    let varianceHold = false;
+    if (varianceHigh && status === 'checked') {
+      status = 'unchecked';
+      varianceHold = true;
+    }
 
     let x: number | undefined = s.x;
     let y: number | undefined = s.y;
@@ -1361,21 +1545,33 @@ function publishPoints(
     let unsetCode = s.unsetCode;
     const dangerOver =
       s.earlyWarning === 'danger' &&
-      ell != null &&
-      ell.major95M > STATION_CLASS_M &&
+      ellPrior != null &&
+      ellPrior.major95M > STATION_CLASS_M &&
       (s.method === 'resection' || s.dangerKind != null);
-    if (dangerOver) {
-      rejected = { x: s.x, y: s.y, semiMajor95M: ell?.major95M, dangerRatio: s.dangerRatio };
+    const sanityOver = ellPrior != null && ellPrior.major95M > SANITY_SEMI_MAJOR_M;
+    if (dangerOver || sanityOver) {
+      rejected = {
+        x: s.x,
+        y: s.y,
+        semiMajor95M: ellPrior?.major95M,
+        dangerRatio: s.dangerRatio,
+      };
       x = undefined;
       y = undefined;
       status = 'unset';
-      unsetCode = 'danger';
-      ell = null;
+      unsetCode = dangerOver ? 'danger' : 'sanity';
+      ellPrior = null;
     }
 
-    const stationBlock = stationClassBlock(s, ell?.major95M, status);
-    const meetsStationClass = stationBlock == null && (s.method === 'resection' || s.method === 'both-tapes');
-    const plant = plantableBlock(s, status, ell?.major95M, withheld, s.id === axisId);
+    const q =
+      qPrior && ellPrior && qScale !== 1
+        ? ([qPrior[0] * qScale, qPrior[1] * qScale, qPrior[2] * qScale] as [number, number, number])
+        : qPrior;
+    const ell = q && ellPrior ? ellipseFrom2x2(q[0], q[1], q[2]) : ellPrior;
+    const stationBlock = stationClassBlock(s, ell?.major95M, status, bearings);
+    const meetsStationClass =
+      stationBlock == null && status === 'checked' && (s.method === 'resection' || s.method === 'both-tapes');
+    const plant = plantableBlock(s, status, ell?.major95M, withheld, s.id === axisId, varianceHold);
 
     points.push({
       id: s.id,
@@ -1393,10 +1589,15 @@ function publishPoints(
       branchChoice: s.branchChoice,
       method: s.method,
       rejected,
-      meetsStationClass: meetsStationClass && status !== 'unset',
-      stationClassBlock: s.method === 'resection' || s.method === 'both-tapes' || s.method === 'branch' ? stationBlock ?? undefined : undefined,
+      meetsStationClass,
+      stationClassBlock:
+        s.method === 'resection' || s.method === 'both-tapes' || s.method === 'branch'
+          ? (stationBlock ?? undefined)
+          : undefined,
       plantable: plant == null,
       plantableBlock: plant ?? undefined,
+      uncheckedObservationId: status === 'unchecked' ? gate.observationId : undefined,
+      varianceHold: varianceHold || undefined,
       candidates: s.candidates,
       thetaRad: s.thetaRad,
       dangerRatio: s.dangerRatio,
@@ -1407,24 +1608,83 @@ function publishPoints(
   return points;
 }
 
+function checkedGate(
+  s: PointState,
+  built: Built,
+  adjusted: LmResult,
+  bearings: BearingPrep[],
+  isAxis: boolean,
+): { ok: boolean; observationId?: string } {
+  if (s.branchChoice) return { ok: false };
+  if (!adjusted.q) return { ok: false };
+  const classTol = s.method === 'resection' || s.method === 'both-tapes' ? STATION_CLASS_M : PLANTABLE_CLASS_M;
+  let blocked: string | undefined;
+  let saw = false;
+  for (const o of built.obs) {
+    if (o.kind === 'focal') continue;
+    const j = o.jacobian(adjusted.x);
+    const gain = parameterGain(j, adjusted.q, o.sigma, built.index, s.id);
+    if (!(gain > 1e-8)) continue;
+    saw = true;
+    const obs = redundancyOf(o, j, adjusted);
+    const photo = bearings.find((b) => `${b.photo.id}:${b.pointId}` === o.id)?.photo;
+    const fxMissing =
+      o.kind === 'bearing' &&
+      photo != null &&
+      photo.fxRelativeUncertainty == null &&
+      photo.bearingSigmaRad == null &&
+      s.method !== 'distances' &&
+      s.method !== 'both-tapes' &&
+      s.method !== 'datum';
+    if (fxMissing) {
+      blocked = blocked ?? o.id;
+      continue;
+    }
+    if (obs <= UNCHECKED_REDUNDANCY) {
+      blocked = blocked ?? o.id;
+      continue;
+    }
+    const move = gain * ((MDB_FACTOR * o.sigma) / Math.sqrt(obs));
+    if (move > classTol) blocked = blocked ?? o.id;
+  }
+  if (!saw && !isAxis) return { ok: false };
+  if (blocked) return { ok: false, observationId: blocked };
+  return { ok: true };
+}
+
+function redundancyOf(o: ObsFn, j: number[], adjusted: LmResult): number {
+  const q = adjusted.q;
+  if (!q) return 0;
+  const n = j.length;
+  const p = 1 / (o.sigma * o.sigma);
+  let h = 0;
+  for (let a = 0; a < n; a++) {
+    let qj = 0;
+    for (let b = 0; b < n; b++) qj += q[a][b] * j[b];
+    h += j[a] * qj;
+  }
+  let r = 1 - p * h;
+  if (r < 0 && r > -1e-6) r = 0;
+  return r;
+}
+
 function stationClassBlock(
   s: PointState,
   semiMajor95M: number | undefined,
   status: SolvePoint['status'],
+  bearings: BearingPrep[],
 ): SolvePoint['stationClassBlock'] | null {
   if (s.method !== 'resection' && s.method !== 'both-tapes' && s.method !== 'branch') return null;
   if (s.method === 'branch' || s.branchChoice) return 'branch';
   if (status === 'unset') return s.earlyWarning === 'danger' ? 'danger' : 'ambiguous';
+  if (s.method === 'resection' && !s.levelled) return 'level';
   if (s.method === 'resection') {
-    if (!s.fxOk) return 'fx';
-    if (!s.levelled) return 'level';
-    if (!s.controlOk) return 'control';
-  }
-  if (s.method === 'both-tapes' && !s.levelled && (s.markCount ?? 0) > 0) {
-    // Tapes fix the position. Unlevelled bearings are a poor check, not a block
-    // on the tape ellipse. The ellipse itself still has to pass.
+    const rays = bearings.filter((b) => b.photo.stationId === s.id);
+    const fxCarried = rays.length > 0 && rays.every((b) => (b.photo.fxRelativeUncertainty ?? 0) > 0 || b.photo.bearingSigmaRad != null);
+    if (!fxCarried) return 'fx';
   }
   if (semiMajor95M == null || semiMajor95M > STATION_CLASS_M) return 'ellipse';
+  if (status !== 'checked') return 'unchecked';
   return null;
 }
 
@@ -1434,8 +1694,10 @@ function plantableBlock(
   semiMajor95M: number | undefined,
   withheld: WithheldCheck[],
   isAxis: boolean,
+  varianceHold: boolean,
 ): SolvePoint['plantableBlock'] | null {
   if (s.method === 'datum' || isAxis) return 'datum';
+  if (varianceHold) return 'variance';
   if (status === 'unset') return 'unset';
   if (status !== 'checked') return 'unchecked';
   if (semiMajor95M == null || semiMajor95M > PLANTABLE_CLASS_M) return 'ellipse';

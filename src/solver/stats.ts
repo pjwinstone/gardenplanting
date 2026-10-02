@@ -75,8 +75,9 @@ export function chi2Ppf(p: number, k: number): number {
 export type VarianceTest = 'ok' | 'high' | 'low' | 'undefined';
 
 /**
- * Two-sided test of vᵀPv against χ²(dof).
- * The design requires the test and does not name α; this uses 5%.
+ * One-sided upper-tail test of vᵀPv against χ²(dof) at `alpha` (default 5%).
+ * `low` is information only: the σ's may be conservative. It is not a warning
+ * and it does not withhold a point.
  */
 export function varianceFactorTest(
   vPv: number,
@@ -86,10 +87,10 @@ export function varianceFactorTest(
   if (!(dof > 0) || !Number.isFinite(vPv)) {
     return { result: 'undefined', low: null, high: null };
   }
-  const low = chi2Ppf(alpha / 2, dof);
-  const high = chi2Ppf(1 - alpha / 2, dof);
-  if (vPv < low) return { result: 'low', low, high };
+  const low = chi2Ppf(alpha, dof);
+  const high = chi2Ppf(1 - alpha, dof);
   if (vPv > high) return { result: 'high', low, high };
+  if (vPv < low) return { result: 'low', low, high };
   return { result: 'ok', low, high };
 }
 

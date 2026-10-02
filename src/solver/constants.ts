@@ -49,8 +49,23 @@ export const THETA_REJECT_RAD = (1 * Math.PI) / 180;
 /** Step length that ends Levenberg–Marquardt, metres. */
 export const LM_STEP_M = 0.0001;
 
-/** Conventional two-sided significance for the global variance-factor test. */
+/** Upper-tail significance for the global variance-factor test. 'low' is not a failure. */
 export const VARIANCE_TEST_ALPHA = 0.05;
+
+/** |w| must be at least this many times the next flagged residual before one observation is dropped. */
+export const W_ISOLATION_RATIO = 2;
+
+/** Circle gap above 3 √(σ₀² + σ₁²) is a miss, not a weak point. About 85 mm at 20 mm tapes. */
+export const GAP_SIGMA_FACTOR = 3;
+
+/** A published mark must sit at least this far in front of every camera that sees it. */
+export const MIN_RAY_RANGE_M = 0.5;
+
+/** Do not publish a coordinate whose a-priori 95% semi-major exceeds this. */
+export const SANITY_SEMI_MAJOR_M = 5;
+
+/** Default 1σ tilt when a bubble is enforced and the caller does not give a tilt σ. */
+export const BUBBLE_TILT_RAD = (0.5 * Math.PI) / 180;
 
 /** Default instrument figures when an observation does not carry its own σ. */
 export const DEFAULT_SIGMA = {
