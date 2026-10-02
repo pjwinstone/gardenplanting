@@ -48,13 +48,13 @@ Adjust on the synthetic suite and on one real export meets the table, and the fi
 
 ## Phase 2 — Markers and photo network
 
-**Goal:** the phone recognises a rod or post from any side and emits the same kind of observation Phase 1 already adjusts. Design: [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md). The mark is an **A4 portrait sleeve** rolled onto the stick: horizontal bands, about **64 mm** diameter if the full sheet width wraps with 10 mm overlap. The stored point is the **stick centre**. A flat tag is not part of the standard print.
+**Goal:** the phone recognises a rod or post from any side and emits the same kind of observation Phase 1 already adjusts. Design: [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md). The mark is an **A4 portrait sleeve** rolled onto the stick: horizontal bands, about **64 mm** diameter if the full sheet width wraps with 10 mm overlap. The stored point is the **axis at the ground**, with the sleeve height recorded and the rod plumbed. A flat tag is not part of the standard print.
 
 Stages are in order. A later stage does not start by weakening an earlier bar.
 
 ### (a) Detect one marker in one photo
 
-**Prove:** a printed A4 ring, photographed in Safari at 1×, returns the right ID or no ID. It does not return a neighbour’s ID. The vertical centreline of the sleeve repeats to about **1 px** on a clean frame (lateral error a few millimetres at 15 m).
+**Prove:** a printed A4 ring, photographed in Safari at 1×, returns the right ID or no ID. It does not return a neighbour’s ID. The centreline (mean of the two edge azimuths) repeats to about **1 px** on a clean frame. That is pixel noise only, a few millimetres. It is not the ray: 1% in `fx` at 20° off-centre is about 16 mm at 5 m, and a 2° lean moves the ground point by about 17 mm when the sleeve centre is 0.5 m up.
 
 **Accuracy:** pixel error only. A wrong ID is a failure even if the pixel is perfect. A 14 mm band is about **8 px** at 5 m on a full-resolution 1× still and about **3 px** at 15 m, so ID at 15 m is not the bar. The bar is ID at **2 m and 5 m**, and a reject (not a guess) at long range. Bearing may still be kept at 8–15 m when both silhouette edges are found.
 
@@ -62,7 +62,7 @@ Stages are in order. A later stage does not start by weakening an earlier bar.
 
 ### (b) Detections are rays
 
-**Prove:** the centreline becomes a levelled bearing `β = atan2(−x_level, z_level)` in the Phase 1 solver, with `σ_px` from the fit. That ray already points at the stick axis, so it carries no radial offset. Focal length is a parameter or a consider-parameter inside the ellipse (PR #3 B2), not a gate checked after the fact. The known sleeve height (297 mm) may be a **weak distance** (about 64 mm at 5 m if `fx` is known to 1%, several hundred millimetres at 15 m), enough to separate the two station candidates that sit about 20 m apart, and not a tape. A point that lands behind the camera is not published (PR #3 B3).
+**Prove:** the centreline becomes a levelled bearing `β = atan2(−x_level, z_level)` in the Phase 1 solver, with `σ_px` from the fit. That ray points at the axis at sleeve height and carries no radial offset. Sleeve ends enter as levelled elevations (`d = H / (tan e_top − tan e_bot)`, each end at `d ± R` for the near or far rim), not as `fx · H / h_px`. One `fx` per phone and 1× zoom is shared across that phone’s photos (geometry note §3.5); a per-photo `fx` cannot carry a calibration. Do not also publish a range derived from that same photo. A height range may pick between the two station candidates only when it is to a sleeve **other than the taped mark**, the two predicted ranges differ by **at least 6σ**, and the observation lies within 2.5σ of the chosen one. Otherwise leave the station unset or ask, and label any pick **unchecked**. A point that lands behind the camera is not published (PR #3 B3).
 
 **Accuracy:** same station class as Phase 1. **95% semi-major ≤ 200 mm** only when `fx` is known to about **1%** and the rays are levelled. A 10% focal error remains about **±1.98 m** on the 7 m / 20° case and must still fail that class. A plantable point stays at **100 mm** with a spare observation; a 200 mm station still needs a tape if you would plant from the new point.
 
@@ -153,8 +153,8 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
 5. **House close.** Today’s 50 mm check measures the gap between two different corners. A polygon of wall lengths only has no traverse misclosure, because a misclosure needs measured angles.
    **Recommendation:** no fixed millimetre threshold. When angles exist, test `mᵀ Q_m⁻¹ m ≤ 5.99` and show 2.45 times the semi-major of `Q_m`. On the demo shed that is **93 mm** for tapes at 20 mm and **144 mm** once each corner also has a 0.2° angle. A flat 50 mm gate false-alarms on about **35%** of correct distance-only sheds at σ = 20 mm, and a tighter tape does not repair that once angles dominate (116 mm at 95% with 3 mm + 1 mm/m and 0.2°).
 
-6. **Offset direction.** `offsetMm` has no direction, so the brick arris is not actually solved. A laser on the front of a roll is not the stick centre. For the A4 sleeve the stick is about **64 mm** across, so the radius is about **32 mm**, not a generic 50 mm.
-   **Recommendation:** the stored point is the **axis**. A photo of the silhouette centreline already points there, so that observation has **no** radial offset. A tape or laser that stops on the paper needs `+radius` along the shot, toward the centre. A wall mark still needs millimetres plus a direction (inward normal or a bearing). Laser σ in the solve is about **5 mm**, not the 2 mm constant in the code. Store the radius with the stick, and the offset on the observation, when the schema bumps.
+6. **Offset direction.** `offsetMm` has no direction, so the brick arris is not actually solved. A laser on the front of a roll is not the stick centre. For the A4 sleeve the stick is about **64 mm** across, so the radius is about **32 mm**, not a generic 50 mm. The planting point is the axis at the ground; a lean moves it by `h_s sin λ`.
+   **Recommendation:** store the axis at ground level, record the sleeve-centre height, and plumb the rod to about **1°** (17 mm at 2° if the sleeve centre is 0.5 m up; the along-sight part is invisible in one photo and stays in `σ_λ`). A photo centreline (mean of the levelled edge azimuths) has **no** radial offset. A tape or laser to the paper is reduced to horizontal, then `+radius`. Still add the radius when the spot is off the centreline; retake only past about half a radius. A wall mark still needs millimetres plus a direction (inward normal or a bearing). Laser σ in the solve is about **5 mm**, not the 2 mm constant in the code. Store the radius with the stick, and the offset on the observation, when the schema bumps.
 
 7. **When to stop special-casing `polygons` id `house`.** The field loop depends on it.
    **Recommendation:** leave it through Phase 1. Fold it into a `structure` item in Phase 3 with a `normalizeDocument` migration.
@@ -187,7 +187,7 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
    **Recommendation:** Phase 1 is the solver in PR #3, not another pass through the dialog. Marker work is Phase 2 and should not land in that PR.
 
 17. **What to print on a rod.** A flat tag is unreadable at a grazing angle, and it disappears as you walk around the stick. The current belt is the same on every rod.
-   **Recommendation:** the cylindrical banded sleeve is the only per-stick mark. Print it on **A4 portrait** and roll it on the stick (about **64 mm** diameter with a 10 mm overlap). A flat AprilTag does not earn a place on the stick: the centreline bearing is already a few millimetres, and a taped distance plus the sleeve height can observe focal length. Keep a flat tag only as a separate experiment if that calibration disappoints.
+   **Recommendation:** the cylindrical banded sleeve is the only per-stick mark. Print it on **A4 portrait** and roll it on the stick (about **64 mm** diameter with a 10 mm overlap). A flat AprilTag does not earn a place on the stick once `fx` is one shared value per phone and the sleeve enters as elevation rays plus the tape. Keep a flat tag only as a separate card if that calibration misses about 1%.
 
 18. **How far the code must read.** On a 12 MP 1× frame a 14 mm band is about 8 px at 5 m and about 3 px at 15 m. The whole 297 mm sleeve is only about 60 px tall at 15 m.
    **Recommendation:** automatic ID at **2 m and 5 m**. At 8 m, accept the ID only when every band is still resolved; otherwise keep the bearing and reject the code. At 15 m, bearing only. Detect on a full-resolution 1× still, not the 1920-wide preview.

@@ -58,7 +58,7 @@ The solved feature is what polygons and beds use. The mark is what a photo click
 
 A laser spot on the **front** of a toilet roll is about **50 mm** in front of the mark centre. The instrument’s reference (often its rear edge) is not the pole axis. Both are known offsets, or the shot is taken to a flat target. Leaving them inside a 2 mm σ will bias the point by centimetres.
 
-The A4 sleeve in [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md) is a different mark. Its stored point is the **stick axis**. A bearing to the silhouette centreline already aims there, so that observation has no radial offset. A tape or laser to the paper, along a line through the axis, is short by the radius: about **32 mm** when the full sheet width wraps with a 10 mm overlap (`D = 200 / π`). That `+R` belongs on the observation, not inside the laser σ. The 50 mm figure stays the older toilet-roll example.
+The A4 sleeve in [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md) is a different mark. Its stored point is the **axis at ground level**. Bearings and surface shots meet the axis at sleeve height, so record that height and plumb the rod to about 1° (`h_s sin λ` is 9 mm at 1° and 17 mm at 2° when the sleeve centre is 0.5 m up). The along-sight part of the lean is invisible in one photo and stays in `σ_λ`. A bearing is the mean of the two levelled edge azimuths and has no radial offset. A tape or laser to the paper is reduced to horizontal **first**, then `+R` (31.8 mm on the full-width stick). An off-centre laser spot still takes `+R`; retake only if it is more than about `R/2` off the axis. The 50 mm figure stays the older toilet-roll example.
 
 Today `offsetMm` is a scalar and Layer A shifts that same point’s `y`. That is not an arris.
 
