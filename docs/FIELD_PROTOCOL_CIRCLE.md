@@ -33,12 +33,12 @@ The app will work out where the points are. Afterwards a test checks two things:
 - A non-stretch line marked at **4.000 m** against the tape, pulled firm, on the flat.
 - A centre peg, six canes for the circle, two canes for the baseline, one cane for the calibration if you do not reuse a circle cane.
 - A small spirit level (a bubble).
-- Sleeves on the canes. Full A4 width, about **64 mm** across, radius **32 mm**. Matte paper.
+- Sleeves glued snug round a **60 mm** dowel. Matte paper. Measure each finished sleeve and write its R on this sheet. That correction is the sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md).
 - This sheet and a pen.
 
 Camera location off, if you remember. The import strips GPS anyway. Point the camera at the sticks.
 
-Leave the app’s **offset mm** box at **0**. Write the 32 mm sleeve correction on this sheet. It is applied later, on the tape, after the tape has been made level.
+Leave the app’s **offset mm** box at **0**. Write each sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md) on this sheet. It is applied later, on the tape, after the tape has been made level.
 
 ## Numbers to trust
 
@@ -50,25 +50,25 @@ Leave the app’s **offset mm** box at **0**. Write the 32 mm sleeve correction 
 | Diameter, opposite points | **8.000 m** |
 | Long chord (every second point) | **6.93 m** |
 | Baseline | **8.000 m** between the two end sticks, level, then sleeve correction |
-| Sleeve radius to add | **32 mm** for each end that stopped on the paper |
+| Sleeve radius to add | the sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md), once for each end that stopped on the paper |
 | Peg to the near baseline end | **4.30 m** |
 | Sleeve centre above the ground | measure it; **0.5 m** is a good height |
 | Plumb | bubble in the middle, about **1°** |
 | Why the bubble matters | a 2° lean at 0.5 m sleeve height moves the ground point **17 mm**. A photo cannot see a lean toward the camera. |
-| Calibration distance | **4.000 m** from the front of the phone to the paper, then +32 mm. Between 3 m and 5 m is acceptable. |
-| Laser dot | retake if it is more than **16 mm** off the middle of the stick |
+| Calibration distance | **4.000 m** from the front of the phone to the paper, then that sleeve’s measured R. Between 3 m and 5 m is acceptable. |
+| Laser dot | retake if it is more than half that sleeve’s measured R (about 15 mm) off the middle of the stick |
 
 You want a clear patch about **8 m** along the baseline and about **17 m** across, so STN01 on one side and STN03 on the other both fit.
 
 ## 1. Set out the circle
 
 1. Put the centre peg in the lawn where you can walk all the way round it.
-2. The line stays on the peg. It is already 4.000 m to the axis of a stick, not to the paper. If you measured the line to the paper, mark it 32 mm longer so the axis is at 4.000 m.
+2. The line stays on the peg. It is already 4.000 m to the axis of a stick, not to the paper. If you measured the line to the paper, mark it longer by the sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md) so the axis is at 4.000 m.
 3. Plant **CRC01** on that line. This will be the point nearest the baseline.
 4. Plant **CRC02** so it is 4.000 m from the peg (the line) and 4.000 m from CRC01 (the tape). The tape is the chord.
 5. Continue the same way for **CRC03**, **CRC04**, **CRC05**, **CRC06**. Each new stick is 4.000 m from the peg and 4.000 m from the one before.
 6. The last chord, CRC06 back to CRC01, should also be 4.000 m. More than 30 mm out: walk the sticks again.
-7. Tape the two diameters, CRC01–CRC04 and CRC02–CRC05, holding the tape level. Each should be 8.000 m between the axes. If you taped to the paper, the reading is about 64 mm short; write the raw reading and “both ends on paper”.
+7. Tape the two diameters, CRC01–CRC04 and CRC02–CRC05, holding the tape level. Each should be 8.000 m between the axes. If you taped to the paper, the reading is short by the two sleeves’ measured R added together (about 60 mm). Write the raw reading and “both ends on paper”.
 8. Both diameters within 20 mm of 8.000 m, and the closing chord within 30 mm of 4.000 m: write `radius σ = 4 mm`. That 4 mm is the set-out scatter this test uses. A 10 mm or 20 mm figure here is a tolerance on a length, not this σ. If a diameter or the closing chord is outside those limits, walk the sticks again. Do not write a larger σ and carry on.
 
 CRC04 is opposite CRC01. CRC01 is the point you will bring close to the baseline.
@@ -82,9 +82,9 @@ The two end sticks are **BAS01** and **BAS02**. BAS02 is the end nearest the cir
 3. BAS01 is **8.000 m** from BAS02, through that side point. The tape runs past the circle and stays clear of it. BAS01 is the far end.
 4. Tape BAS01 to BAS02 **both ways**, BAS01 to BAS02 and back. Pull the tape firm and hold it level. Write both readings.
 5. If one end is higher, write the height difference. The level length is the one that counts. A drop of 0.3 m in 8 m makes the slope reading about 6 mm long.
-6. Level each reading first. Then add **32 mm for each end that stopped on the paper**. Write “level, then +32 mm” or “+64 mm”.
+6. Level each reading first. Then add the sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md) for each end that stopped on the paper. Write “level, then +R” and the R you used for each end. Both ends on paper means add both.
 7. The two axis lengths must agree within **10 mm**. More than that: tape both ways again. Do not average a pair that disagrees by more than 10 mm. The mean of the two that do agree is the baseline you type into the app. Kind: tape.
-8. Shoot the same baseline with the laser. This reading is required. It is a check, and it is **not** typed into the app. The circle test cannot see a bad baseline on its own, because the tapes from the stations carry the scale. Keep the dot within **16 mm** of the middle of the stick. If it sits further out, shoot again. Level that reading, then add the same 32 mm per sleeved end. Write the laser on this sheet.
+8. Shoot the same baseline with the laser. This reading is required. It is a check, and it is **not** typed into the app. The circle test cannot see a bad baseline on its own, because the tapes from the stations carry the scale. Keep the dot within half that sleeve’s measured R (about 15 mm) of the middle of the stick. If it sits further out, shoot again. Level that reading, then add that end’s measured R for each sleeved end. Write the laser on this sheet.
 
 ## 3. Plumb every stick and write its height
 
@@ -104,7 +104,7 @@ Before any station. Same phone. **1×**.
 
 1. Use one plumbed cane (a spare, or CRC01).
 2. Stand so the front of the phone is about **4 m** from the stick, and between 3 m and 5 m.
-3. Tape from the **front of the phone** to the paper. Hold it level. Write the raw reading. The axis is that reading plus 32 mm, and that sum stays a tape. Leave it as a length.
+3. Tape from the **front of the phone** to the paper. Hold it level. Write the raw reading. The axis is that reading plus the sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md), and that sum stays a tape. Leave it as a length.
 4. One photo. The sleeve should be a large, clear target, not a speck. Phone held steady, cane filling a good part of the frame.
 5. This photo stays in the capture. Name it so you can find it (`CAL`).
 
@@ -126,7 +126,7 @@ STN01 uses the whole 8 m tape, both ways. Hold it level. There is no spare in an
 
 **STN03 is part of this test.** A capture with only STN01 and STN02 can be written up, and the numbers can be printed, but it is not a pass or a fail. The grade needs all three stations. If you cannot reach 10.5 m, stop and say so on the sheet. Do not call the two-station visit a finished test.
 
-Tape from the **pole** to each end stick. Hold it level. Add 32 mm if that end is a sleeve. The phone-end of the tape is the pole, not a sleeve, so you add 32 mm once, not twice. Write each reading.
+Tape from the **pole** to each end stick. Hold it level. Add that end’s measured R if that end is a sleeve. The phone-end of the tape is the pole, not a sleeve, so you add R once, not twice. Write each reading.
 
 In the app these are ordinary tapes. They are how the station is fixed. The photos then check it. Write the side in the notes as well as on the sheet: STN01 opposite the peg, STN02 and STN03 on the peg’s side.
 
@@ -158,7 +158,7 @@ Tap the marks afterwards: BAS01, BAS02, and each CRC you can see. The full photo
 
 Measure these after the stations. Write them on this sheet. The app’s distances are the baseline and the tapes from the places you stood.
 
-1. **Diameter** CRC01 to CRC04, a fresh pull, separate from the set-out diameters. Level. Raw reading. Note whether each end was on paper (+32 mm each).
+1. **Diameter** CRC01 to CRC04, a fresh pull, separate from the set-out diameters. Level. Raw reading. Note whether each end was on paper, and add that end’s measured R.
 2. **Long chord** CRC01 to CRC03. Same rules. Axis-to-axis should be near **6.93 m**. The neighbour chords of 4.000 m were the set-out. This longer chord is the check.
 
 The laser baseline from section 2 is the third check. It stays on this sheet. It is not typed into the app. The tape mean is the baseline in the app.
@@ -179,11 +179,11 @@ Keep this filled sheet. The stills that count are the ones from the path the pro
 - [ ] Same iPhone, same lens, 1×, for the calibration and every station
 - [ ] Line marked 4.000 m, six sticks, neighbour chords 4.000 m
 - [ ] Both diameters written; closing chord within 30 mm; radius σ **4 mm**
-- [ ] Baseline 8.000 m, both directions, level, +32 mm per sleeved end
+- [ ] Baseline 8.000 m, both directions, level, plus each sleeved end’s measured R
 - [ ] The two baseline pulls agree within 10 mm
 - [ ] Laser baseline written, and not typed into the app
 - [ ] Peg to BAS02 written (aim 4.30 m)
-- [ ] Every cane bubbled, height to the middle of the paper written
+- [ ] Every cane bubbled, height to the middle of the paper written, and that sleeve’s measured R written
 - [ ] Calibration tape from the front of the phone written raw
 - [ ] STN01, STN02, and STN03, each with two tapes, each side ticked
 - [ ] Lens over the middle of the pole at each station, then the pole bubbled
@@ -203,17 +203,17 @@ Lens name on the probe:
 
 Motion reading inside the photo: yes / no.
 
-| Cane | Height to sleeve centre (m) | Plumb ok |
-|---|---|---|
-| CRC01 | | |
-| CRC02 | | |
-| CRC03 | | |
-| CRC04 | | |
-| CRC05 | | |
-| CRC06 | | |
-| BAS01 | | |
-| BAS02 | | |
-| CAL | | |
+| Cane | Height to sleeve centre (m) | Sleeve R (mm) | Plumb ok |
+|---|---|---|---|
+| CRC01 | | | |
+| CRC02 | | | |
+| CRC03 | | | |
+| CRC04 | | | |
+| CRC05 | | | |
+| CRC06 | | | |
+| BAS01 | | | |
+| BAS02 | | | |
+| CAL | | | |
 
 | Measurement | Raw | Level? | Height diff | Ends on paper | Axis length |
 |---|---|---|---|---|---|
