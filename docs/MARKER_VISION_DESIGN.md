@@ -124,9 +124,24 @@ Vertical budget. The module is **13 mm**, not 14 mm, so the quiet zones can be m
 
 (the width-6 polynomial `0x19`). On the 12-bit word, and also on an 8-data-bit word of 14 bits, the minimum distance is **4**. CRC-6/ITU, `x⁶ + x + 1`, has distance **3** on both of those lengths, so it is not used. One flipped band fails the check. **Do not correct a bit.** A corrected band can name the wrong stick.
 
-Of the 64 checksummed words, **28** have no run longer than 3. Those are the issued IDs: `05 07 08 0A 0B 0D 0E 11 12 14 17 19 1A 1B 1D 22 23 25 26 29 2E 32 33 34 35 36 39 3B`. `garden.json` maps each one to a name (`A1`, `HSE03`, `FNC01`, …). Rods, about ten corners and a dozen posts fit. There is not a spare 256. A new batch of marks needs a new sync, not a reused code.
+Of the 64 checksummed words, **28** have no run longer than 3. Those are the issued IDs: `05 07 08 0A 0B 0D 0E 11 12 14 17 19 1A 1B 1D 22 23 25 26 29 2E 32 33 34 35 36 39 3B`. `garden.json` maps each one to a name (`A1`, `HSE03`, `FNC01`, …).
 
-Decode from the sync, not from a hope that all 19 edges are visible. Module height is the four-black run divided by 4. Every other run must be 1, 2 or 3 modules. Same-colour bands are one run; they are not lost, because the sync sets the scale. Reject if there is any other run of four blacks, if the module count is not 19, if the stop is not white-then-black, or if the CRC fails.
+**Is 28 enough?** For the marks you read from across the garden, only just. Six rod sleeves, about ten house corners and four fence discs is 20, with eight left for reprints and a lost sheet. A fuller boundary, eight to twelve posts, uses the rest. Baseline ends are those house corners or those rod marks, not a third set. Bed corners and path pegs are different: a few beds and a path can be fifteen to forty points. Put this sleeve on all of them and 28 is not enough.
+
+Those bed and path points are named when you stand on them (`+ Point`). They do not need a code that reads at 5 m. They stay off this sleeve.
+
+If the long-range set itself goes past about **24** (leave four codes for reprints), add a second bank. Do not shrink the module, and do not stack a second sheet yet.
+
+| Option | What you get | What it costs |
+|---|---|---|
+| **Second bank (recommended if 28 runs out)** | Sync of **five** blacks instead of four. Same CRC, same run limit, same 13 mm module. Another 28 IDs, **56** in total. A run of five cannot appear in the payload, so the two syncs do not collide. | One extra band. Code height 260 mm, quiet zones about **18 mm** each, down from 22 and 28. Still above the 15 mm margin that was rejected. Module stays 7.9 px at 5 m. |
+| Smaller module, more data bits | Eight data bits is 97 IDs, but that is 21 bands. At 11 mm the quiet zones fit, and 11 mm is 8 px at about **4.2 m**. | The 5 m ID promise moves in. |
+| Two A4 sheets, 594 mm tall | Room for more bands at 13 mm with the current quiet zones. | The sleeve centre moves up, so the same lean is a larger ground error, and the paper catches the wind. |
+| A colour prefix | Another bank with no extra height. | Needs a colour printer. A coloured band in sun is the brightness problem this code was built to avoid. |
+
+Use the five-black bank when the long-range count passes about 24. Stack a second sheet only if 56 is still short. A shorter module is the wrong trade while ID at 5 m is the bar.
+
+Decode from the sync, not from a hope that all 19 edges are visible. On the first bank the module height is the four-black run divided by 4, and there are 19 modules. On the second bank it is the five-black run divided by 5, and there are 20. Every other run must be 1, 2 or 3 modules. Same-colour bands are one run; they are not lost, because the sync sets the scale. Reject a second long black run, a module count that is not 19 or 20, a stop that is not white-then-black, or a failed CRC.
 
 **Range of the ID.** Promise it at **2 m and 5 m** (20 px and 7.9 px per band). At **8 m** a band is 4.9 px: keep the ID only when the sync, the runs and the CRC all pass; otherwise reject the code. At **15 m** a band is 2.6 px: **no ID**.
 
@@ -258,5 +273,5 @@ A flat tag is not in this comparison as a thing we might still print. A square f
 
 Both reviews are applied. What is left is practical, not a second code:
 
-1. Count the real marks. Twenty-eight issued IDs cover the rods, about ten corners and a dozen posts. If the garden needs more, the next sync has to be designed before those sleeves are printed.
+1. Count the long-range marks before printing. Twenty-eight covers rods, the house and a short fence. Past about 24, print the five-black bank (56 IDs) rather than a shorter module. Beds and paths stay unnamed by this sleeve.
 2. The checkerboard prior and `sigmaCentringM` have to be in the solver when Phase 2 wires detections into it. This note does not change PR #3.

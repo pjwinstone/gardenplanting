@@ -193,7 +193,7 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
    **Recommendation:** automatic ID at **2 m and 5 m**, seeded by a tap. At 8 m, accept the ID only when the sync, the run lengths and the CRC all pass; otherwise keep the bearing and reject the code. At 15 m, bearing only. Detect on a full-resolution 1× still, not the 1920-wide preview.
 
 19. **Wrong ID versus a miss.** Correcting a single glare-flipped band can turn rod A into rod B. A checksum with distance 3 will miss some two-band errors.
-   **Recommendation:** CRC-6 on `x⁶ + x⁴ + x³ + 1` (distance 4 over the 12-bit word). Reject, do not correct. A failed read falls back to the hand click that seeded the search.
+   **Recommendation:** CRC-6 on `x⁶ + x⁴ + x³ + 1` (distance 4 over the 12-bit word). Reject, do not correct. A failed read falls back to the hand click that seeded the search. The run limit leaves **28** issued IDs, enough for rods, the house and a short fence, not for every bed and path peg. Those are named at the station. If the long-range set passes about 24, add a five-black sync as a second bank (56 IDs) instead of a shorter module.
 
 20. **Hand clicks.** Markers will miss in sun, leaves, and blur.
    **Recommendation:** keep the tap. A photo with no accepted code is still a photo you can mark by hand.
