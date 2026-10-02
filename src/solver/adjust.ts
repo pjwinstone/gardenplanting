@@ -16,7 +16,8 @@ import {
   STATION_CLASS_M,
   TRI_ANGLE_WARN_MAX_DEG,
   TRI_ANGLE_WARN_MIN_DEG,
-  UNCHECKED_REDUNDANCY,
+  REDUNDANCY_ZERO,
+  ZERO_REDUNDANCY_SHIFT_M,
   W_CRITICAL,
   W_ISOLATION_RATIO,
   Z_95,
@@ -119,17 +120,19 @@ export function solve(input: SolveInput): SolveResult {
   let result = solveOnce(current);
   if (input.dropBlunders) {
     for (let n = 0; n < 3; n++) {
-      const flagged = result.observations
-        .filter((o) => o.used && o.flagged && o.standardised != null && o.kind !== 'focal')
+      const ranked = result.observations
+        .filter((o) => o.used && o.standardised != null && o.kind !== 'focal')
         .sort((a, b) => Math.abs(b.standardised ?? 0) - Math.abs(a.standardised ?? 0));
-      const worst = flagged[0];
+      const worst = ranked.find((o) => o.flagged);
       if (!worst?.standardised) break;
-      const second = flagged[1];
-      const ratio = second?.standardised
-        ? Math.abs(worst.standardised) / Math.abs(second.standardised)
+      const next = ranked.find((o) => o.id !== worst.id);
+      const ratio = next?.standardised
+        ? Math.abs(worst.standardised) / Math.abs(next.standardised)
         : Infinity;
-      if (second && ratio < W_ISOLATION_RATIO) {
-        for (const o of flagged) if (!inseparable.includes(o.id)) inseparable.push(o.id);
+      if (next && ratio < W_ISOLATION_RATIO) {
+        for (const o of [worst, next, ...ranked.filter((q) => q.flagged)]) {
+          if (!inseparable.includes(o.id)) inseparable.push(o.id);
+        }
         break;
       }
       const previous = result;
@@ -151,7 +154,9 @@ export function solve(input: SolveInput): SolveResult {
       };
       result = solveOnce(current);
       if (result.varianceTest === 'high') {
-        for (const o of flagged) if (!inseparable.includes(o.id)) inseparable.push(o.id);
+        for (const o of ranked.filter((q) => q.flagged)) {
+          if (!inseparable.includes(o.id)) inseparable.push(o.id);
+        }
         dropped.pop();
         result = previous;
         break;
@@ -662,15 +667,27 @@ function uniqueMarks(bearings: BearingPrep[]): string[] {
 function classifyControl(s: PointState, marks: string[], xyOf: (id: string) => Xy | null): void {
   if (s.x == null || s.y == null) return;
   s.markCount = marks.length;
-  if (marks.length >= 3) {
-    const pts = marks.slice(0, 3).map((id) => xyOf(id)!).filter(Boolean);
-    if (pts.length === 3) {
-      const danger = dangerAssessment({ x: s.x, y: s.y }, pts);
-      s.dangerRatio = danger.ratio;
-      s.dangerKind = danger.kind;
-      if (danger.warn) s.earlyWarning = 'danger';
+  const pts: Xy[] = [];
+  for (const id of marks) {
+    const p = xyOf(id);
+    if (p) pts.push(p);
+  }
+  if (pts.length < 3) return;
+  // The first three clicks are not special. Keep the best-conditioned triple.
+  let best: ReturnType<typeof dangerAssessment> | null = null;
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      for (let k = j + 1; k < pts.length; k++) {
+        const danger = dangerAssessment({ x: s.x, y: s.y }, [pts[i], pts[j], pts[k]]);
+        if (!best || danger.ratio > best.ratio) best = danger;
+      }
     }
   }
+  if (!best) return;
+  s.dangerRatio = best.ratio;
+  s.dangerKind = best.kind;
+  if (best.warn) s.earlyWarning = 'danger';
+  else if (s.earlyWarning === 'danger') s.earlyWarning = undefined;
 }
 
 function placeFromDistances(
@@ -1081,6 +1098,8 @@ function observedBearingScaleDerivative(b: BearingPrep, scale: number): number {
     cy: photo.cy ?? photo.height / 2,
     fx: fx0 * (1 + scale),
     fy: fy0 * (1 + scale),
+    fx0,
+    fy0,
     gravity: photo.gravity,
   });
 }
@@ -1135,6 +1154,11 @@ function runLm(built: Built): LmResult {
   let converged = false;
   for (let iter = 0; iter < 40; iter++) {
     const { N, g } = normal(built, x);
+    const decrement = gnDecrement(N, g);
+    if (decrement != null && decrement >= 0 && decrement <= 1e-10 * Math.max(1, cost)) {
+      converged = true;
+      break;
+    }
     const damped = N.map((row) => row.slice());
     for (let i = 0; i < n; i++) damped[i][i] += lambda * Math.max(N[i][i], 1e-8);
     const rhs = g.map((v) => -v);
@@ -1167,6 +1191,15 @@ function runLm(built: Built): LmResult {
     return { x, rankDeficient: true, nullVector: nullVectorOf(N), q: null, converged };
   }
   return { x, rankDeficient: false, nullVector: null, q, converged };
+}
+
+/** Predicted cost drop gᵀ N⁻¹ g. Null when N has no inverse. */
+function gnDecrement(N: number[][], g: number[]): number | null {
+  const delta = solveEquilibrated(N, g);
+  if (!delta) return null;
+  let s = 0;
+  for (let i = 0; i < g.length; i++) s += delta[i] * g[i];
+  return s;
 }
 
 function costOf(built: Built, x: number[]): number {
@@ -1640,8 +1673,9 @@ function checkedGate(
       blocked = blocked ?? o.id;
       continue;
     }
-    if (obs <= UNCHECKED_REDUNDANCY) {
-      blocked = blocked ?? o.id;
+    // r ≈ 0 makes an MDB unbounded. Block only when a 1σ shift is real.
+    if (obs < REDUNDANCY_ZERO) {
+      if (gain * o.sigma > ZERO_REDUNDANCY_SHIFT_M) blocked = blocked ?? o.id;
       continue;
     }
     const move = gain * ((MDB_FACTOR * o.sigma) / Math.sqrt(obs));

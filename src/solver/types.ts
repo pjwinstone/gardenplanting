@@ -143,7 +143,7 @@ export interface SolveInput {
   branchChoices?: SolverBranchChoice[];
   /**
    * Drop one observation and re-solve, up to three times, only when its |w|
-   * stands clear of the next flagged residual and the variance test then passes.
+   * stands clear of the next residual, flagged or not, and the variance test then passes.
    */
   dropBlunders?: boolean;
 }

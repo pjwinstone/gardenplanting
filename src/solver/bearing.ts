@@ -93,20 +93,28 @@ export function clickBearingFxDerivative(px: number, cx: number, fx: number): nu
 }
 
 /**
- * ∂β/∂s where fx = fx₀(1+s) and fy = fy₀(1+s). Pass the current fx and fy.
+ * ∂β/∂s where fx = fx₀(1+s) and fy = fy₀(1+s).
+ * The ray is evaluated at the current focal length. ∂β/∂fx is then multiplied
+ * by fx₀, not by the current fx, so the factor (1+s) is not applied twice.
  */
 export function levelledBearingScaleDerivative(opts: {
   px: number;
   py: number;
   cx: number;
   cy: number;
+  /** Current focal length, fx₀(1+s). */
   fx: number;
   fy: number;
+  /** Nominal focal length fx₀. Defaults to `fx`, which is exact only at s = 0. */
+  fx0?: number;
+  fy0?: number;
   gravity?: Vec3 | null;
 }): number {
   const fx = opts.fx;
   const fy = opts.fy;
-  if (!opts.gravity) return clickBearingFxDerivative(opts.px, opts.cx, fx) * fx;
+  const fx0 = opts.fx0 ?? fx;
+  const fy0 = opts.fy0 ?? fy;
+  if (!opts.gravity) return clickBearingFxDerivative(opts.px, opts.cx, fx) * fx0;
   const up = opts.px - opts.cx;
   const vp = opts.py - opts.cy;
   const { pitch, roll } = pitchRollFromGravity(opts.gravity);
@@ -116,7 +124,7 @@ export function levelledBearingScaleDerivative(opts: {
   const drdy = mul3(R, { x: 0, y: -vp / (fy * fy), z: 0 });
   const n2 = ray.x * ray.x + ray.z * ray.z || 1e-18;
   const dBeta = (dRay: Vec3) => (-ray.z / n2) * dRay.x + (ray.x / n2) * dRay.z;
-  return dBeta(drdx) * fx + dBeta(drdy) * fy;
+  return dBeta(drdx) * fx0 + dBeta(drdy) * fy0;
 }
 
 /**

@@ -12,11 +12,13 @@
  *   about ε·v/fx for roll and δ·u·v/(fx²+u²) for pitch.
  * - fx, when a relative σ is supplied, is a parameter with that prior. Rays
  *   from a both-tapes station carry it. Depth and "four marks" are not a class.
- * - A point is checked only when every observation that moves it has r > 0.1
- *   and an MDB-sized shift inside the class. A high variance factor withholds
- *   checked and plantable, and scales the published covariance by σ̂₀².
+ * - A point is checked when every observation that moves it has an MDB-sized
+ *   shift inside the class. r ≈ 0 is the only redundancy guard (a 1σ shift
+ *   above 0.1 mm). A high variance factor withholds checked and plantable,
+ *   and scales the published covariance by σ̂₀².
  * - One blunder is dropped only when its |w| is at least twice the next
- *   flagged residual and the variance test then passes.
+ *   residual, flagged or not, and the variance test then passes.
+ * - ∂β/∂s uses the nominal focal length. The current fx would add a factor (1+s).
  * - House Q_m holds the first azimuth and puts angle noise on the other n−1
  *   turnings. All n interior angles also face |Σα−(n−2)π| ≤ 1.96 σ √n.
  * - v1 offsetMm is not applied. A constant frame offset is used only when the

@@ -35,7 +35,7 @@ import {
   trilaterationEllipse,
 } from '../src/solver/index.ts';
 import type { SolveInput, SolverPhotoInput } from '../src/solver/types.ts';
-import { clickBearingUnlevelled, tiltBearingSigma, wrap } from '../src/solver/bearing.ts';
+import { clickBearingUnlevelled, levelledBearingScaleDerivative, tiltBearingSigma, wrap } from '../src/solver/bearing.ts';
 import { invertSpd } from '../src/solver/linalg.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -1521,6 +1521,8 @@ test('N2: a concyclic first triple does not hide a resectable station', () => {
   ]) {
     const station = point(run(order), 'S');
     assert.notEqual(station.unsetCode, 'flat-angle', order.map((m) => m.id).join(','));
+    assert.notEqual(station.unsetCode, 'danger', order.map((m) => m.id).join(','));
+    assert.ok((station.dangerRatio ?? 0) > 0.2, `ratio ${station.dangerRatio} ${order.map((m) => m.id).join(',')}`);
     assert.ok(Math.abs((station.x ?? 99) - S.x) < 1e-2, `x ${station.x} ${station.unsetCode}`);
     assert.ok(Math.abs((station.y ?? 99) - S.y) < 1e-2, `y ${station.y}`);
   }
@@ -1592,6 +1594,157 @@ test('circle gap is 3 √(σ₀² + σ₁²), and bubble tilt is per ray', () =>
     fx: 900,
   });
   assert.ok(Math.abs(tilt - (2 * DEG * 300) / 900) < 1e-12, `tilt ${tilt}`);
+});
+
+test('focal-scale derivative matches a finite difference, and noisy resections converge', () => {
+  const fx0 = 864;
+  const scale = 0.003;
+  const h = 1e-6;
+  for (const gravity of [undefined, { x: 0.1, y: 0.95, z: -0.05 }] as const) {
+    const beta = (s: number) =>
+      levelledBearing({
+        px: 400,
+        py: 520,
+        cx: 600,
+        cy: 450,
+        fx: fx0 * (1 + s),
+        fy: fx0 * (1 + s),
+        gravity,
+      });
+    const numeric = (beta(scale + h) - beta(scale - h)) / (2 * h);
+    const analytic = levelledBearingScaleDerivative({
+      px: 400,
+      py: 520,
+      cx: 600,
+      cy: 450,
+      fx: fx0 * (1 + scale),
+      fy: fx0 * (1 + scale),
+      fx0,
+      fy0: fx0,
+      gravity,
+    });
+    assert.ok(Math.abs(analytic / numeric - 1) < 1e-4, `∂β/∂s ratio ${analytic / numeric}`);
+  }
+
+  // A Jacobian large by (1+s) stalled about 4.6% of these solves as diverged.
+  const marks = [
+    { id: 'A', x: 0, y: 0 },
+    { id: 'B', x: 8, y: 0 },
+    { id: 'C', x: 1, y: 3 },
+    { id: 'D', x: 7, y: 3 },
+  ];
+  const S = { x: 4, y: 8 };
+  const yaw = -Math.PI / 2;
+  const width = 1200;
+  const fxOver = 0.72;
+  const fx = fxOver * width;
+  const rng = mulberry32(3);
+  const trials = 120;
+  let diverged = 0;
+  for (let t = 0; t < trials; t++) {
+    const focal = 1 + gaussian(rng) * 0.01;
+    const clicks = marks.map((m) => {
+      const beta = wrap(Math.atan2(m.y - S.y, m.x - S.x) - yaw) + gaussian(rng) * 0.1 * DEG;
+      return { pointId: m.id, px: width / 2 - fx * focal * Math.tan(beta), py: 450 };
+    });
+    const result = solve({
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
+      points: [
+        { id: 'C', held: { x: 1, y: 3 } },
+        { id: 'D', held: { x: 7, y: 3 } },
+      ],
+      photos: [
+        {
+          id: 'cam',
+          stationId: 'S',
+          width,
+          height: 900,
+          fxOverWidth: fxOver,
+          fxRelativeUncertainty: 0.01,
+          gravity: { x: 0, y: 1, z: 0 },
+          bearingSigmaRad: 0.1 * DEG,
+          clicks,
+        },
+      ],
+    });
+    if (!result.converged || point(result, 'S').x == null) diverged++;
+  }
+  assert.equal(diverged, 0, `${diverged} / ${trials} diverged`);
+});
+
+test('MDB shift checks a redundant tape net; r ≤ 0.1 alone does not', () => {
+  // Six points, eleven 5 mm tapes, three degrees of freedom. AR and RS have
+  // r under 0.1. Their MDB shifts stay inside the planting class, so the
+  // free points are checked. A blunder of 1.5×MDB checks none of them.
+  const net = {
+    A: { x: 0, y: 0 },
+    B: { x: 10, y: 0 },
+    P: { x: 4, y: 3 },
+    Q: { x: 7, y: 4 },
+    R: { x: 3, y: 7 },
+    S: { x: 8, y: 8 },
+  };
+  const free = ['P', 'Q', 'R', 'S'] as const;
+  const pairs = [
+    ['A', 'P'], ['B', 'P'], ['A', 'Q'], ['B', 'Q'], ['P', 'Q'],
+    ['A', 'R'], ['B', 'R'], ['Q', 'R'], ['R', 'S'], ['Q', 'S'], ['P', 'S'],
+  ] as const;
+  const sigma = 0.005;
+  const length = (a: string, b: string) => {
+    const pa = net[a as keyof typeof net];
+    const pb = net[b as keyof typeof net];
+    return Math.hypot(pa.x - pb.x, pa.y - pb.y);
+  };
+  const solveNet = (extra: (id: string) => number) =>
+    solve({
+      datum: { originId: 'A', axisPointId: 'B', lengthM: 10, fixScale: true },
+      distances: pairs.map(([a, b]) => ({
+        id: `${a}${b}`,
+        a,
+        b,
+        slopeM: length(a, b) + extra(`${a}${b}`),
+        sigmaM: sigma,
+      })),
+    });
+
+  const exact = solveNet(() => 0);
+  assert.equal(exact.degreesOfFreedom, 3);
+  assert.equal(exact.converged, true);
+  const low = exact.observations.filter((o) => o.used && o.redundancy > 1e-6 && o.redundancy <= 0.1);
+  assert.ok(low.length >= 1, 'expected a tape with r ≤ 0.1');
+  for (const id of free) {
+    const p = point(exact, id);
+    assert.equal(p.status, 'checked', `${id} blocked by ${p.uncheckedObservationId}`);
+  }
+
+  const rng = mulberry32(21);
+  let checked = 0;
+  let seen = 0;
+  const trials = 100;
+  for (let i = 0; i < trials; i++) {
+    const result = solveNet(() => gaussian(rng) * sigma);
+    for (const id of free) {
+      seen++;
+      if (point(result, id).status === 'checked') checked++;
+    }
+  }
+  const rate = checked / seen;
+  assert.ok(rate > 0.88 && rate < 0.995, `clean checked ${rate}`);
+
+  const tape = exact.observations.find((o) => o.id === 'AR');
+  assert.ok(tape?.mdb && tape.redundancy <= 0.1 && tape.redundancy > 1e-6);
+  const blown = solveNet((id) => (id === 'AR' ? 1.5 * tape.mdb! : 0));
+  assert.equal(blown.varianceTest, 'high');
+  for (const id of free) assert.equal(point(blown, id).status, 'unchecked', id);
+
+  const rngB = mulberry32(22);
+  let badChecked = 0;
+  const badTrials = 40;
+  for (let i = 0; i < badTrials; i++) {
+    const result = solveNet((id) => gaussian(rngB) * sigma + (id === 'AR' ? 1.5 * tape.mdb! : 0));
+    for (const id of free) if (point(result, id).status === 'checked') badChecked++;
+  }
+  assert.equal(badChecked, 0);
 });
 
 const fieldFixture = join(root, 'fixtures/field-circle-baseline/garden.json');

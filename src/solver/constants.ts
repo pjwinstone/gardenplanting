@@ -19,8 +19,18 @@ export const MDB_FACTOR = 4.13;
 /** 1D 95% factor for a withheld distance. */
 export const Z_95 = 1.96;
 
-/** A determining observation at or below this redundancy leaves the point unchecked. */
+/**
+ * A low redundancy number is worth showing on an observation. It does not,
+ * by itself, keep a point unchecked: the MDB shift does that. At r ≈ 0 the
+ * MDB is unbounded, and REDUNDANCY_ZERO is that guard.
+ */
 export const UNCHECKED_REDUNDANCY = 0.1;
+
+/** Below this redundancy an MDB is treated as unbounded. */
+export const REDUNDANCY_ZERO = 1e-6;
+
+/** At r ≈ 0, a 1σ shift above this (0.1 mm) leaves the point unchecked. */
+export const ZERO_REDUNDANCY_SHIFT_M = 0.0001;
 
 /** Photo-station class: 95% semi-major. */
 export const STATION_CLASS_M = 0.2;
@@ -52,7 +62,7 @@ export const LM_STEP_M = 0.0001;
 /** Upper-tail significance for the global variance-factor test. 'low' is not a failure. */
 export const VARIANCE_TEST_ALPHA = 0.05;
 
-/** |w| must be at least this many times the next flagged residual before one observation is dropped. */
+/** |w| must be at least this many times the next residual, flagged or not, before one observation is dropped. */
 export const W_ISOLATION_RATIO = 2;
 
 /** Circle gap above 3 √(σ₀² + σ₁²) is a miss, not a weak point. About 85 mm at 20 mm tapes. */
