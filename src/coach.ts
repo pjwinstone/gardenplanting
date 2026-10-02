@@ -1,4 +1,6 @@
 import type { GardenDocument, SessionMode } from './model';
+import type { SolvePoint, SolveResult } from './solver/types';
+import type { HouseTolerance } from './solver/house';
 import {
   baselineReady,
   baselineTieReady,
@@ -206,4 +208,127 @@ export function speakCoachLine(text: string, enabled: boolean): void {
 
 export function refusalSentence(reason: string): string {
   return reason;
+}
+
+function mm(metres: number): string {
+  return `${Math.abs(metres * 1000).toFixed(0)} mm`;
+}
+
+/**
+ * Sentences for a phase-1 solve. The solver returns numbers and codes;
+ * the wording stays here.
+ */
+export function solverCoachLines(result: SolveResult): string[] {
+  const lines: string[] = [];
+  const origin = result.points.find((p) => p.datumRole === 'origin');
+  const axis = result.points.find((p) => p.datumRole === 'axis');
+  if (origin && axis) {
+    lines.push(
+      `${origin.id} is the datum origin. ${axis.id} lies on the axis, and the baseline tape is an ordinary distance.`,
+    );
+  }
+  if (result.degreesOfFreedom > 0 && result.sigma0 != null) {
+    lines.push(
+      `Variance factor σ̂₀ is ${result.sigma0.toFixed(2)} on ${result.degreesOfFreedom} degrees of freedom. The variance test is ${result.varianceTest}.`,
+    );
+  } else {
+    lines.push('Nothing is spare yet, so σ̂₀ is not defined.');
+  }
+  for (const o of result.observations) {
+    if (!o.used || o.kind !== 'distance') continue;
+    const sign = o.residual < 0 ? 'short' : 'long';
+    lines.push(`${o.id} residual ${mm(o.residual)} ${sign}.`);
+    if (o.flagged && o.standardised != null) {
+      lines.push(`${o.id} fails the w-test, |w| = ${Math.abs(o.standardised).toFixed(2)}.`);
+    }
+  }
+  for (const o of result.observations) {
+    if (!o.used || o.kind === 'distance' || !o.flagged || o.standardised == null) continue;
+    lines.push(`${o.id} fails the w-test, |w| = ${Math.abs(o.standardised).toFixed(2)}.`);
+  }
+  for (const p of result.points) {
+    lines.push(...pointCoach(p));
+  }
+  for (const w of result.withheld) {
+    lines.push(
+      w.pass
+        ? `Withheld ${w.id} misses by ${mm(w.missM)}, inside the 1.96 limit of ${mm(w.limitM)}.`
+        : `Withheld ${w.id} misses by ${mm(w.missM)}, outside the 1.96 limit of ${mm(w.limitM)}.`,
+    );
+  }
+  for (const skip of result.skippedPhotos) {
+    lines.push(`${skip.id} has no calibrated fx/width, so I have not resected it.`);
+  }
+  return lines;
+}
+
+function pointCoach(p: SolvePoint): string[] {
+  if (p.datumRole === 'origin') return [];
+  if (p.status === 'unset') {
+    if (p.unsetCode === 'one-distance') {
+      return [
+        `${p.id} has one taped edge. That does not fix a corner, and I will not turn 90° to place it. A second distance or a ray would.`,
+      ];
+    }
+    if (p.unsetCode === 'hanging') {
+      return [`${p.id} is not tied to a solved point yet.`];
+    }
+    if (p.unsetCode === 'arc-only') {
+      return [`${p.id} has no coordinate. Two marks and no tape are only an arc.`];
+    }
+    if (p.unsetCode === 'two-candidates') {
+      const apart = p.candidateSeparationM != null ? ` ${p.candidateSeparationM.toFixed(1)} m apart.` : '';
+      return [`${p.id} is two candidates${apart} I will not average them.`];
+    }
+    if (p.unsetCode === 'flat-angle') {
+      return [`The subtended angle at ${p.id} is nearly flat. I will not invent a range.`];
+    }
+    if (p.unsetCode === 'danger') {
+      const size = p.rejected?.semiMajor95M != null ? ` The 95% semi-major is ${mm(p.rejected.semiMajor95M)}.` : '';
+      return [`${p.id} sits on the danger circle.${size} I have not set a coordinate.`];
+    }
+    if (p.unsetCode === 'mirror') {
+      return [`${p.id} has two mirrors and nothing to choose between them. I have not set a coordinate.`];
+    }
+    if (p.unsetCode === 'rank') {
+      return [`${p.id} is unset. The normal matrix cannot carry it.`];
+    }
+    if (p.unsetCode === 'miss') {
+      return [`${p.id} is unset. Those distances do not meet.`];
+    }
+    return [`${p.id} is unset.`];
+  }
+  const lines: string[] = [];
+  if (p.status === 'unchecked') {
+    lines.push(
+      p.branchChoice
+        ? `${p.id} is an explicit branch choice, so it is fixed but unchecked.`
+        : `${p.id} is fixed but unchecked. Nothing spare is checking it.`,
+    );
+  }
+  if (p.semiMajor95M != null && p.x != null) {
+    lines.push(`${p.id} 95% semi-major ${mm(p.semiMajor95M)}.`);
+  }
+  if (p.earlyWarning === 'shallow-intersection' || p.earlyWarning === 'straight-intersection') {
+    lines.push(`${p.id} intersection is shallow. The ellipse decides, not the angle.`);
+  }
+  if (p.earlyWarning === 'shallow-rays') {
+    lines.push(`${p.id} rays cross under about 25°. The ellipse decides.`);
+  }
+  if (p.meetsStationClass) {
+    lines.push(`${p.id} meets the 200 mm station class.`);
+  } else if (p.stationClassBlock === 'fx') {
+    lines.push(`${p.id} does not meet the station class. fx is not calibrated to 1%.`);
+  }
+  return lines;
+}
+
+/** House closing sentence. Distances alone have no misclosure to test. */
+export function houseCoachLine(tolerance: HouseTolerance, flatGateMm = 50): string {
+  const semi = mm(tolerance.semiMajor95M);
+  if (!tolerance.hasTraverseMisclosure) {
+    return `No angles were measured, so the house has no traverse misclosure. Distance noise alone would still scatter a closing by a 95% semi-major of ${semi}. A flat ${flatGateMm} mm gate is not the test.`;
+  }
+  const gate = tolerance.pass ? 'inside' : 'outside';
+  return `Traverse misclosure is ${gate} χ²(2, 0.95). The 95% semi-major of Q_m is ${semi}.`;
 }
