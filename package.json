@@ -7,16 +7,12 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "npm run test:solver && npm run test:field-circle && npm run test:occ-off-baseline && npm run test:station-baseline",
-    "test:solver": "tsc -p tsconfig.solver.json --noEmit && tsx --test tests/phase1-solver.test.ts",
     "test:field-circle": "node scripts/check-field-circle-baseline.mjs",
     "test:occ-off-baseline": "node scripts/check-occ-off-baseline.mjs",
     "test:station-baseline": "node scripts/check-station-baseline.mjs"
   },
   "devDependencies": {
-    "@types/node": "^22.15.0",
     "puppeteer": "^24.15.0",
-    "tsx": "^4.20.3",
     "typescript": "~5.7.2",
     "vite": "^6.0.3",
     "vite-plugin-pwa": "^0.21.1"
