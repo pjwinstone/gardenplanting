@@ -48,21 +48,21 @@ Adjust on the synthetic suite and on one real export meets the table, and the fi
 
 ## Phase 2 — Markers and photo network
 
-**Goal:** the phone recognises a rod or post from any side and emits the same kind of observation Phase 1 already adjusts. Design: [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md). Recommended mark is a **wrap-around ring code** for identity and bearing, plus an optional **flat AprilTag** when a face is visible and focal length needs a check.
+**Goal:** the phone recognises a rod or post from any side and emits the same kind of observation Phase 1 already adjusts. Design: [MARKER_VISION_DESIGN.md](MARKER_VISION_DESIGN.md). The mark is an **A4 portrait sleeve** rolled onto the stick: horizontal bands, about **64 mm** diameter if the full sheet width wraps with 10 mm overlap. The stored point is the **stick centre**. A flat tag is not part of the standard print.
 
 Stages are in order. A later stage does not start by weakening an earlier bar.
 
 ### (a) Detect one marker in one photo
 
-**Prove:** a printed ring, photographed in Safari at 1×, returns the right ID or no ID. It does not return a neighbour’s ID. The vertical centreline of the sleeve repeats to about **2 px** (no worse than a careful click).
+**Prove:** a printed A4 ring, photographed in Safari at 1×, returns the right ID or no ID. It does not return a neighbour’s ID. The vertical centreline of the sleeve repeats to about **1 px** on a clean frame (lateral error a few millimetres at 15 m).
 
-**Accuracy:** pixel error only. A wrong ID is a failure even if the pixel is perfect. At full-resolution 1× (`fx/width` about 0.72), a 100 mm toilet-roll belt is only about **19 px** tall at 15 m, so ID at 15 m is not the bar. The bar is ID at **2 m and 5 m**, and a reject (not a guess) at long range.
+**Accuracy:** pixel error only. A wrong ID is a failure even if the pixel is perfect. A 14 mm band is about **8 px** at 5 m on a full-resolution 1× still and about **3 px** at 15 m, so ID at 15 m is not the bar. The bar is ID at **2 m and 5 m**, and a reject (not a guess) at long range. Bearing may still be kept at 8–15 m when both silhouette edges are found.
 
 **Validate:** one printed sheet. Photos at 2 m and 5 m, plus a tilt, a leaf across one band, and sun on the sleeve. Zero wrong IDs on that set.
 
 ### (b) Detections are rays
 
-**Prove:** the centreline becomes a levelled bearing `β = atan2(−x_level, z_level)` in the Phase 1 solver, with `σ_px` from the fit. Focal length is a parameter or a consider-parameter inside the ellipse (PR #3 B2), not a gate checked after the fact. A known band height may be a **weak distance** (several percent of range), enough to separate the two station candidates that sit about 20 m apart, and not a tape. A point that lands behind the camera is not published (PR #3 B3).
+**Prove:** the centreline becomes a levelled bearing `β = atan2(−x_level, z_level)` in the Phase 1 solver, with `σ_px` from the fit. That ray already points at the stick axis, so it carries no radial offset. Focal length is a parameter or a consider-parameter inside the ellipse (PR #3 B2), not a gate checked after the fact. The known sleeve height (297 mm) may be a **weak distance** (about 64 mm at 5 m if `fx` is known to 1%, several hundred millimetres at 15 m), enough to separate the two station candidates that sit about 20 m apart, and not a tape. A point that lands behind the camera is not published (PR #3 B3).
 
 **Accuracy:** same station class as Phase 1. **95% semi-major ≤ 200 mm** only when `fx` is known to about **1%** and the rays are levelled. A 10% focal error remains about **±1.98 m** on the 7 m / 20° case and must still fail that class. A plantable point stays at **100 mm** with a spare observation; a 200 mm station still needs a tape if you would plant from the new point.
 
@@ -153,8 +153,8 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
 5. **House close.** Today’s 50 mm check measures the gap between two different corners. A polygon of wall lengths only has no traverse misclosure, because a misclosure needs measured angles.
    **Recommendation:** no fixed millimetre threshold. When angles exist, test `mᵀ Q_m⁻¹ m ≤ 5.99` and show 2.45 times the semi-major of `Q_m`. On the demo shed that is **93 mm** for tapes at 20 mm and **144 mm** once each corner also has a 0.2° angle. A flat 50 mm gate false-alarms on about **35%** of correct distance-only sheds at σ = 20 mm, and a tighter tape does not repair that once angles dominate (116 mm at 95% with 3 mm + 1 mm/m and 0.2°).
 
-6. **Offset direction.** `offsetMm` has no direction, so the brick arris is not actually solved. A laser on the front of a roll is about **50 mm** from the centre, and the instrument’s reference is not the pole axis.
-   **Recommendation:** millimetres plus a direction for the mark, and an explicit laser face/reference offset. Laser σ in the solve is about **5 mm**, not the 2 mm constant in the code. Store both when the schema bumps.
+6. **Offset direction.** `offsetMm` has no direction, so the brick arris is not actually solved. A laser on the front of a roll is not the stick centre. For the A4 sleeve the stick is about **64 mm** across, so the radius is about **32 mm**, not a generic 50 mm.
+   **Recommendation:** the stored point is the **axis**. A photo of the silhouette centreline already points there, so that observation has **no** radial offset. A tape or laser that stops on the paper needs `+radius` along the shot, toward the centre. A wall mark still needs millimetres plus a direction (inward normal or a bearing). Laser σ in the solve is about **5 mm**, not the 2 mm constant in the code. Store the radius with the stick, and the offset on the observation, when the schema bumps.
 
 7. **When to stop special-casing `polygons` id `house`.** The field loop depends on it.
    **Recommendation:** leave it through Phase 1. Fold it into a `structure` item in Phase 3 with a `normalizeDocument` migration.
@@ -186,11 +186,11 @@ Each item is unresolved in the repo or is a fork the next phase should not guess
 16. **UI churn vs solver work.** `src/ui.ts` is where almost every 0.7.x commit landed, and you are still editing it.
    **Recommendation:** Phase 1 is the solver in PR #3, not another pass through the dialog. Marker work is Phase 2 and should not land in that PR.
 
-17. **What to print on a rod.** A flat AprilTag or ArUco is invisible from the other side of the pole. The current black/white belt is the same on every rod, so it cannot name the mark. A ring of bands wrapped 360° can.
-   **Recommendation:** hybrid. A wrap-around ring code is the everyday mark (ID and bearing from any direction). Add a flat AprilTag 36h11 only on a face you can look at squarely, for focal length and a tighter range. Do not wrap a square tag around the tube.
+17. **What to print on a rod.** A flat tag is unreadable at a grazing angle, and it disappears as you walk around the stick. The current belt is the same on every rod.
+   **Recommendation:** the cylindrical banded sleeve is the only per-stick mark. Print it on **A4 portrait** and roll it on the stick (about **64 mm** diameter with a 10 mm overlap). A flat AprilTag does not earn a place on the stick: the centreline bearing is already a few millimetres, and a taped distance plus the sleeve height can observe focal length. Keep a flat tag only as a separate experiment if that calibration disappoints.
 
-18. **How far the code must read.** A 100 mm toilet-roll belt is about 19 px tall at 15 m on a full-resolution 1× photo, and about 9 px on the 1920-wide camera preview. That is not an ID.
-   **Recommendation:** automatic ID at **2 m and 5 m** on a sleeve about 250 mm tall, detected on a full-resolution 1× still. From 8–15 m, keep the bearing if the sleeve is still a clear column, and do not invent an ID. A large flat board is the only honest 15 m name-tag.
+18. **How far the code must read.** On a 12 MP 1× frame a 14 mm band is about 8 px at 5 m and about 3 px at 15 m. The whole 297 mm sleeve is only about 60 px tall at 15 m.
+   **Recommendation:** automatic ID at **2 m and 5 m**. At 8 m, accept the ID only when every band is still resolved; otherwise keep the bearing and reject the code. At 15 m, bearing only. Detect on a full-resolution 1× still, not the 1920-wide preview.
 
 19. **Wrong ID versus a miss.** Correcting a single glare-flipped band can turn rod A into rod B.
    **Recommendation:** checksum, reject, do not correct. A failed read falls back to a hand click.

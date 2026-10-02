@@ -1,133 +1,175 @@
 # Markers and photo reading — draft for review
 
-**Status:** proposal only. No detection code and no solver code. The Photo & Marker Vision Reviewer should review the marker and the Safari path. The Geometry & Maths Advisor should review the ray, range, and focal-length parts.
+**Status:** proposal only. No detection code and no solver code. The cylindrical sleeve is the design. A flat tag is an optional extra and is not in the standard print.
 
-**Depends on:** the Phase 1 ray model in [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md), as implemented on PR #3 (`cursor/phase1-geometry-solver-8c5c`). This note does not change that branch. Roadmap stages: [ROADMAP.md](ROADMAP.md) Phase 2.
+The Photo & Marker Vision Reviewer should review the code, the print sheet, and the Safari path. The Geometry & Maths Advisor should review the pixel scale, the centreline bearing, the range estimate, and the radius offset.
 
-Today’s rod belt is a toilet-roll wrap about **100 mm** tall and **140 mm + 10 mm** around, with the same black 15 / white 20 / black 15 mm stripes on every rod and a human label (A1, A2, A0, B1, B2, B0). Those stripes do not identify the rod. Clicks are still manual.
+**Depends on:** the Phase 1 ray model in [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) and PR #3 (`cursor/phase1-geometry-solver-8c5c`). This note does not change that branch. Stages: [ROADMAP.md](ROADMAP.md) Phase 2.
+
+The stored point is the **centre of the stick**. The paper is a sleeve around it.
 
 ## 1. Recommendation
 
-Print a **wrap-around ring code** on each rod and post: horizontal bands that go all the way round, so any side of the pole shows the same code. Use that for **identity** and for the **bearing** of the pole axis.
+Print one **A4 portrait** sheet per mark. Horizontal bands run across the sheet. Roll the sheet into a cylinder and slide it over the stick. Any direction around the stick shows the same code.
 
-Add a **flat AprilTag (family 36h11)** only where you can look at a face straight on: a small card on the garden side of a rod, or a larger board when you need a name at long range. Use that face to tighten **focal length** and range. Do not wrap the square tag onto the cylinder. A planar code on a curve is not the code the detector was built for.
+Do not put a flat AprilTag or ArUco on the stick. A face-on square code fails at a grazing angle, which is most of a walk around the garden. The sleeve’s centreline bearing is already tight (section 5), and focal length can be checked with a tape and the known paper height (section 6). A flat tag earns a place only if that check fails in the field. It is not part of this template.
 
-ArUco is the fallback square code if a WASM AprilTag cannot be shown to run in iPhone Safari. It is not the primary mark.
+Hand clicks stay when the code is rejected.
 
-Hand clicks stay. A failed decode is a miss, not a guess.
+## 2. Sheet, stick, and diameter
 
-## 2. Why not the other shapes
+A4 portrait is **210 mm** wide and **297 mm** tall. The short side goes around the stick. The long side becomes the height of the sleeve. Bands are horizontal, so they become rings.
 
-| Mark | From the side you didn’t face | What a hit actually gives | Outdoor false ID |
-|---|---|---|---|
-| **Ring of bands (this proposal)** | Same code, 360° | Bearing of the axis, ID, a coarse range from the known stack height | You own the checksum. Glare can flip a bar. |
-| **Flat AprilTag / ArUco** | Gone once you walk past the face. On a 44 mm tube a square tag is edge-on for most of the circle | Four corners, a homography, a much better range and an `fx` check when the face is large enough | AprilTag 36h11 is strong. Small ArUco dictionaries are not. |
-| **Current 15/20/15 belt** | Visible all round | A blob a person can click. Every rod looks alike | No ID to get wrong |
-| **Three or four flat tags stuck around the tube** | Only the one facing you | Pose of that face, if it is still flat | The tube is curved, so the “flat” tag is bent |
+The overlap is glue, not extra circumference. With a **10 mm** overlap the full sheet width gives
 
-A ring is rotationally symmetric. It cannot tell you which way around the pole you stood, and it cannot give a full pose. That is acceptable: Phase 1 needs a **ray to a known point**, and the point is the **axis** of the tube, which is already the mark centre.
+`D = (210 − 10) / π = 200 / π = 63.7 mm`,
 
-A flat tag is the right tool when the ray is not enough, in particular for focal length (section 6). It is the wrong tool as the only mark on a rod you walk around.
+radius **31.8 mm**. A 15 mm overlap on the same sheet gives `195 / π = 62.1 mm`.
 
-## 3. Ring code
+The stick chooses the diameter. The sheet only has to be at least `πD + overlap` wide, and it cannot be wider than 210 mm.
 
-Bands are **horizontal on the printed sheet** and become rings on the pole. Colour alternates, black then white, so every edge is a real transition. The bit is the **width**, not the brightness: narrow = 0, wide = 1, wide = 2× narrow. A brightness threshold alone will fail in sun.
+| Stick diameter | Radius | Circumference | Paper width with 10 mm overlap | Spare on the 210 mm sheet |
+|---|---|---|---|---|
+| 25 mm | 12.5 mm | 79 mm | 89 mm | 122 mm |
+| 32 mm | 16 mm | 101 mm | 111 mm | 100 mm |
+| 40 mm | 20 mm | 126 mm | 136 mm | 74 mm |
+| 50 mm | 25 mm | 157 mm | 167 mm | 43 mm |
+| **64 mm (full width)** | **32 mm** | **200 mm** | **210 mm** | **0** |
 
-Layout, top to bottom, after a white quiet zone:
+**Use the full width, about 64 mm,** unless the stick you already have is thinner. A wider stick is a wider silhouette (section 5). A thinner stick still uses this band layout; the unused side of the sheet stays blank and holds the corner marks, and the overlap strip moves in to `πD + 10 mm`.
 
-| Bars | Widths | Role |
-|---|---|---|
-| 3 | wide, narrow, wide | Start. Data is not allowed to begin with this run. |
-| 6 | narrow or wide | Payload. **64 IDs.** |
-| 4 | narrow or wide | CRC-4 over the payload (polynomial `x⁴ + x + 1`). |
-| 2 | narrow, wide | Stop, so an upside-down sleeve does not match the start. |
+## 3. Where the point is
 
-That is 15 bars. With a 14 mm narrow bar, a typical mix of wide bars, and two short quiet zones, the sleeve is about **250 mm** tall. A 100 mm toilet-roll belt can keep the human label. It cannot hold this code.
+The coordinate in the garden is the **axis**, not the paper surface.
 
-64 IDs cover two rods (A1 A2 A0 B1 B2 B0), a house of about ten corners, a run of fence posts, and spares. The printed number is only an index. `garden.json` maps it to a point id (`A1`, `HSE03`, `FNC01`), so a tag can be reassigned without a new pattern. Human text in the quiet zone uses the existing names and avoids O and I.
+- A levelled bearing to the **silhouette centreline** already aims at the axis. Circular tangents are symmetric, so the midline is the axis even when you are not square-on. That observation has **no** radial offset.
+- A tape or a laser that stops on the **outside of the paper**, along a line that passes through the axis, is short by one radius. The length to the centre is the reading **plus R** (about **32 mm** on the full-width stick). Store that on the observation: `offsetMm = R`, direction from the impact toward the axis.
+- A laser that hits the side of the stick, rather than the near face, is not `+R` along the beam. If the spot is obviously off the centreline, do not apply the radius; retake the shot or tape to the near face.
+- A wall disc is a different case: millimetres plus a fixed direction (inward normal of that edge). The stick’s radius is not that offset.
 
-**Errors.** One flipped bar fails the CRC. The decoder **rejects**. It does not correct. A corrected bit can name the other rod. Two issued payloads must not differ by a single bar; the CRC is what enforces that for single width errors. A read that fails the bar count, the start, the stop, or the CRC produces **no observation**.
+This is roadmap decision 6. The old “about 50 mm to the front of a toilet roll” figure is the right kind of correction and the wrong length for this sleeve.
 
-## 4. Size at 2–15 m
+## 4. Pixel scale
 
-The in-app camera asks for about **1920×1440**. A full 1× still is about **4032** px wide. For both, `fx / width ≈ 0.72` on the iPhone 1× lens (24–26 mm equivalent, 4:3). Pixels across a feature of height `h` at distance `d` are `fx · h / d`.
+Working camera: iPhone **1×**, **26 mm** equivalent, 4:3 still, **4032 × 3024**. The 35 mm frame is 43.3 mm on the diagonal, so the 4:3 width is `43.3 × 0.8 = 34.6 mm` and
 
-| Feature | 2 m, full 1× | 5 m, full 1× | 8 m, full 1× | 15 m, full 1× | 15 m, 1920-wide |
-|---|---|---|---|---|---|
-| 100 mm toilet-roll belt | ~145 px | ~58 px | ~36 px | **~19 px** | **~9 px** |
-| 14 mm narrow bar | ~20 px | **~8 px** | ~5 px | ~3 px | ~1 px |
-| 44 mm tube width | ~64 px | ~26 px | ~16 px | ~9 px | ~4 px |
-| 80 mm flat tag | ~116 px | ~46 px | ~29 px | ~15 px | ~7 px |
-| 150 mm flat tag | — | — | ~54 px | **~29 px** | ~14 px |
+`fx / width = 26 / 34.6 = 0.751`, `fx = 0.751 × 4032 = 3028 px`.
 
-A bar needs about **8 px** to measure a width ratio after blur. On a full-resolution 1× frame that is a 14 mm bar at **5 m**, and it is already failing at 8 m. On the 1920-wide preview it fails sooner. Detect on the **full 1× still**, not the preview.
+A 24 mm-equivalent phone is `fx ≈ 2798 px` (about 8% coarser). The 1920-wide preview is `fx ≈ 1442 px` and is not the detection image. Figures below use 3028 px.
 
-**ID bar:** 2 m and 5 m, correct or blank. **8–15 m:** the sleeve may still give a centreline bearing if both edges are visible (the tube is still ~9 px wide at 15 m on a full-res frame). Do not promote that to an ID. A name at 15 m needs a **large flat board** (150 mm is only ~29 px, enough to try a detection, not enough for a stable pose).
+Millimetres per pixel = `1000 × d / fx`:
 
-## 5. What a cylinder measures
+| Distance | mm per pixel | 14 mm band | 297 mm sleeve | 64 mm stick width |
+|---|---|---|---|---|
+| 2 m | 0.66 | 21 px | 450 px | 96 px |
+| 5 m | 1.65 | **8.5 px** | 180 px | 39 px |
+| 8 m | 2.64 | 5.3 px | 112 px | 24 px |
+| 15 m | 4.95 | **2.8 px** | **60 px** | **13 px** |
 
-Sample the image **along the pole axis**, not down a raw image column. Fit the two silhouette edges, take the midline, and read the bright/dark profile along that line. The axis is the angle bisector of the two tangent rays, so the midline is the bearing of the **centre**, including when you are not square-on.
+Stick width in pixels is `fx × D / d`. At these ranges the exact tangent angle `2 arcsin(R / d)` matches that to a pixel.
 
-That bearing is one horizontal ray to the mark centre. It is the same observation as a careful click. It does not say how far away the pole is, and it does not say which side of the garden you are on by itself. Phase 1 still applies: two rods and no tape are not a station; one tape usually leaves two stations about 20 m apart; tapes to both baseline ends, or a third mark, fix a station.
+A narrow bar has to be about **8 px** tall before a width or a black/white run is safe to classify after blur. That is **14 mm at 5 m**, **21 mm at 8 m**, and **40 mm at 15 m**.
 
-**Range from the stack.** The metric height `H` of the code is known, so
+## 5. The code that fits on 297 mm
 
-`d ≈ fx · H / h_px`.
+Vertical budget:
 
-The relative error is about `σ_fx / fx` plus `σ_h / h`. A 1% focal length and a 2 px error on a 40 px stack are already several percent of range: **decimetres at 5–8 m**, not a 20 mm tape. Enter it as a distance observation with that σ. It is good enough to throw away the wrong station candidate (those two solutions are ~20 m apart). It is not a plantable length. If the pole leans, or the fitted axis is more than about **15°** from vertical after levelling, drop the range and keep the bearing.
+| Strip | Height |
+|---|---|
+| Top quiet zone, with corner crosses | 15 mm |
+| Bottom quiet zone, with the human ID and corner crosses | 16 mm |
+| **19 code bands × 14 mm** | **266 mm** |
+| Total | **297 mm** |
 
-Tilt, leaves, and glare:
+Each code band is the same height. The bit is black or white, not a wide/narrow pair. Equal bands are what fit an 8 px bar at 5 m **and** a real checksum. Width coding (wide = 2× narrow) at this same 14 mm floor would average about 21 mm a bar, and 297 mm would hold only about ten bars after the quiet zones: too few for start, data, and a check.
 
-- **Tilt.** The profile follows the fitted axis. Gravity still levels the ray (section 6). A strong lean widens or drops the range only.
-- **Leaves.** A hidden bar fails the CRC. No ID, so no ray. A visible centreline without an ID is not an observation, because the point is unknown.
-- **Glare.** Matte paper, width ratios, CRC. A clipped run is a miss. Do not laminate the sleeve into a mirror.
+| Bands | Role |
+|---|---|
+| 3 | **Start / orientation.** Black, black, white. Two blacks in a row cannot appear in the data, so this end is “up”. Upside-down is a reject, not another ID. |
+| 8 | **Data.** 256 IDs. `garden.json` maps the number to `A1`, `HSE03`, `FNC01`, and so on. |
+| 6 | **Check.** CRC-6 over the data. One flipped band fails the check. |
+| 2 | **Stop.** White, white. Confirms the end and the count. |
 
-## 6. Rays, intrinsics, and the Phase 1 solver
+Decode only if the band count is 19, the start is at the top, the stop is at the bottom, neighbouring data bands were actually separated, and the CRC matches. **Reject otherwise. Do not correct a bit.** A corrected band can name the wrong stick.
 
-Store the detection in the same pixel buffer the solver will use. `px` is the midline at the start-bar. `py` is that bar’s vertical position. Orientation and EXIF must be applied **before** those numbers are saved, so “image right” matches the bearing formula. DeviceMotion axis mapping stays the open item in the geometry note: a photo with no camera-frame gravity vector stays unlevelled.
+64 rods, corners, and posts fit easily in 256. The spare codes are reprints and new posts, not a second garden’s worth of cleverness.
 
-The levelled bearing is the one PR #3 already checks:
+**Range of the ID.** Promise it at **2 m and 5 m** (21 px and 8.5 px per band). At **8 m** a band is 5.3 px: keep the ID only when all 19 runs are found and the CRC passes; otherwise reject the code. At **15 m** a band is 2.8 px: **no ID**.
 
-`β = atan2(−x_level, z_level)`
+The previous 15-bar width code (64 IDs, about 250 mm) is retired. It spent the paper on wide bars and still missed the 8 px floor once quiet zones were included.
 
-from the ray `((px − cx) / fx, (py − cy) / fy, 1)` with y downward. `σ_px` comes from the edge fit. A clean sleeve should land near **1–2 px**, which is the hand-click budget (`σ_β² = (σ_px / fx)² + (σ_centring / d)²`).
+## 6. Bearing and range
 
-**Focal length (advisor B2 on PR #3).** A 10% `fx` error moves the 7 m / 20° station by **±1.98 m**. In the solver review, a 1% `fx` prior that never entered the covariance covered only about **67%** of stations with the reported 95% ellipse, and a ray from a both-tapes station with a 10% `fx` error moved a new mark by **309 mm** while still calling it checked. Marker rays must not repeat that.
+**Bearing.** Locate the left and right silhouette edges and take the midline. If each edge is good to `σ_e` pixels and the errors are independent, the midline is `σ_e / √2` pixels and
 
-- Carry `fx` as a parameter with a prior, or as a consider parameter, so every ellipse includes it.
-- A ring of known height observes `fx · H` only. It is a weak scale check and it is mixed up with lean. It does **not** by itself meet the 1% bar.
-- A flat AprilTag of known size, seen large and fairly square, observes `fx` and the principal point through the homography. That is the observation that can earn the 1% prior. If the tag is oblique or tiny, keep the centre ray and drop the scale update.
-- The 1% rule applies to **any** photo whose rays fix other points, not only to a resected camera (B2b). Do not publish checked or plantable while the variance test is high (B2c).
+`σ_β = (σ_e / √2) / fx` radians, lateral miss `= d × σ_β`.
 
-**Behind the camera (advisor B3).** A detection in the frame is in front of that exposure. The adjust can still slide the point behind the camera if the ID was wrong. Do not publish a point with a negative depth along the ray, outside the field of view, or closer than about **0.5 m** to the camera that claims to see it.
+With `fx = 3028` and `σ_e = 1 px`, `σ_β = 0.013°` and the lateral miss is **0.5 mm at 2 m, 1.2 mm at 5 m, 1.9 mm at 8 m, 3.5 mm at 15 m**. At 2 px on the edge at 15 m (the stick is only 13 px wide) the miss is **7 mm**. That is inside a hand click and inside the tape σ. The centreline is a valid Phase 1 ray across 2–15 m whenever both edges are found. It does not depend on reading the code. Without an ID, though, there is still no point to attach it to, unless this sleeve is the only one in the frame and the user confirms the name.
 
-An optional AprilTag’s four corners are four rays in the tag’s own plane. For this 2D solver, pass the **centre of the quad** as the mark ray. Pass the known side length as the scale observation above. Do not open a second coordinate frame.
+**Range from the paper height.** The sheet is 297 mm. With both outer edges found,
 
-## 7. Printing
+`d = fx × H / h_px`, `σ_d / d ≈ √( (σ_h / h)² + (σ_fx / fx)² )`.
 
-Same path as today: A4, black and white, actual size, `window.print()`.
+`σ_h ≈ √2` px if each end is 1 px. On this camera:
 
-- Ring sheet: bands parallel to the long edge of the wrap, quiet zone at the **overlap**, seam taped in the quiet zone so it does not cut a bar. Circumference is the tube or the rod plus 10 mm.
-- Human name in the quiet zone, matching the point id.
-- AprilTag, if used, on a **flat** card, not on the wrap. One lookup row maps both the ring index and the AprilTag id to the same point.
-- Matte paper. The current belt graphic can remain as a finder above a short label, but it is not the code.
+| Distance | Sleeve in pixels | Edge term | With `fx` known to 1% | With `fx` known to 5% |
+|---|---|---|---|---|
+| 2 m | 450 px | 0.3% | **21 mm** | 100 mm |
+| 5 m | 180 px | 0.8% | **64 mm** | 253 mm |
+| 8 m | 112 px | 1.3% | **129 mm** | 412 mm |
+| 15 m | 60 px | 2.4% | **384 mm** | 829 mm |
 
-## 8. In the browser
+So:
 
-The ring decoder is a canvas scan: find a high-contrast column, fit its axis, read the profile, test start, stop, and CRC. No library. That runs in iPhone Safari.
+- It **does** separate the two station candidates that sit about 20 m apart, at every range in this table, even with a 5% focal length.
+- It is **not** a tape. At 5 m and a 1% focal length, 64 mm is a check, not a plantable length (the plantable bar is 100 mm with a real spare observation). At 8–15 m it is a weak distance and must carry this σ.
+- A lean toward the camera shortens the image. `10°` is about 1.5% (`1 − cos 10°`), `15°` about 3.4%. Past about **15°** from vertical after levelling, drop the range and keep the bearing.
+- This formula is the small-angle size. Past 2 m that is enough for the σ already quoted.
 
-The flat face, when you print one, should be **AprilTag 36h11** through a small **WASM** build. Safari has run WASM for years; this still needs a phone check before it is a dependency. OpenCV.js is too large for this PWA. `js-aruco2` is pure JavaScript and is the fallback if WASM fails, with a larger dictionary than 4×4 so a leaf is less likely to become a valid id. The ring path must not wait on that.
+**Focal length.** A taped distance to the axis (surface reading **plus R**) and a measured sleeve height observe `fx = h_px × d / H`. At 5 m, `d` to 20 mm and `h` to 1.4 px is about **1%** on `fx`, which is the Phase 1 bar. That is the calibration. It is why a flat tag is not required on every stick. PR #3 review B2 still applies: that `fx` has to enter the covariance, and a ray from a photo whose `fx` is loose must not be published as checked.
 
-## 9. Several photos
+## 7. Print template
 
-Stage (c) does not replace the adjuster. Each accepted detection is a bearing on that photo, tied to a point id by the marker table. The same id in another photo is the same point, including across a yaw-only set and across a later station. A single view of a ring does not create a distance except for the weak stack range in section 5.
+One A4 portrait page, black and white, **actual size**. The printer must not scale to fit.
 
-Stage (d), later and optional: use the full ray, not only the horizontal bearing, and allow a height. The ring still has no twist around the pole. Planting does not wait for this.
+```
+297 mm
+┌──────────────────────────────────────── 210 mm ─┐
+│ + corner cross          top quiet 15 mm         │
+│ ████████████████████████████████████████████    │ 14 mm  start: black
+│ ████████████████████████████████████████████    │ 14 mm  start: black
+│                                                 │ 14 mm  start: white
+│  … 8 data bands, then 6 check bands …           │
+│                                                 │ 14 mm  stop: white
+│                                                 │ 14 mm  stop: white
+│ +   A1 · 014          A1 · 014          overlap │ 16 mm  ID, twice
+└─────────────────────────────────────────────────┘
+                                              ↑
+                                    10 mm glue strip
+                                    (copy of the opposite edge)
+```
 
-## 10. What the reviewers should try to break
+- Bands run the full circumference. They stop at the glue strip. The **10 mm overlap is a copy of the first 10 mm** of the pattern, marked “glue under”, so the seam does not delete a bar or shift the rings.
+- Corner crosses sit in the quiet zones, inset about 5 mm, so a trimmed sheet still has a reference.
+- A tick on the overlap edge lines up with a tick on the opposite edge.
+- Human text is the point name and the code number, printed **twice** across the bottom quiet zone, clear of the glue strip. Names avoid O and I.
+- Matte paper. No laminate.
+- The seam is vertical. The decoder reads a vertical profile, so a thin seam does not change the code. It must not become a dark ridge that splits the silhouette; press it flat.
 
-1. Is 64 IDs and a reject-only CRC the right capacity, or do fence-plus-house runs need 8 payload bits on a taller sleeve?
-2. Is 8 px per narrow bar the right detection floor on an iPhone 1× still, and is 5 m the right ID range to promise?
-3. Is the stack range honest as a weak distance, and is dropping it past about 15° of lean enough?
-4. Does the AprilTag homography actually observe `fx` well enough to be the B2 prior, once the tag is allowed to be 30° off axis?
-5. Confirm WASM AprilTag in Safari, or say ArUco is the face code we should specify instead.
+## 8. Reading it, and the flat-tag comparison
+
+In Safari, on the full 1× still: find the high-contrast column, fit the two edges, sample the profile **along the axis**, test the 19 runs, accept or reject. No library.
+
+Tilt: the profile follows the fitted axis, not image y. Leaves or glare that merge or split a band fail the count or the CRC. That is a miss. Sun on a glossy sleeve is the reason the paper stays matte.
+
+**Flat tag, for comparison only.** The largest comfortable square on this same A4 sheet, with a quiet margin, is about **180 mm**. On this camera that is 109 px at 5 m and 36 px at 15 m. Pose of a square fiducial is usually usable within about **±45° of straight-on**. Detection sometimes limps out toward **±70°** and then gets worse quickly; range from the homography goes first. Edge-on, which is what you see after you walk past a card stuck to a stick, it is not a target. Three tags around a 64 mm stick are curved, so they are not that fiducial either.
+
+A flat tag would earn a place only as a **separate** calibration card if a taped sleeve fails to pin `fx` to about 1%. It is not printed on the sleeve.
+
+## 9. What the reviewers should check
+
+1. Is 14 mm / 19 bands / 256 IDs the right cut, or is a 16 mm band and fewer IDs safer at 8 m?
+2. Is CRC-6 with no correction enough, given glare on matte paper?
+3. Are the centreline lateral figures (a few millimetres) fair once the seam and a slight lean are included?
+4. Is `+R` the right tape correction only for a near-face shot, as written?
+5. Does the sleeve-plus-tape calibration really make a per-stick flat tag unnecessary?
