@@ -269,6 +269,8 @@ function solveOnce(input: SolveInput): SolveResult {
         gardenSign,
         bearings,
         branch: branch.get(id),
+        sidedByGardenSign: (pid: string) =>
+          pid === originId || pid === axisId || state.get(pid)?.sidedByGardenSign === true,
       });
       const s = ensure(id);
       if (placed.point) {
@@ -473,6 +475,15 @@ function solveOnce(input: SolveInput): SolveResult {
     s.sidedByGardenSign = false;
     s.unsetCode = undefined;
     if (cross < RAY_CROSS_WARN_DEG) s.earlyWarning = 'shallow-rays';
+  }
+
+  // A pure y-mirror has the same tape cost. Tests start there to see whether
+  // every garden-sign point, including those chained by a later tape, is counted.
+  if (input.reflectSeed) {
+    for (const s of state.values()) {
+      if (s.id === originId || s.id === axisId || held.has(s.id)) continue;
+      if (s.y != null) s.y = -s.y;
+    }
   }
 
   // --- parameters ---
@@ -834,6 +845,8 @@ function placeFromDistances(
     gardenSign: 1 | -1;
     bearings: BearingPrep[];
     branch?: 0 | 1;
+    /** Datum ends count. A ray or bearing parent does not. */
+    sidedByGardenSign?: (id: string) => boolean;
   },
 ): { point?: Xy; weak?: boolean; branch?: boolean; fromGardenSign?: boolean; code: UnsetCode; candidates?: Xy[] } {
   const d0 = toKnown[0];
@@ -867,7 +880,12 @@ function placeFromDistances(
       (p, q) =>
         Math.abs(hypot2(p, c) - extra.horizontalM) - Math.abs(hypot2(q, c) - extra.horizontalM),
     );
-    return { point: featureFromMark(hits[0], id, offsets), weak, code: 'one-distance' };
+    // The extra tape only picks a side. The point is still a garden-sign
+    // placement when every parent is the datum or was itself placed that way.
+    const inherit = ctx.sidedByGardenSign;
+    const fromGardenSign =
+      inherit != null && inherit(k0) && inherit(k1) && inherit(other);
+    return { point: featureFromMark(hits[0], id, offsets), weak, fromGardenSign, code: 'one-distance' };
   }
 
   const datumPair =
@@ -1877,7 +1895,7 @@ function checkedGate(
   let blocked: string | undefined;
   let saw = false;
   for (const o of built.obs) {
-    if (o.kind === 'focal') continue;
+    if (o.kind === 'focal' || (o.live && !o.live())) continue;
     const j = o.jacobian(adjusted.x);
     const gain = parameterGain(j, adjusted.q, o.sigma, built.index, s.id);
     if (!(gain > 1e-8)) continue;

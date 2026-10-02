@@ -406,9 +406,10 @@ export function distanceSigma(opts: {
 /**
  * True when the axis point came out with x < 0, or every point whose side
  * was chosen by the garden-sign fallback sits on the opposite side of that
- * sign. Bearings, rays, and branch choices are not counted: they cannot
- * reflect at the same cost, and a garden that lies wholly on −Y is legitimate
- * when `solveGardenDocument` still passes sign +1.
+ * sign, including points a later tape chained off those. Bearings, rays,
+ * and branch choices are not counted: they cannot reflect at the same cost,
+ * and a garden that lies wholly on −Y is legitimate when
+ * `solveGardenDocument` still passes sign +1.
  */
 export function wholeGardenReflection(opts: {
   axisX: number;

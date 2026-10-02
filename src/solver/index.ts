@@ -26,8 +26,9 @@
  *   is only the distance-only fallback.
  * - After a behind-camera rejection the normal equations are rebuilt and
  *   solved again, and the check runs once more after the last re-solve.
- * - reflected counts only garden-sign fallback points, so a garden on −Y
- *   is not a false mirror. jointCofactor returns the a-priori joint covariance.
+ * - reflected counts garden-sign fallback points, including a tape chain
+ *   that inherited that flag. A garden on −Y is not a false mirror.
+ *   jointCofactor returns the a-priori joint covariance.
  * - House Q_m holds the first azimuth and puts angle noise on the other n−1
  *   turnings. All n interior angles also face |Σα−(n−2)π| ≤ 1.96 σ √n.
  * - v1 offsetMm is not applied. A constant frame offset is used only when the

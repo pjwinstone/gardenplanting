@@ -159,6 +159,11 @@ export interface SolveInput {
    * The check still runs once after the last of these, with no further solve.
    */
   behindCameraResolves?: number;
+  /**
+   * Test hook. After placement, negate the y of every free seed so a same-cost
+   * mirror is what the adjustment starts from. Default off.
+   */
+  reflectSeed?: boolean;
 }
 
 export interface SolvePoint {

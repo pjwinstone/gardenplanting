@@ -2007,6 +2007,131 @@ test('a −Y garden is not a mirror; only garden-sign points count', () => {
   assert.equal(garden.reflected, false);
 });
 
+test('a chained tape-only garden inherits the garden-sign flag', () => {
+  const A = { x: 0, y: 0 };
+  const B = { x: 10, y: 0 };
+  const P = { x: 4, y: 3 };
+  const Q = { x: 7, y: 4 };
+  const R = { x: 2, y: 5 };
+  const dist = (p: { x: number; y: number }, q: { x: number; y: number }) => Math.hypot(p.x - q.x, p.y - q.y);
+  const tape = (id: string, a: string, b: string, p: { x: number; y: number }, q: { x: number; y: number }) => ({
+    id,
+    a,
+    b,
+    slopeM: dist(p, q),
+    sigmaM: 0.005,
+  });
+  const input = {
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 10, fixScale: true, gardenSign: 1 as const },
+    distances: [
+      tape('AP', 'A', 'P', A, P),
+      tape('BP', 'B', 'P', B, P),
+      tape('AQ', 'A', 'Q', A, Q),
+      tape('PQ', 'P', 'Q', P, Q),
+      tape('BQ', 'B', 'Q', B, Q),
+      tape('RP', 'R', 'P', R, P),
+      tape('RQ', 'R', 'Q', R, Q),
+      tape('RA', 'R', 'A', R, A),
+    ],
+  };
+  const straight = solve(input);
+  assert.equal(straight.converged, true);
+  assert.equal(straight.reflected, false);
+  for (const s of [P, Q, R]) {
+    const id = s === P ? 'P' : s === Q ? 'Q' : 'R';
+    const got = point(straight, id);
+    assert.ok((got.y ?? 0) > 2, `${id} y ${got.y}`);
+  }
+
+  const mirrored = solve({ ...input, reflectSeed: true });
+  assert.equal(mirrored.converged, true);
+  for (const id of ['P', 'Q', 'R']) {
+    assert.ok((point(mirrored, id).y ?? 0) < -2, `${id} mirror y ${point(mirrored, id).y}`);
+  }
+  assert.equal(mirrored.reflected, true);
+
+  // Distance points hung off bearing stations on −Y must not inherit the flag.
+  const width = 1200;
+  const fxOver = 0.72;
+  const S1 = { x: 3, y: -4 };
+  const S2 = { x: 6, y: -5 };
+  const N = { x: 4, y: -2 };
+  const M = { x: 5, y: -3 };
+  const yaw = Math.PI / 2;
+  const photo = (s: { x: number; y: number }, id: string) => ({
+    id,
+    stationId: id,
+    width,
+    height: 900,
+    fxOverWidth: fxOver,
+    gravity: { x: 0, y: 1, z: 0 },
+    bearingSigmaRad: 0.1 * DEG,
+    clicks: [
+      { pointId: 'A', ...projectClick(s, yaw, A, width, fxOver) },
+      { pointId: 'B', ...projectClick(s, yaw, { x: 8, y: 0 }, width, fxOver) },
+    ],
+  });
+  const hung = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true, gardenSign: 1 },
+    distances: [
+      tape('S1A', 'S1', 'A', S1, A),
+      tape('S1B', 'S1', 'B', S1, { x: 8, y: 0 }),
+      tape('S2A', 'S2', 'A', S2, A),
+      tape('S2B', 'S2', 'B', S2, { x: 8, y: 0 }),
+      tape('NS1', 'N', 'S1', N, S1),
+      tape('NS2', 'N', 'S2', N, S2),
+      tape('NA', 'N', 'A', N, A),
+      tape('MS1', 'M', 'S1', M, S1),
+      tape('MS2', 'M', 'S2', M, S2),
+      tape('MA', 'M', 'A', M, A),
+    ],
+    photos: [photo(S1, 'S1'), photo(S2, 'S2')],
+  });
+  assert.ok((point(hung, 'N').y ?? 0) < 0, `N ${point(hung, 'N').y} ${point(hung, 'N').unsetCode}`);
+  assert.ok((point(hung, 'M').y ?? 0) < 0, `M ${point(hung, 'M').y} ${point(hung, 'M').unsetCode}`);
+  assert.equal(hung.reflected, false);
+});
+
+test('checkedGate skips observations dropped after the final behind-camera check', () => {
+  const width = 1200;
+  const fxOver = 0.5;
+  const S = { x: 4, y: 5 };
+  const P = { x: 6, y: 2 };
+  const yawAway = Math.PI / 2;
+  const clicks = [
+    { id: 'A', x: 0, y: 0 },
+    { id: 'B', x: 8, y: 0 },
+  ].map((m) => ({ pointId: m.id, ...projectClick(S, -Math.PI / 2, m, width, fxOver) }));
+  const result = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 8, fixScale: true },
+    behindCameraResolves: 0,
+    distances: [
+      { id: 'SA', a: 'S', b: 'A', slopeM: Math.hypot(S.x, S.y), sigmaM: 0.001 },
+      { id: 'SB', a: 'S', b: 'B', slopeM: Math.hypot(S.x - 8, S.y), sigmaM: 0.001 },
+      { id: 'PA', a: 'P', b: 'A', slopeM: Math.hypot(P.x, P.y), sigmaM: 0.005 },
+      { id: 'PB', a: 'P', b: 'B', slopeM: Math.hypot(P.x - 8, P.y), sigmaM: 0.005 },
+    ],
+    photos: [
+      {
+        id: 'cam',
+        stationId: 'S',
+        width,
+        height: 900,
+        fxOverWidth: fxOver,
+        gravity: { x: 0, y: 1, z: 0 },
+        bearingSigmaRad: 1 * DEG,
+        yawHeldRad: yawAway,
+        clicks,
+      },
+    ],
+  });
+  assert.equal(point(result, 'S').unsetCode, 'behind-camera');
+  assert.equal(point(result, 'S').x, undefined);
+  const kept = point(result, 'P');
+  assert.ok(Math.abs((kept.y ?? 0) - P.y) < 0.05, `P ${kept.x} ${kept.y} ${kept.unsetCode}`);
+  assert.equal(result.observations.find((o) => o.id === 'SA')?.used, false);
+});
+
 test('a branch that contradicts the bearings is a branch conflict', () => {
   const width = 1200;
   const fxOver = 0.72;
