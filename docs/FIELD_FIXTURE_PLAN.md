@@ -29,7 +29,7 @@ Notes that travel with those five, and are not separate gates:
 | STN02’s second turn saw no known mark. | That turn is gone. STN02’s second photo keeps **BAS02**. CRC04 is not photographed from STN02. |
 | The solver needs the side of the baseline. | Datum is BAS01 at the origin, BAS02 on +X, matching the sheet order BAS01–BAS02. Paul ticks left or right looking from BAS01 toward BAS02. The importer writes the index. |
 | The lens must be on the pole axis. | `phonePole.lensOnAxis`. The field sheet says to sight the lens over the middle of the pole before plumbing. |
-| The circle fit must use the joint covariance. Per-point covariance makes `σ_R` about 1.6–2.5× too small. | §3.2 fits with `C = GQGᵀ + σ²_stick I`. Marginal `Q_i` is not the weight. |
+| The circle fit must use the joint covariance. Per-point covariance makes `σ_R` about 1.6–2.5× too small. | §3.2 still fits with the joint cofactor. On this network that σ is **15.0 mm**. The per-point blocks give **14.4 mm**, about 4% optimistic, not 1.6–2.5×. |
 | Add about 6 mm of per-stick scatter. | `σ_stick = 6 mm` inside that `C`. |
 | Use `σ_setout ≈ 4 mm`. Keep the 3.29 single-point threshold. | `radiusSigmaM` is **0.003**, the common set-out only. The 6 mm stick term stays in `C` and is not counted again. `w_i` and 3.29 are unchanged. |
 | Withheld tapes need `σ ≈ 9 mm`, including lean. | That 9 mm was a ground tape. These checks are sleeve to sleeve, so lean cancels. `CHK-BASE` is **5 mm**. The figure checks are **5 mm** and are diagnostics, not the grade. |
@@ -425,11 +425,11 @@ Written by the surveyor, not fitted by the script. The known radius is not an ob
 
 `candidateIndex` is the index from `intersectCircles(BAS01, tape to BAS01, BAS02, tape to BAS02)`. With BAS02 on `+X`, index **0** is `+Y`, which is the **left** as you look from BAS01 toward BAS02. Index **1** is the **right**. So STN01 is 0 and STN02 and STN03 are 1. The importer derives the index from the tick and from this datum order. It does not copy the index off the sheet, and it does not guess it from a stored coordinate.
 
-Those indices are the opposite of the earlier note, which defined them with BAS02 as the origin. Using 1, 0, 0 under a BAS01 origin puts every station on the wrong side and the solve diverges.
+Those indices are the opposite of the earlier note, which defined them with BAS02 as the origin. Using 1, 0, 0 under a BAS01 origin contradicts each station’s own two-mark bearings.
 
-A correct solve of this datum can still report `reflected`. The default garden sign is the left-hand side of BAS01→BAS02, and the circle sits on the right. Points that were placed by an explicit branch choice are not what sets that flag; the circle points do. `reflected` true is not a grade failure.
+PR #3 at `12a987d` reads `branchChoices` for a both-tapes station. Candidate 0 is +Y of origin→axis and candidate 1 is −Y. An index that agrees with the station’s own two-mark bearings is used. An index that contradicts them unsets that station as `branch-conflict`. The index does not override the photo. The old 1, 0, 0 does that on all three stations. The fixture still records the index from the tick. A click order is a worse place to keep the side than the tick.
 
-The solver at `d680a49` does read `branchChoices` for a both-tapes station. An explicit index wins, then the order of two marks in a photo of that station, then the garden sign. The first photo at each station holds both ends, so the bearings can pick the side when the index is absent. The fixture still records the index. A click order is a worse place to keep the side than the tick.
+`reflected` at `12a987d` counts only an axis that came out with `x < 0`, and points that took their side from the garden-sign fallback. Bearings, rays, and branch choices are not counted, so a garden that really lies on −Y is not flagged. A correct solve of this fixture reports `reflected: false`. `reflected: true` fails the grade. It means the datum came out backwards, or a distance-only point landed on the wrong side.
 
 `baselinePullsAgreeWithinM` is the field gate on the two tape pulls. The mean of the two axis lengths is the baseline in the app, stored with `sigmaM.baseline` of **3 mm**. A pair that differs by more than 10 mm is remeasured, not averaged. A 10 mm limit on the difference of two pulls is `1.96 √2 σ_pull`, so each pull is about **3.6 mm**. The mean of two such pulls is about **2.5 mm**. The stored 3 mm sits just above that, for the level and the sleeve correction. The solver’s unset-tape default is 20 mm. At 20 mm only about 27% of good pulls would pass the 10 mm rule, so that default is not written on this baseline.
 
@@ -439,9 +439,9 @@ Station tapes are one pull each, from the pole to the sleeve, and the long ones 
 
 **Check σ, and where the tape is held.** All three withheld lengths are sleeve to sleeve, the same height as the solved sleeve centres. The lean `√2 · h_s · σ_λ` belongs only when a length is taken at the ground and the solved point is the sleeve. It does not belong here, so the old 9 mm figure is withdrawn.
 
-`CHK-BASE` is **5 mm**. The laser itself is about 2–3 mm, and a dot half a radius off the centreline can still bias the range by about 4 mm. Five millimetres covers both. At 9 mm that check catches a 20 mm baseline blunder about **57%** of the time. At 5 mm it catches it about **95%**, and a good laser still fails the check under 1% of the time. In the full grade those two settings are about **66%** and **96%** detection.
+`CHK-BASE` is **5 mm**. The laser itself is about 2–3 mm, and a dot half a radius off the centreline can still bias the range by about 4 mm. Five millimetres covers both. On the measured grade a baseline typed 20 mm long is caught **94%** of the time. A good laser fails this check about **0.5%** of the time in a model-matched trial.
 
-`CHK-DIA` and `CHK-CHORD` are **5 mm** for the same reason: sleeve to sleeve, lean left out. They are printed. They do not fail the grade (§3.3).
+`CHK-DIA` and `CHK-CHORD` are **5 mm** for the same reason: sleeve to sleeve, lean left out. They are printed. They do not fail the grade (§3.3). A diameter that fails while the grade passes is a hint of a focal length shared by the phone.
 
 ### 2.4 Privacy, and the public repo
 
@@ -487,7 +487,7 @@ From STN02, CRC05 lies **0.07°** behind CRC03. CRC03 is the near cane (about 3 
 
 **Checked is not expected.** Each station is fixed by exactly two tapes, so that fix has no spare observation. With three stations the phase 1 gate marks only CRC01 checked. With two stations it marks none. Plantable is the same gate plus the ellipse and a withheld distance. This layout’s grade is the circle table in §3.3, not a checked or plantable flag.
 
-From `d680a49` the both-tapes path reads `branchChoices`. The recorded index is applied before the bearing order and before the garden sign. Do not drop STN01, and do not reuse the old indices 1, 0, 0 that belonged to a BAS02 origin.
+PR #3 at `12a987d` reads `branchChoices` and unsets a station as `branch-conflict` when the index contradicts that station’s own two-mark bearings. Do not drop STN01, and do not reuse the old indices 1, 0, 0 that belonged to a BAS02 origin.
 
 ### 3.1 Solve
 
@@ -504,7 +504,7 @@ From `d680a49` the both-tapes path reads `branchChoices`. The recorded index is 
    - The two baseline tape pulls differ by at most `baselinePullsAgreeWithinM` (10 mm) on the axis lengths.
 3. `solveGardenDocument`, passing `branchChoices`. Do not read stored `x,y` as measurements. If STN03 is absent, or `CHK-BASE` is absent, print the statistics and **do not grade**. A grade requires STN01, STN02, and STN03.
 4. Append `ground-truth.withheld` as withheld distances using `√(s² − Δh²) + nR`, not `faceOffsetM`. `CHK-BASE` is in that list. It is not a line in `garden.json`.
-5. Fail if the variance test is `high`, if the solve did not converge, or if any circle point is `unset`. `low` is not a failure. This fail is a grade. It is not applied to an ungraded two-station capture; that capture is reported.
+5. Fail if `reflected` is true, if the variance test is `high`, if the solve did not converge, if any station is `branch-conflict`, or if any circle point is `unset`. `low` is not a failure. This fail is a grade. It is not applied to an ungraded two-station capture; that capture is reported.
 6. Photos skipped as `no-fx` fail this fixture. The prior may be the EXIF 35 mm equivalent (`fx/width` in the 0.69–0.75 band, width in sensor pixels) with a relative σ, **one prior per photo**. Each ray uses that photo’s `sigmaPx` in sensor pixels, not a flat 2 px on a thumbnail. The calibration block is present either way. The test does not compute `fx` from the sleeve, and it does not force the photos onto one `fx`.
 
 Checked versus unchecked is reported per point, and for this layout the expected report is that the points are **not** checked, apart from CRC01 when all three stations are in. A circle point does not have to be plantable for the radius test to run. Plantable remains the roadmap rule (95% semi-major ≤ 100 mm, a spare observation, and a withheld distance inside its own limit). The withheld lengths are the laser baseline, the diameter, and one chord. They are checks on those lengths. They are not what makes the other points plantable.
@@ -513,7 +513,7 @@ Checked versus unchecked is reported per point, and for this layout the expected
 
 Use an orthogonal-distance fit of the **solved** circle points only. Kåsa is the seed. Kåsa’s radius is not the result. The existing `fitCircleGeometric` is the right shape and the wrong weight for this gate: it treats points as equal and independent, and it multiplies the radius variance by `rss / dof`. That scaled σ is a residual statistic. The gate stays on the **a-priori** covariances, as in the geometry note.
 
-Let `Q` be the **joint** cofactor of the six circle points, 12×12, in the same point order as `circlePointIds`. The marginal `(qxx, qxy, qyy)` on each point is not this matrix. Points that share a station or the datum are correlated, and a fit that keeps only the 2×2 blocks makes `σ_R` about **1.6–2.5× too small**. On this three-station network the marginal blocks give a radius σ of about 6.4 mm; the joint cofactor gives about 9.2 mm.
+Let `Q` be the **joint** cofactor of the six circle points, 12×12, in the same point order as `circlePointIds`, from `jointCofactor` at PR #3 `12a987d`. The marginal `(qxx, qxy, qyy)` on each point is not this matrix. On this network the joint cofactor gives a radius σ of **15.0 mm**. The 2×2 blocks alone give **14.4 mm**, about 4% optimistic, not 1.6–2.5 times too small. The joint matrix is still the weight: it matches an independent least squares and the Monte Carlo, all three at 14.9 mm. With the 6 mm stick term in `C` the radius σ is **16.2 mm**. The per-photo focal-length prior is what moves it. Station tapes at 5 mm, 10 mm, and 20 mm change the network-only figure only from 14.2 mm to 16.5 mm.
 
 Let `g_i` be the unit radial vector from the current centre to point `i`. Let `G` be the 6×12 matrix whose `i`th row is `g_iᵀ` in that point’s two columns and zeros elsewhere. Add the per-stick scatter on the diagonal:
 
@@ -523,7 +523,7 @@ Let `g_i` be the unit radial vector from the current centre to point `i`. Let `G
 
 Fit by generalised least squares with covariance `C`. Residual `v_i = ‖p_i − c‖ − R`, Jacobian row `(−g_i, −1)`, normal matrix `N = Jᵀ C⁻¹ J`. Recompute `g_i`, `G`, and `C` each iteration.
 
-`σ²_R` is the radius entry of `N⁻¹`. Do not multiply by `σ̂₀²`. If the variance test was `high`, the fixture has already failed; do not inflate this limit to absorb it. Do not form `σ_R` from the marginal `Q_i`.
+`σ²_R` is the radius entry of `N⁻¹`. Do not multiply by `σ̂₀²`. If the variance test was `high`, the fixture has already failed; do not inflate this limit to absorb it. Do not form `σ_R` from the per-point blocks. On this layout that shortcut is the 14.4 mm figure, not the 15.0 mm joint one.
 
 Arc span is the same quantity as `arcRad` in `fitCircleGeometric`. The protocol is a full circle, so the span is about `2π` and `radiusWeak` is false. If a future capture spans under `π/2`, report `σ_R` and **do not** apply the radius gate. That is the geometry note and the roadmap: a short arc does not pin a radius.
 
@@ -535,7 +535,7 @@ Arc span is the same quantity as `arcRad` in `fitCircleGeometric`. The protocol 
 |---|---|---|
 | Network | Solver variance test | Not `high`. One-sided, upper tail, α = 5%, as implemented. `low` does not fail. |
 | Circle points | Status | None `unset`. |
-| Radius | `\|R̂ − R_known\| ≤ 1.96 √(σ²_R + σ²_setout)` | 1.96 is the 1D 95% factor. `σ_setout` is `radiusSigmaM`, **3 mm**, the common set-out only. |
+| Radius | `\|R̂ − R_known\| ≤ 2.576 √(σ²_R + σ²_setout)` | **2.576** is the two-sided 1% factor. The other rows stay at 5%. `σ_setout` is `radiusSigmaM`, **3 mm**, the common set-out only. At 1.96 this row alone false-fails **9.7%** of correct captures: the empirical s.d. of `R̂` is 19.9 mm against a `σ_R` of 16.2 mm, because a focal error common to the phone is not what the per-photo model assumes. |
 | Shape | `vᵀ C⁻¹ v ≤ χ²(n − 3, 0.95)` | `v_i = ‖p_i − ĉ‖ − R̂`. `C` is the joint radial covariance from §3.2, stick scatter included. One-sided. This is the set of radial residuals, not a millimetre cap on each point. |
 | One point | `\|w_i\| ≤ 3.29` | `w_i = v_i / √(C_vv)_{ii}`, with `C_vv = C − J N⁻¹ Jᵀ` and `N = Jᵀ C⁻¹ J`. 3.29 is the solver’s two-sided 0.1% residual threshold. It stays 3.29. It is not tightened to a Bonferroni 2.64, and it is not `v_i / (σ_i √(1 − h_ii))` from a diagonal weight matrix. A point outside 1.96 σ is reported and does not by itself fail. |
 | Short arc | `arcRad < π/2` | Radius row is not applied. Shape and `w_i` still are. |
@@ -547,21 +547,21 @@ Arc span is the same quantity as `arcRad` in `fitCircleGeometric`. The protocol 
 
 The radius row is the scale check. The fit can have tiny residuals and a wrong radius; the known radius catches that. The shape row is the radial residuals against the covariances.
 
-**One grade, not seven vetoes.** Every row above is printed. The CI result is a single pass or fail. It fails when the solve is unusable (no convergence, or a circle point unset), or when any of these rows fails: network, radius, shape, `|w|`, or `CHK-BASE`. `CHK-DIA`, `CHK-CHORD`, the near-end note, and `reflected` are diagnostics.
+**One grade.** Every row above is printed. The CI result is a single pass or fail. It fails when the solve is unusable (no convergence, a circle point unset, a station `branch-conflict`, or `reflected: true`), or when any of these rows fails: network, radius, shape, `|w|`, or `CHK-BASE`. `CHK-DIA`, `CHK-CHORD`, and the near-end note are diagnostics. They do not change the pass or fail.
 
-The numbers that decide this, from the re-check at solver `d680a49` (500 trials, a focal length shared by the phone, baseline 4 mm in that trial, station tapes 10 mm):
+The rates are from two runs of 1,000 trials on solver `12a987d`, seeds 777 and 4242, with this fixture’s σ (baseline 3 mm, station tapes 10 mm, checks 5 mm sleeve to sleeve, `radiusSigmaM` 3 mm, `σ_stick` 6 mm) and a focal error common to the phone, drawn from the 2% per-photo prior.
 
-| Policy | A correct capture passes | A stick 50 mm off the circle is caught | A baseline typed 20 mm long is caught |
-|---|---|---|---|
-| All seven rows at about 5%, AND-ed | **80%** (false-fail 20%) | **69%** | **66%** if `CHK-BASE` is 9 mm; **96%** if it is 5 mm |
-| All seven rows at about 1% | **93%** (false-fail 7%) | **43%** | **77%** with `CHK-BASE` at 5 mm |
-| This grade | about **97%** | about **69%** | about **96%** |
+| Policy | A correct capture passes | A stick 50 mm off the circle is caught | A baseline typed 20 mm long is caught | A common focal length 5% high is caught |
+|---|---|---|---|---|
+| Radius at 1.96, the other grade rows unchanged | **85.6–87.0%** | **69–73%** | **94%** | **100%** |
+| **This grade: radius at 2.576, the rest unchanged** | **93.2%** | **65%** | **94%** | **100%** |
+| Network, radius, shape, and the laser all at 1% | 96.1% | 38.8% | 78.6% | 88.4% |
 
-The 20% false-fail is mostly `CHK-DIA`. On a correct capture that one check fails alone in **17%** of trials, because a focal length shared by the phone is not shared by this solve, and the diameter then fails safe. Moving every row to 1% would lift a correct capture to 93%, and it would catch the 50 mm stick only 43% of the time. The stick is what this test is for, and shape plus `|w|` are what catch it (about 58% and 14%). Those rows stay at `χ²(3, 0.95)` and at 3.29.
+The radius row is the one moved. At 1.96 it alone false-fails **9.7%** of correct captures. Those failures sit on the same common focal error as the network row and the diameter, so they are not a separate 9.7 points added to something else. Widening only that row to 2.576 is what produces the **93.2% / 65% / 94% / 100%** line. Moving every grade row to 1% would pass 96.1% of correct captures and would catch the 50 mm stick only 38.8% of the time, and a focal length 5% high only 88.4%. Shape stays at `χ²(3, 0.95)` and `|w|` stays at 3.29.
 
-Leaving `CHK-DIA` and `CHK-CHORD` out of the grade removes that 17 points. What remains of the 20% is about **3%**, so a correct capture passes about **97%**. The stick stays at about **69%**. `CHK-BASE` at 5 mm stays in the grade, so the 20 mm baseline stays at about **96%** (the check itself about 95%). `|w|` is already a 0.1% threshold, not a 5% one, so it adds little false-fail. The network row stays at 5%: a common focal length 5% high is caught there every time, and only about 42% of the time if that test is moved to 1%.
+`CHK-DIA` and `CHK-CHORD` stay printed and stay out of the grade. On a correct capture the diameter fails in **16.2%** of trials, but in only **6.3%** is a figure tape the only failure. Taking them out of an all-rows grade lifts the pass rate from **81.8%** to **87.0%**, not to 97%. They add almost nothing on the faults this test is for: about **0.6%** of 50 mm sticks and **0.2%** of 20 mm baselines are seen only there. What they do see, when the grade has passed, is a scale error from a focal length common to the phone. **A diameter or chord that fails while the grade passes means suspect that common focal length.**
 
-The trial’s baseline was 4 mm and this fixture stores 3 mm. The rates above are the trial’s. The 1 mm is the rounding from the 10 mm pull rule down to a stored 3 mm, not a second network.
+The blind spot that remains is the same mechanism. A common focal error of **+3%** moves `R̂` by about **+25 mm** and still **passes 73%** of the time on the 1.96 radius row. The 2.576 limit is wider (about `2.576 √(16.2² + 3²)` mm against about 32 mm at 1.96), so that fault is not what the wider row is for. It is caught when the focal error reaches **+5%** (**100%** on this grade), or later, when one `fx` is shared. A 1% prior would bring the network-only `σ_R` down from 15.0 mm to 11.0 mm. This fixture does not do that. `fxSharedInSolve` stays false.
 
 ### 3.4 What one capture does not prove
 
@@ -572,7 +572,7 @@ It does not estimate NEES and it does not show that 95% of repeats fall in the e
 1. **Probe first, then stills.** A path is an archive path only after `FocalLength` and `LensModel` survive on that phone. The canvas shutter is a thumb, not the archive. Stills sit in a sibling folder.
 2. **Stay on document version 1** with optional fields. v2 remains the bump already agreed. The sidecar is not a second garden file.
 3. **Node import script.** Not an in-app export. Photos stay on OneDrive. The repo gets observations and ground truth. Any future image bytes are rewritten to the allow-list in §2.4.
-4. **Circle test** as §3.3. One pass/fail: the circle rows plus the laser baseline. Figure tapes are printed and do not fail the grade. Joint covariance, 6 mm stick scatter, `σ_setout` 3 mm, `|w|` at 3.29. Baseline σ 3 mm, station tapes 10 mm, `CHK-BASE` 5 mm. Datum BAS01 → BAS02. A grade needs STN03.
+4. **Circle test** as §3.3. One pass/fail: network, shape, `|w|`, the laser baseline, and the radius row at **2.576** (1%). A correct capture passes **93.2%**. A 50 mm stick is caught **65%**, a 20 mm baseline **94%**, and a common focal length 5% high **100%**. A common focal length 3% high still passes **73%**. Figure tapes are printed and do not fail the grade. `reflected: true` fails it. Joint covariance, `σ_R` 15.0 mm, 6 mm stick scatter, `σ_setout` 3 mm. Baseline σ 3 mm, station tapes 10 mm, checks 5 mm. Datum BAS01 → BAS02, as in PR #3 `12a987d`. A grade needs STN03.
 5. **`+R` after horizontal reduction**, stored separately from v1 `offsetMm`. Leave that box at 0. `R` is the sleeve’s measured R (about 30 mm, see MARKER_VISION_DESIGN.md), stored on each stick.
 6. **One phone, one `LensModel`, one calibration shot at 3–5 m**, raw tape and sleeve height, no derived focal length in the file. `fxSharedInSolve` is false: this solver gives each photo its own `fx`.
 7. **Licence and the public repo.** The repo is public and has no licence. Paul decides whether to add one, and whether a survey of this garden should be committed here at all. This note does not pick a licence. Until that decision, fixture photos are not committed.
