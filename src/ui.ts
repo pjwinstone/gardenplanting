@@ -97,15 +97,19 @@ import {
 } from './layers';
 import { GEOMETRY_CHOICES, placeholderThumb, type GeometryType, type PhotoClick } from './model';
 import { imageNaturalSize, suggestTagBlobs, type TagSuggestion } from './tagSuggest';
-import { dngRejectionMessage, type PreviewPixelMap } from './photoOriginal';
+import { readSurveyExif } from './photoExif';
+import { dngRejectionMessage, orientationSwapsAxes, type PreviewPixelMap } from './photoOriginal';
 import {
   kickPhotoUploads,
   listQueuedPhotos,
   photosManifestLink,
   rememberOriginalPhoto,
+  resumePhotoUploads,
+  retryPhotoUpload,
   startPhotoUploadLoop,
   type PhotoStatusUpdate,
 } from './photoSync';
+import { silentGraphToken } from './onedrive';
 
 export type View = 'survey' | 'tags';
 
@@ -649,8 +653,9 @@ function statusFromDraft(photoId: string, draft: Awaited<ReturnType<typeof remem
     fullHeight: draft.pixels?.fullHeight,
     previewWidth: draft.pixels?.previewWidth,
     previewHeight: draft.pixels?.previewHeight,
-    previewScale: draft.pixels?.previewScale,
-    pixelCentre: draft.pixels?.pixelCentre,
+    previewScaleX: draft.pixels?.previewScaleX,
+    previewScaleY: draft.pixels?.previewScaleY,
+    clickMap: draft.pixels?.clickMap,
   };
 }
 
@@ -674,8 +679,10 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
         fullHeight: update.fullHeight ?? p.originalFile?.fullHeight,
         previewWidth: update.previewWidth ?? p.originalFile?.previewWidth,
         previewHeight: update.previewHeight ?? p.originalFile?.previewHeight,
-        previewScale: update.previewScale ?? p.originalFile?.previewScale,
-        pixelCentre: update.pixelCentre ?? p.originalFile?.pixelCentre,
+        previewScaleX: update.previewScaleX ?? p.originalFile?.previewScaleX,
+        previewScaleY: update.previewScaleY ?? p.originalFile?.previewScaleY,
+        clickMap: update.clickMap ?? p.originalFile?.clickMap,
+        uploadPermanent: update.permanent ?? p.originalFile?.uploadPermanent,
         usabilityNote: update.usabilityNote ?? p.originalFile?.usabilityNote,
         uploadStatus: update.status,
         uploadError: update.error,
@@ -744,8 +751,10 @@ async function hydratePhotoUploadStatus(): Promise<void> {
           fullHeight: rec.pixels?.fullHeight,
           previewWidth: rec.pixels?.previewWidth,
           previewHeight: rec.pixels?.previewHeight,
-          previewScale: rec.pixels?.previewScale,
-          pixelCentre: rec.pixels?.pixelCentre,
+          previewScaleX: rec.pixels?.previewScaleX,
+          previewScaleY: rec.pixels?.previewScaleY,
+          clickMap: rec.pixels?.clickMap,
+          uploadPermanent: rec.permanent,
           usabilityNote: rec.usabilityNote,
           uploadStatus: rec.status === 'uploading' ? 'queued' : rec.status,
           uploadError: rec.lastError,
@@ -1266,7 +1275,21 @@ async function quietCloudSave(
   opts: { afterLocalQuota?: boolean } = {},
 ): Promise<void> {
   if (!isSignedIn()) return;
-  const result = await saveGardenCloud(doc);
+  const auth = await silentGraphToken();
+  if (!auth.ok) {
+    if (auth.interactionRequired) {
+      notePhotoSignIn(true);
+      setCloudMessage('Sign in to save.');
+      return;
+    }
+    setCloudMessage(
+      opts.afterLocalQuota
+        ? `Browser storage full, and OneDrive save failed: ${auth.error}. Export garden.json now.`
+        : `Could not auto-save to OneDrive: ${auth.error}`,
+    );
+    return;
+  }
+  const result = await saveGardenCloud(doc, undefined, auth.token);
   if (result.ok) {
     setLastSaveIso(result.savedAt);
     if (opts.afterLocalQuota) {
@@ -2036,6 +2059,11 @@ function onShellClick(e: Event): void {
     void onPhotoSignInToUpload();
     return;
   }
+  if (cmd === 'photo-upload-retry') {
+    const photoId = target.getAttribute('data-photo-id') ?? undefined;
+    void retryPhotoUpload(photoId);
+    return;
+  }
   if (cmd === 'ms-signout') {
     void onSignOut();
     return;
@@ -2095,7 +2123,7 @@ async function onPhotoSignInToUpload(): Promise<void> {
   if (auth.ok) {
     photoUploadNeedsSignIn = false;
     setCloudMessage('Signed in. Uploading photos…');
-    kickPhotoUploads();
+    void resumePhotoUploads();
     return;
   }
   photoUploadNeedsSignIn = true;
@@ -3036,38 +3064,93 @@ function errorLogSectionStatus(): {
 /**
  * Display-only preview. Never written as the stored survey photo.
  * The original File/Blob is queued separately and uploaded unchanged.
- * Clicks are stored in this preview. Map them back with the +0.5 pixel-centre
- * convention: full = (previewPx + 0.5) / scale - 0.5.
+ * Clicks are upright (orientation applied) edge coordinates in this preview:
+ * full = previewPx / previewScale on that axis. Subtract 0.5 only for a pixel-centre index.
+ * Where the browser supports it, the preview is decoded with resizeWidth so the
+ * full bitmap is not kept in memory.
  */
 async function fileToPreview(
   file: File,
   maxEdge = 640,
 ): Promise<{ dataUrl: string; pixels: PreviewPixelMap }> {
-  const bitmap = await createImageBitmap(file);
+  const upright = await uprightSizeFromExif(file);
+  if (upright) {
+    const scale = Math.min(1, maxEdge / Math.max(upright.width, upright.height));
+    const pw = Math.max(1, Math.round(upright.width * scale));
+    const ph = Math.max(1, Math.round(upright.height * scale));
+    try {
+      const bitmap = await createImageBitmap(file, resizedBitmapOptions(pw, ph));
+      try {
+        return bitmapToPreview(bitmap, upright.width, upright.height);
+      } finally {
+        bitmap.close();
+      }
+    } catch {
+      /* resize options unsupported — decode below */
+    }
+  }
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' } as ImageBitmapOptions);
   try {
-    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
-    const w = Math.max(1, Math.round(bitmap.width * scale));
-    const h = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas unavailable');
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    return {
-      dataUrl: canvas.toDataURL('image/jpeg', 0.7),
-      pixels: {
-        fullWidth: bitmap.width,
-        fullHeight: bitmap.height,
-        previewWidth: w,
-        previewHeight: h,
-        previewScale: scale,
-        pixelCentre: '+0.5',
-      },
-    };
+    return bitmapToPreview(bitmap, bitmap.width, bitmap.height);
   } finally {
     bitmap.close();
   }
+}
+
+async function uprightSizeFromExif(
+  file: File,
+): Promise<{ width: number; height: number } | undefined> {
+  try {
+    const exif = await readSurveyExif(file);
+    const w = exif.PixelXDimension;
+    const h = exif.PixelYDimension;
+    if (!w || !h) return undefined;
+    if (orientationSwapsAxes(exif.Orientation)) return { width: h, height: w };
+    return { width: w, height: h };
+  } catch {
+    return undefined;
+  }
+}
+
+function resizedBitmapOptions(width: number, height: number): ImageBitmapOptions {
+  return {
+    imageOrientation: 'from-image',
+    resizeWidth: width,
+    resizeHeight: height,
+    resizeQuality: 'medium',
+  } as ImageBitmapOptions;
+}
+
+function bitmapToPreview(
+  bitmap: ImageBitmap,
+  fullWidth: number,
+  fullHeight: number,
+): { dataUrl: string; pixels: PreviewPixelMap } {
+  const needsScale = Math.max(bitmap.width, bitmap.height) > 640;
+  const scale = needsScale ? Math.min(1, 640 / Math.max(bitmap.width, bitmap.height)) : 1;
+  const previewWidth = Math.max(1, Math.round(bitmap.width * scale));
+  const previewHeight = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = previewWidth;
+  canvas.height = previewHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas unavailable');
+  ctx.drawImage(bitmap, 0, 0, previewWidth, previewHeight);
+  const fullW = fullWidth || bitmap.width;
+  const fullH = fullHeight || bitmap.height;
+  return {
+    dataUrl: canvas.toDataURL('image/jpeg', 0.7),
+    pixels: {
+      fullWidth: fullW,
+      fullHeight: fullH,
+      previewWidth,
+      previewHeight,
+      previewScaleX: previewWidth / fullW,
+      previewScaleY: previewHeight / fullH,
+      clickMap: 'p/scale',
+      clickSpace: 'upright',
+    },
+  };
 }
 
 function hierOps(
@@ -3464,6 +3547,24 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
         className: 'point-dialog__mark-hint',
         text: `Upload ${uploadWord}.`,
         attrs: { 'data-testid': 'photo-upload-status' },
+      }),
+    );
+  }
+  if (
+    selectedPhoto?.originalFile?.uploadStatus === 'failed' &&
+    selectedPhoto.id &&
+    !selectedPhoto.originalFile.uploadPermanent
+  ) {
+    photosSection.appendChild(
+      el('button', {
+        className: 'btn btn--util',
+        text: 'Retry',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'photo-upload-retry',
+          'data-photo-id': selectedPhoto.id,
+          'data-testid': 'photo-upload-retry',
+        },
       }),
     );
   }
@@ -4154,7 +4255,7 @@ function buildCloudPanel(): HTMLElement {
     row.appendChild(
       el('button', {
         className: 'btn btn--suggested',
-        text: 'Sign in to upload',
+        text: 'Sign in',
         attrs: {
           type: 'button',
           'data-cmd': 'photo-sign-in-upload',

@@ -19,7 +19,12 @@ import {
 import type { GraphRequest, PhotoProvenance } from './photosManifest';
 import { publishPhotoManifest, uploadAndVerifyOriginal } from './photoUpload';
 
-/** Stop retrying a photo after this many failed passes. Permanent errors stop sooner. */
+/**
+ * Pause automatic retries after this many counted failures.
+ * This is not permanent: app start, online, becoming visible, sign-in, and Retry clear it.
+ * Offline skips and hash mismatches do not use this counter the same way —
+ * a hash mismatch is permanent on its own.
+ */
 export const PHOTO_UPLOAD_MAX_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 2000;
 const BACKOFF_MAX_MS = 60_000;
@@ -27,6 +32,13 @@ const BACKOFF_MAX_MS = 60_000;
 export function photoUploadBackoffMs(attempts: number): number {
   const n = Math.max(1, attempts);
   return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** (n - 1));
+}
+
+/** Wait at least the exponential backoff, and at least until Retry-After. */
+export function retryWaitMs(record: { attempts: number; retryNotBefore?: string }, now = Date.now()): number {
+  const backoff = photoUploadBackoffMs(record.attempts);
+  const until = record.retryNotBefore ? Date.parse(record.retryNotBefore) - now : 0;
+  return Math.max(backoff, Number.isFinite(until) ? until : 0, 0);
 }
 
 export interface PhotoStatusUpdate {
@@ -47,8 +59,11 @@ export interface PhotoStatusUpdate {
   fullHeight?: number;
   previewWidth?: number;
   previewHeight?: number;
-  previewScale?: number;
-  pixelCentre?: '+0.5';
+  previewScaleX?: number;
+  previewScaleY?: number;
+  clickMap?: 'p/scale';
+  /** Hash mismatch or a name still taken after -4. Retry will not clear this. */
+  permanent?: boolean;
   error?: string;
 }
 
@@ -69,6 +84,8 @@ export interface PhotoUploadDeps {
   /** Test hook. Defaults to the Graph 4 MB simple-upload limit. */
   simpleUploadMaxBytes?: number;
   fetchImpl?: typeof fetch;
+  /** Test hook. Production uses navigator.onLine. */
+  online?: () => boolean;
 }
 
 let appQueue: PhotoQueue | null = null;
@@ -132,8 +149,10 @@ function originalFields(
     fullHeight: source.pixels?.fullHeight,
     previewWidth: source.pixels?.previewWidth,
     previewHeight: source.pixels?.previewHeight,
-    previewScale: source.pixels?.previewScale,
-    pixelCentre: source.pixels?.pixelCentre,
+    previewScaleX: source.pixels?.previewScaleX,
+    previewScaleY: source.pixels?.previewScaleY,
+    clickMap: source.pixels?.clickMap,
+    clickSpace: source.pixels?.clickSpace,
     usabilityNote: source.usabilityNote,
     uploadStatus: status,
     uploadError: error,
@@ -197,13 +216,15 @@ export function startPhotoUploadLoop(
     now: deps.now,
     simpleUploadMaxBytes: deps.simpleUploadMaxBytes,
     fetchImpl: deps.fetchImpl,
+    online: deps.online,
   };
   if (!listening && typeof window !== 'undefined') {
     listening = true;
     window.addEventListener('online', () => {
-      const active = loopDeps;
-      if (!active) return;
-      void requeueFailedAfterOnline(active).then(() => kickPhotoUploads());
+      void resumePhotoUploads();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void resumePhotoUploads();
     });
     const persist = navigator.storage?.persist?.bind(navigator.storage);
     if (persist) {
@@ -215,22 +236,60 @@ export function startPhotoUploadLoop(
       });
     }
   }
+  void resumePhotoUploads();
+}
+
+/**
+ * Clear the attempt counter on every non-permanent row and queue failed ones again.
+ * Used on app start, online, visibility, sign-in, and the Retry button.
+ */
+export async function resetPhotoUploadAttempts(
+  queue: PhotoQueue,
+  now = new Date().toISOString(),
+): Promise<void> {
+  const records = await queue.list();
+  for (const record of records) {
+    if (record.permanent) continue;
+    if (record.status !== 'failed' && record.attempts === 0 && !record.retryNotBefore) continue;
+    await queue.put({
+      ...record,
+      status: record.status === 'failed' || record.status === 'uploading' ? 'queued' : record.status,
+      attempts: 0,
+      retryNotBefore: undefined,
+      lastError: record.status === 'failed' ? undefined : record.lastError,
+      updatedAt: now,
+    });
+  }
+}
+
+/** Reset attempts, then upload. Does not clear a hash mismatch. */
+export async function resumePhotoUploads(): Promise<void> {
+  const active = loopDeps;
+  if (!active) return;
+  await resetPhotoUploadAttempts(active.queue, active.now?.() ?? new Date().toISOString());
   kickPhotoUploads();
 }
 
-async function requeueFailedAfterOnline(deps: PhotoUploadDeps): Promise<void> {
-  const records = await deps.queue.list();
+/** User tapped Retry. One photo, or every non-permanent failure when photoId is omitted. */
+export async function retryPhotoUpload(photoId?: string): Promise<void> {
+  const active = loopDeps;
+  if (!active) return;
+  const now = active.now?.() ?? new Date().toISOString();
+  const records = await active.queue.list();
   for (const record of records) {
-    if (record.status === 'failed' && !record.permanent) {
-      await deps.queue.put({
-        ...record,
-        status: 'queued',
-        attempts: 0,
-        lastError: undefined,
-        updatedAt: deps.now?.() ?? new Date().toISOString(),
-      });
-    }
+    if (photoId && record.photoId !== photoId) continue;
+    if (record.permanent) continue;
+    if (record.status !== 'failed' && record.status !== 'queued') continue;
+    await active.queue.put({
+      ...record,
+      status: 'queued',
+      attempts: 0,
+      retryNotBefore: undefined,
+      lastError: undefined,
+      updatedAt: now,
+    });
   }
+  kickPhotoUploads();
 }
 
 export function kickPhotoUploads(): void {
@@ -258,7 +317,8 @@ async function scheduleRetryIfNeeded(deps: PhotoUploadDeps): Promise<void> {
   const records = await deps.queue.list();
   const retryable = records.filter(isRetryable);
   if (!retryable.length) return;
-  const wait = Math.min(...retryable.map((r) => photoUploadBackoffMs(r.attempts)));
+  const now = Date.now();
+  const wait = Math.min(...retryable.map((r) => retryWaitMs(r, now)));
   if (retryTimer != null) return;
   retryTimer = setTimeout(() => {
     retryTimer = null;
@@ -299,6 +359,7 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
 
   const pending = (await deps.queue.list()).filter(isRetryable);
   if (!pending.length) return 0;
+  if (!isOnline(deps)) return 0;
 
   const tokenResult = readToken(await deps.getToken());
   if (tokenResult.interactionRequired) {
@@ -312,6 +373,7 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
   const records = await deps.queue.list();
   for (const record of records) {
     if (!isRetryable(record)) continue;
+    if (!isOnline(deps)) return failed;
 
     const stamp = deps.now?.() ?? new Date().toISOString();
     const uploading: PhotoQueueRecord = { ...record, status: 'uploading', updatedAt: stamp };
@@ -327,12 +389,17 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
       } else {
         failed += 1;
         const attempts = record.attempts + 1;
-        const permanent = outcome.permanent || attempts >= PHOTO_UPLOAD_MAX_ATTEMPTS;
+        const permanent = Boolean(outcome.permanent);
+        const retryNotBefore =
+          outcome.retryAfterMs != null
+            ? new Date(Date.now() + outcome.retryAfterMs).toISOString()
+            : undefined;
         const failedRec: PhotoQueueRecord = {
           ...(outcome.record ?? uploading),
           status: 'failed',
           attempts,
           permanent,
+          retryNotBefore,
           lastError: outcome.error,
           bytesOnDrive: outcome.bytesOnDrive,
           updatedAt: deps.now?.() ?? new Date().toISOString(),
@@ -348,7 +415,7 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
         ...uploading,
         status: 'failed',
         attempts,
-        permanent: attempts >= PHOTO_UPLOAD_MAX_ATTEMPTS,
+        permanent: false,
         lastError: message,
         updatedAt: deps.now?.() ?? new Date().toISOString(),
       };
@@ -372,7 +439,14 @@ async function uploadOne(
   deps: PhotoUploadDeps,
 ): Promise<
   | { ok: true; record?: PhotoQueueRecord }
-  | { ok: false; error: string; bytesOnDrive: boolean; permanent?: boolean; record?: PhotoQueueRecord }
+  | {
+      ok: false;
+      error: string;
+      bytesOnDrive: boolean;
+      permanent?: boolean;
+      retryAfterMs?: number;
+      record?: PhotoQueueRecord;
+    }
 > {
   return uploadNamed(client, record, deps, 0);
 }
@@ -384,7 +458,14 @@ async function uploadNamed(
   suffixTry: number,
 ): Promise<
   | { ok: true; record?: PhotoQueueRecord }
-  | { ok: false; error: string; bytesOnDrive: boolean; permanent?: boolean; record?: PhotoQueueRecord }
+  | {
+      ok: false;
+      error: string;
+      bytesOnDrive: boolean;
+      permanent?: boolean;
+      retryAfterMs?: number;
+      record?: PhotoQueueRecord;
+    }
 > {
   let bytesOnDrive = record.bytesOnDrive;
   if (!bytesOnDrive) {
@@ -394,7 +475,7 @@ async function uploadNamed(
         ok: false,
         error: 'Queued file size changed before upload.',
         bytesOnDrive: false,
-        permanent: true,
+        permanent: false,
         record,
       };
     }
@@ -407,19 +488,27 @@ async function uploadNamed(
       simpleUploadMaxBytes: deps.simpleUploadMaxBytes,
     });
     if (!uploaded.ok) {
-      if (uploaded.conflict && suffixTry < 3) {
+      if (uploaded.conflict && uploaded.permanent) {
         const fileName = suffixedPhotoFileName(record.fileName);
-        if (fileName) {
+        if (fileName && suffixTry < 3) {
           const renamed: PhotoQueueRecord = { ...record, fileName, bytesOnDrive: false, status: 'uploading' };
           await deps.queue.put(renamed);
           return uploadNamed(client, renamed, deps, suffixTry + 1);
         }
+        return {
+          ok: false,
+          error: uploaded.error,
+          bytesOnDrive: false,
+          permanent: true,
+          record,
+        };
       }
       return {
         ok: false,
         error: uploaded.error,
         bytesOnDrive: false,
         permanent: Boolean(uploaded.permanent),
+        retryAfterMs: uploaded.retryAfterMs,
         record,
       };
     }
@@ -459,10 +548,18 @@ function statusOf(
     fullHeight: record.pixels?.fullHeight,
     previewWidth: record.pixels?.previewWidth,
     previewHeight: record.pixels?.previewHeight,
-    previewScale: record.pixels?.previewScale,
-    pixelCentre: record.pixels?.pixelCentre,
+    previewScaleX: record.pixels?.previewScaleX,
+    previewScaleY: record.pixels?.previewScaleY,
+    clickMap: record.pixels?.clickMap,
+    permanent: record.permanent,
     error,
   };
+}
+
+function isOnline(deps: PhotoUploadDeps): boolean {
+  if (deps.online) return deps.online();
+  if (typeof navigator === 'undefined') return true;
+  return navigator.onLine !== false;
 }
 
 export async function listQueuedPhotos(

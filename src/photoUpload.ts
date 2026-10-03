@@ -10,7 +10,7 @@
 import { photosFolderPath, photosManifestPath, ONEDRIVE_FOLDER } from './cloudConfig';
 import type { PhotoQueueRecord } from './photoQueue';
 import {
-  PIXEL_CENTRE,
+  CLICK_MAP,
   graphError,
   graphItemUrl,
   upsertManifestPhoto,
@@ -34,20 +34,31 @@ export interface RemoteFileInfo {
 export function verifyRemoteFile(
   local: { size: number; quickXorHash: string },
   remote: { size?: number; quickXorHash?: string },
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true } | { ok: false; reason: string; permanent: boolean } {
   if (typeof remote.size !== 'number' || remote.size !== local.size) {
     return {
       ok: false,
+      permanent: false,
       reason: `Size mismatch (local ${local.size}, OneDrive ${remote.size ?? 'missing'}).`,
     };
   }
   if (!remote.quickXorHash) {
-    return { ok: false, reason: 'OneDrive did not return quickXorHash.' };
+    return { ok: false, permanent: false, reason: 'OneDrive did not return quickXorHash.' };
   }
   if (remote.quickXorHash !== local.quickXorHash) {
-    return { ok: false, reason: 'quickXorHash does not match the local file.' };
+    return { ok: false, permanent: true, reason: 'quickXorHash does not match the local file.' };
   }
   return { ok: true };
+}
+
+/** Retry-After is either delta-seconds or an HTTP date. */
+export function parseRetryAfter(header: string | null, now = Date.now()): number | undefined {
+  if (!header) return undefined;
+  const trimmed = header.trim();
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Math.round(Number(trimmed) * 1000);
+  const when = Date.parse(trimmed);
+  if (Number.isFinite(when)) return Math.max(0, when - now);
+  return undefined;
 }
 
 export function manifestEntryFromRecord(record: PhotoQueueRecord): ManifestPhoto {
@@ -55,7 +66,7 @@ export function manifestEntryFromRecord(record: PhotoQueueRecord): ManifestPhoto
   // New rows set receivedAt, and capturedAt is the EXIF time (or absent).
   // Older rows stored the receive time in capturedAt and have no receivedAt.
   const capturedAt = record.receivedAt ? record.capturedAt : undefined;
-  const provenance: PhotoProvenance = record.provenance ?? 'library';
+  const provenance: PhotoProvenance = record.provenance ?? 'unknown';
   return {
     fileName: record.fileName,
     photoId: record.photoId,
@@ -74,8 +85,10 @@ export function manifestEntryFromRecord(record: PhotoQueueRecord): ManifestPhoto
     fullHeight: record.pixels?.fullHeight,
     previewWidth: record.pixels?.previewWidth,
     previewHeight: record.pixels?.previewHeight,
-    previewScale: record.pixels?.previewScale,
-    pixelCentre: PIXEL_CENTRE,
+    previewScaleX: record.pixels?.previewScaleX,
+    previewScaleY: record.pixels?.previewScaleY,
+    clickMap: CLICK_MAP,
+    clickSpace: 'upright',
   };
 }
 
@@ -94,7 +107,7 @@ export async function uploadAndVerifyOriginal(opts: {
   chunkBytes?: number;
 }): Promise<
   | { ok: true; remote: RemoteFileInfo; existed: boolean }
-  | { ok: false; error: string; permanent?: boolean; conflict?: boolean }
+  | { ok: false; error: string; permanent?: boolean; conflict?: boolean; retryAfterMs?: number }
 > {
   const folder = await ensurePhotosFolder(opts.client);
   if (!folder.ok) return folder;
@@ -115,8 +128,8 @@ export async function uploadAndVerifyOriginal(opts: {
     return {
       ok: false,
       error: check.reason,
-      permanent: true,
-      conflict: uploaded.existed,
+      permanent: check.permanent,
+      conflict: uploaded.existed && check.permanent,
     };
   }
   return { ok: true, remote: uploaded.remote, existed: uploaded.existed };
@@ -142,7 +155,9 @@ async function simpleUpload(
   itemPath: string,
   bytes: Uint8Array,
   contentType: string,
-): Promise<{ ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string; retryAfterMs?: number }
+> {
   const url = conflictFailUrl(graphItemUrl(itemPath, ':/content'));
   const res = await client.fetch(url, {
     method: 'PUT',
@@ -153,7 +168,7 @@ async function simpleUpload(
     body: new Blob([bytes], { type: contentType || 'application/octet-stream' }),
   });
   if (res.status === 409) return readExistingAndReturn(client, itemPath);
-  if (!res.ok) return { ok: false, error: await graphError(res) };
+  if (!res.ok) return failResponse(res);
   const remote = await remoteFromResponse(client, itemPath, res);
   if (!remote.ok) return remote;
   return { ok: true, remote: remote.info, existed: false };
@@ -165,7 +180,9 @@ async function sessionUpload(
   fileName: string,
   bytes: Uint8Array,
   chunkBytes = UPLOAD_CHUNK_BYTES,
-): Promise<{ ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string; retryAfterMs?: number }
+> {
   const createUrl = graphItemUrl(itemPath, ':/createUploadSession');
   const created = await client.fetch(createUrl, {
     method: 'POST',
@@ -181,7 +198,7 @@ async function sessionUpload(
     }),
   });
   if (created.status === 409) return readExistingAndReturn(client, itemPath);
-  if (!created.ok) return { ok: false, error: await graphError(created) };
+  if (!created.ok) return failResponse(created);
   const session = (await created.json()) as { uploadUrl?: string };
   if (!session.uploadUrl) return { ok: false, error: 'OneDrive did not return an upload session.' };
 
@@ -199,16 +216,26 @@ async function sessionUpload(
     });
     const finished = end === bytes.byteLength;
     if (finished) {
-      if (!last.ok) return { ok: false, error: await graphError(last) };
+      if (!last.ok) return failResponse(last);
       break;
     }
-    if (last.status !== 202 && !last.ok) return { ok: false, error: await graphError(last) };
+    if (last.status !== 202 && !last.ok) return failResponse(last);
     start = end;
   }
   if (!last) return { ok: false, error: 'Upload session sent no bytes.' };
   const remote = await remoteFromResponse(client, itemPath, last);
   if (!remote.ok) return remote;
   return { ok: true, remote: remote.info, existed: false };
+}
+
+async function failResponse(
+  res: Response,
+): Promise<{ ok: false; error: string; retryAfterMs?: number }> {
+  const retryAfterMs =
+    res.status === 429 || res.status === 503
+      ? parseRetryAfter(res.headers.get('Retry-After'))
+      : undefined;
+  return { ok: false, error: await graphError(res), retryAfterMs };
 }
 
 function conflictFailUrl(contentUrl: string): string {
@@ -307,6 +334,7 @@ async function ensureFolder(
     }),
   });
   if (res.ok || res.status === 409) return { ok: true };
+  if (res.status === 429 || res.status === 503) return failResponse(res);
   const detail = await graphError(res);
   if (res.status === 405 || /nameAlreadyExists/i.test(detail)) return { ok: true };
   return { ok: false, error: detail };

@@ -161,15 +161,20 @@ export interface PhotoOriginalFile {
   receivedAt?: string;
   /** EXIF DateTimeOriginal + SubSec + offset, when present. */
   capturedAt?: string;
-  provenance?: 'camera-path' | 'library';
+  provenance?: 'camera-path' | 'library' | 'unknown';
   calibrationKey?: string;
   fullWidth?: number;
   fullHeight?: number;
   previewWidth?: number;
   previewHeight?: number;
-  previewScale?: number;
-  /** full = (previewPx + 0.5) / previewScale - 0.5 */
-  pixelCentre?: '+0.5';
+  previewScaleX?: number;
+  previewScaleY?: number;
+  /** full = previewPx / scale, from the pixel edge. Centre index is full − 0.5. */
+  clickMap?: 'p/scale';
+  /** Clicks are upright (orientation applied). */
+  clickSpace?: 'upright';
+  /** Set when the failure will not succeed on Retry (hash mismatch or name still taken). */
+  uploadPermanent?: boolean;
   /** Missing lens data, or capture time outside the station setup. */
   usabilityNote?: string;
   uploadStatus?: PhotoUploadStatus;

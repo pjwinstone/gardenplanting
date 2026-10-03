@@ -10,14 +10,18 @@
 
 import type { AppleMakerNote, SurveyExif } from './photoExif';
 
-/** `image.jpg` from the system camera sheet, with no Make tag. Otherwise a library pick. */
-export type PhotoProvenance = 'camera-path' | 'library';
+/**
+ * `camera-path`: WebKit named the file image.jpg and there is no Make tag.
+ * `library`: the file still has a Make tag.
+ * `unknown`: neither of those — do not guess.
+ */
+export type PhotoProvenance = 'camera-path' | 'library' | 'unknown';
 
 /**
- * Clicks are stored in the display preview's pixel space.
- * `full = (previewPx + 0.5) / previewScale - 0.5`.
+ * Clicks are upright edge coordinates (fraction × preview size).
+ * `full = previewPx / scale`. A pixel-centre index is that value minus 0.5.
  */
-export const PIXEL_CENTRE = '+0.5' as const;
+export const CLICK_MAP = 'p/scale' as const;
 
 export interface ManifestPhoto {
   fileName: string;
@@ -36,13 +40,17 @@ export interface ManifestPhoto {
   makerNote?: AppleMakerNote;
   /** Make|Model|LensModel|FocalLength|pixel size. */
   calibrationKey: string;
-  /** Decoded bitmap size (`createImageBitmap`). */
+  /** Upright full-resolution size (EXIF orientation applied). */
   fullWidth?: number;
   fullHeight?: number;
   previewWidth?: number;
   previewHeight?: number;
-  previewScale?: number;
-  pixelCentre: typeof PIXEL_CENTRE;
+  previewScaleX?: number;
+  previewScaleY?: number;
+  /** `full = previewPx / scale` from the pixel edge. Centre index is full − 0.5. */
+  clickMap: typeof CLICK_MAP;
+  /** Clicks are in upright pixels, after orientation is applied. */
+  clickSpace: 'upright';
 }
 
 export interface PhotosManifest {

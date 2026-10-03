@@ -35,8 +35,10 @@ export interface PhotoQueueRecord {
   status: PhotoUploadStatus;
   attempts: number;
   lastError?: string;
-  /** Hash mismatch or a name that stayed taken. Do not retry. */
+  /** Hash mismatch, or the name was still taken after -4. Do not retry. */
   permanent?: boolean;
+  /** Do not start another attempt before this ISO time (Retry-After). */
+  retryNotBefore?: string;
   /** True once OneDrive has this exact file (size + quickXorHash). */
   bytesOnDrive: boolean;
   updatedAt: string;

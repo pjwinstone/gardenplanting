@@ -1,11 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { exifCapturedAtIso, readAppleMakerNote, readSurveyExif } from '../src/photoExif';
+import { exifCapturedAtIso, readAppleMakerNote, readMakerNoteBytes, readSurveyExif } from '../src/photoExif';
 import {
   calibrationKeyFor,
   dngRejectionMessage,
   inferPhotoProvenance,
   inspectOriginalFile,
+  photoUsabilityNote,
   previewPixelToFull,
+  previewPixelToFullCentre,
   suffixedPhotoFileName,
 } from '../src/photoOriginal';
 import { SAMPLE_EXIF, buildSurveyExifContainers } from './fixtures/buildSurveyExif';
@@ -66,8 +69,8 @@ describe('survey EXIF', () => {
     expect(draft.capturedAt).toBe('2026-10-02T23:26:00.123+01:00');
     expect(draft.provenance).toBe('library');
     expect(draft.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(draft.calibrationKey).toBe('Apple|iPhone14|Back wide|5.2|26|4032x3024');
     expect(draft.calibrationKey).toBe(calibrationKeyFor(draft.exif));
-    expect(draft.calibrationKey).toContain('Apple|iPhone14|Back wide|');
     expect(draft.quickXorHash.length).toBeGreaterThan(10);
     expect(draft.usabilityNote).toMatch(/Not usable for timing/);
     expect(draft.usabilityNote ?? '').not.toMatch(/focal length/);
@@ -87,6 +90,7 @@ describe('survey EXIF', () => {
     expect(cameraPath.usabilityNote).toMatch(/focal length/);
     expect(cameraPath.usabilityNote).toMatch(/timing/);
     expect(inferPhotoProvenance('image.jpg', { Make: 'Apple' })).toBe('library');
+    expect(inferPhotoProvenance('note.png', {})).toBe('unknown');
     expect(exifCapturedAtIso(cameraPath.exif)).toBeUndefined();
   });
 
@@ -104,68 +108,97 @@ describe('survey EXIF', () => {
     expect(dngRejectionMessage(jpeg, 'IMG_1.jpg', 'image/jpeg')).toBeNull();
   });
 
-  it('reads Apple maker-note AccelerationVector, RunTime and CameraType when the header is present', () => {
+  it('reads Apple maker-note AccelerationVector and CameraType 0x002e', () => {
     const note = appleMakerNote();
     expect(readAppleMakerNote(note)).toEqual({
       AccelerationVector: [0.5, -0.25, 1],
-      RunTime: { flags: 1, value: 1000, scale: 1_000_000_000, epoch: 0 },
       CameraType: 1,
     });
     expect(readAppleMakerNote(new Uint8Array([1, 2, 3, 4]))).toBeUndefined();
   });
 
-  it('maps preview clicks back to full pixels with the +0.5 centre', () => {
-    expect(previewPixelToFull(0, 0.5)).toBeCloseTo(0.5);
-    expect(previewPixelToFull(10, 0.5)).toBeCloseTo(20.5);
+  it('parses a real iPhone 7 maker note from ExifTool’s Apple.jpg', async () => {
+    // Source: https://github.com/exiftool/exiftool/blob/master/t/images/Apple.jpg
+    // Licence: ExifTool is dual-licensed under the GPL and the Artistic License.
+    // This is ExifTool’s published test image, not a personal photo.
+    const file = readFileSync(new URL('./fixtures/exiftool-apple-iphone7.jpg', import.meta.url));
+    const note = await readMakerNoteBytes(file);
+    expect(note?.[0]).toBe(0x41);
+    const parsed = readAppleMakerNote(note ?? new Uint8Array());
+    expect(parsed?.AccelerationVector?.[0]).toBeCloseTo(-0.6483164083377873, 6);
+    expect(parsed?.AccelerationVector?.[1]).toBeCloseTo(0.0022641190037876384, 6);
+    expect(parsed?.AccelerationVector?.[2]).toBeCloseTo(-0.750076757752533, 6);
+    expect(parsed?.RunTime).toEqual({
+      flags: 1,
+      value: 39772089846958,
+      scale: 1_000_000_000,
+      epoch: 0,
+    });
+    expect(parsed?.CameraType).toBeUndefined();
+    const exif = await readSurveyExif(file);
+    expect(exif.FocalLengthIn35mmFilm).toBe(28);
+    expect(calibrationKeyFor(exif)).toBe('Apple|iPhone 7|iPhone 7 back camera 3.99mm f/1.8|3.99|28|4032x3024');
+    expect(
+      photoUsabilityNote({
+        exif,
+        capturedAt: '2016-01-01T00:00:00Z',
+        sessionStartedAt: '2016-01-01T00:00:00Z',
+        now: '2016-01-01T00:00:00Z',
+      }),
+    ).toMatch(/not 1×/);
+  });
+
+  it('maps a preview-edge click with full = p / scale', () => {
+    const scale = 640 / 4032;
+    expect(previewPixelToFull(10, scale)).toBeCloseTo(10 / scale);
+    expect(previewPixelToFullCentre(10, scale)).toBeCloseTo(10 / scale - 0.5);
+    const oldCentre = (10 + 0.5) / scale - 0.5;
+    expect(oldCentre - previewPixelToFullCentre(10, scale)).toBeCloseTo(0.5 / scale, 5);
     expect(suffixedPhotoFileName('P01_20261002T232600123Z.jpg')).toBe('P01_20261002T232600123Z-2.jpg');
     expect(suffixedPhotoFileName('P01_20261002T232600123Z-4.jpg')).toBeNull();
   });
 });
 
+/** ExifTool layout: Apple iOS\\0, 00 01, MM, IFD at +14, offsets from byte 0. */
 function appleMakerNote(): Uint8Array {
-  const head = [0x41, 0x70, 0x70, 0x6c, 0x65, 0x20, 0x69, 0x4f, 0x53, 0x00];
-  const tiff = 10;
-  const runtimeAt = 80;
-  const accelAt = 104;
-  const bytes = new Uint8Array(140);
-  bytes.set(head, 0);
-  bytes[tiff] = 0x49;
-  bytes[tiff + 1] = 0x49;
-  bytes[tiff + 2] = 42;
-  bytes[tiff + 4] = 8;
-  const ifd = tiff + 8;
-  bytes[ifd] = 3;
-  writeEntry(bytes, ifd + 2, 0x0003, 7, 20, runtimeAt);
-  writeEntry(bytes, ifd + 14, 0x0008, 10, 3, accelAt);
-  writeEntry(bytes, ifd + 26, 0x0030, 3, 1, 1);
-  writeU32(bytes, tiff + runtimeAt, 1);
-  writeU32(bytes, tiff + runtimeAt + 4, 1000);
-  writeU32(bytes, tiff + runtimeAt + 12, 1_000_000_000);
-  writeI32(bytes, tiff + accelAt, 1);
-  writeI32(bytes, tiff + accelAt + 4, 2);
-  writeI32(bytes, tiff + accelAt + 8, -1);
-  writeI32(bytes, tiff + accelAt + 12, 4);
-  writeI32(bytes, tiff + accelAt + 16, 1);
-  writeI32(bytes, tiff + accelAt + 20, 1);
+  const bytes = new Uint8Array(80);
+  bytes.set([0x41, 0x70, 0x70, 0x6c, 0x65, 0x20, 0x69, 0x4f, 0x53, 0x00], 0);
+  bytes[11] = 0x01;
+  bytes[12] = 0x4d;
+  bytes[13] = 0x4d;
+  writeU16be(bytes, 14, 3);
+  const accelOff = 52;
+  writeEntryBe(bytes, 16, 0x0008, 10, 3, accelOff);
+  writeEntryBe(bytes, 28, 0x002e, 3, 1, 0x00010000);
+  writeEntryBe(bytes, 40, 0x0030, 3, 1, 0x00090000);
+  writeI32be(bytes, accelOff, 1);
+  writeI32be(bytes, accelOff + 4, 2);
+  writeI32be(bytes, accelOff + 8, -1);
+  writeI32be(bytes, accelOff + 12, 4);
+  writeI32be(bytes, accelOff + 16, 1);
+  writeI32be(bytes, accelOff + 20, 1);
   return bytes;
 }
 
-function writeEntry(bytes: Uint8Array, at: number, tag: number, type: number, count: number, value: number): void {
-  bytes[at] = tag & 0xff;
-  bytes[at + 1] = (tag >> 8) & 0xff;
-  bytes[at + 2] = type & 0xff;
-  bytes[at + 3] = (type >> 8) & 0xff;
-  writeU32(bytes, at + 4, count);
-  writeU32(bytes, at + 8, value);
+function writeEntryBe(bytes: Uint8Array, at: number, tag: number, type: number, count: number, value: number): void {
+  writeU16be(bytes, at, tag);
+  writeU16be(bytes, at + 2, type);
+  writeU32be(bytes, at + 4, count);
+  writeU32be(bytes, at + 8, value);
 }
 
-function writeU32(bytes: Uint8Array, at: number, value: number): void {
-  bytes[at] = value & 0xff;
-  bytes[at + 1] = (value >>> 8) & 0xff;
-  bytes[at + 2] = (value >>> 16) & 0xff;
-  bytes[at + 3] = (value >>> 24) & 0xff;
+function writeU16be(bytes: Uint8Array, at: number, value: number): void {
+  bytes[at] = (value >>> 8) & 0xff;
+  bytes[at + 1] = value & 0xff;
 }
 
-function writeI32(bytes: Uint8Array, at: number, value: number): void {
-  writeU32(bytes, at, value < 0 ? value + 0x100000000 : value);
+function writeU32be(bytes: Uint8Array, at: number, value: number): void {
+  bytes[at] = (value >>> 24) & 0xff;
+  bytes[at + 1] = (value >>> 16) & 0xff;
+  bytes[at + 2] = (value >>> 8) & 0xff;
+  bytes[at + 3] = value & 0xff;
+}
+
+function writeI32be(bytes: Uint8Array, at: number, value: number): void {
+  writeU32be(bytes, at, value < 0 ? value + 0x100000000 : value);
 }

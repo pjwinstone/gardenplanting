@@ -14,8 +14,9 @@ import { getGardenCloudFileName } from '../cloudConfig';
 export async function saveGardenCloud(
   doc: GardenDocument,
   fileName = getGardenCloudFileName(),
+  token?: string,
 ): Promise<CloudSaveResult> {
-  return saveGardenToOneDrive(doc, fileName);
+  return saveGardenToOneDrive(doc, fileName, token);
 }
 
 export async function loadGardenCloud(

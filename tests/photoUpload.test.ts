@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { quickXorHash } from '../src/quickXorHash';
 import { createMemoryPhotoQueue, type PhotoQueueRecord } from '../src/photoQueue';
-import { SIMPLE_UPLOAD_MAX_BYTES, uploadAndVerifyOriginal } from '../src/photoUpload';
-import { PHOTO_UPLOAD_MAX_ATTEMPTS, drainPhotoQueue, photoUploadBackoffMs } from '../src/photoSync';
+import { SIMPLE_UPLOAD_MAX_BYTES, parseRetryAfter, uploadAndVerifyOriginal } from '../src/photoUpload';
+import {
+  PHOTO_UPLOAD_MAX_ATTEMPTS,
+  drainPhotoQueue,
+  photoUploadBackoffMs,
+  resetPhotoUploadAttempts,
+  retryWaitMs,
+} from '../src/photoSync';
 import type { GraphRequest } from '../src/photosManifest';
 
 const bytes = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 11, 12]);
@@ -160,7 +166,7 @@ describe('drainPhotoQueue', () => {
     expect(manifestBody).toContain(record.fileName);
     expect(manifestBody).toContain('"stationId": "P01"');
     expect(manifestBody).toContain('"receivedAt"');
-    expect(manifestBody).toContain('"+0.5"');
+    expect(manifestBody).toContain('"p/scale"');
     expect(manifestBody).toContain(hash);
   });
 
@@ -259,6 +265,120 @@ describe('drainPhotoQueue', () => {
     expect(left?.attempts).toBe(1);
     expect(left?.blob.size).toBe(bytes.byteLength);
     expect(left?.lastError).toMatch(/unavailable/);
+    expect(left?.permanent).toBeFalsy();
+  });
+
+  it('does not make a network failure permanent after the attempt pause', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put({ ...queuedRecord(), attempts: PHOTO_UPLOAD_MAX_ATTEMPTS - 1, status: 'failed' });
+    await drainPhotoQueue({
+      queue,
+      getToken: async () => 'tok',
+      fetchImpl: scripted([
+        () => json(409, {}),
+        () => json(409, {}),
+        () => json(500, { error: { message: 'unavailable' } }),
+      ]).fetch,
+      onStatus: () => undefined,
+    });
+    const [paused] = await queue.list();
+    expect(paused?.attempts).toBe(PHOTO_UPLOAD_MAX_ATTEMPTS);
+    expect(paused?.permanent).toBeFalsy();
+    let tokens = 0;
+    expect(
+      await drainPhotoQueue({
+        queue,
+        getToken: async () => {
+          tokens += 1;
+          return 'tok';
+        },
+        onStatus: () => undefined,
+      }),
+    ).toBe(0);
+    expect(tokens).toBe(0);
+    await resetPhotoUploadAttempts(queue, '2026-10-03T00:00:00.000Z');
+    const [reset] = await queue.list();
+    expect(reset?.status).toBe('queued');
+    expect(reset?.attempts).toBe(0);
+  });
+
+  it('does not count an attempt while offline', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put(queuedRecord());
+    let tokens = 0;
+    const failed = await drainPhotoQueue({
+      queue,
+      online: () => false,
+      getToken: async () => {
+        tokens += 1;
+        return 'tok';
+      },
+      onStatus: () => undefined,
+    });
+    expect(failed).toBe(0);
+    expect(tokens).toBe(0);
+    const [left] = await queue.list();
+    expect(left?.status).toBe('queued');
+    expect(left?.attempts).toBe(0);
+  });
+
+  it('honours Retry-After and does not treat a missing quickXorHash as permanent', async () => {
+    expect(parseRetryAfter('30')).toBe(30_000);
+    const later = Date.parse('Wed, 21 Oct 2026 07:28:00 GMT');
+    expect(parseRetryAfter('Wed, 21 Oct 2026 07:28:00 GMT', later - 15_000)).toBe(15_000);
+
+    const missing = await uploadAndVerifyOriginal({
+      client: scripted([
+        () => json(409, {}),
+        () => json(409, {}),
+        () => json(200, { size: bytes.byteLength, file: {} }),
+        () => json(200, { size: bytes.byteLength, file: {} }),
+      ]),
+      bytes,
+      fileName: 'P01_x.jpg',
+      contentType: 'image/jpeg',
+      localHash: hash,
+    });
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.permanent).toBeFalsy();
+
+    const queue = createMemoryPhotoQueue();
+    await queue.put(queuedRecord());
+    const before = Date.now();
+    await drainPhotoQueue({
+      queue,
+      getToken: async () => 'tok',
+      fetchImpl: scripted([
+        () => json(409, {}),
+        () => json(409, {}),
+        () => json(503, { error: { message: 'busy' } }, { 'Retry-After': '30' }),
+      ]).fetch,
+      onStatus: () => undefined,
+    });
+    const [left] = await queue.list();
+    expect(left?.permanent).toBeFalsy();
+    expect(left?.attempts).toBe(1);
+    expect(Date.parse(left?.retryNotBefore ?? '') - before).toBeGreaterThan(20_000);
+    expect(retryWaitMs({ attempts: 1, retryNotBefore: left?.retryNotBefore }, before)).toBeGreaterThan(20_000);
+  });
+
+  it('marks a name that is still taken at -4 as permanent', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put({ ...queuedRecord(), fileName: 'P01_20261002T232600123Z-4.jpg' });
+    await drainPhotoQueue({
+      queue,
+      getToken: async () => 'tok',
+      onStatus: () => undefined,
+      fetchImpl: scripted([
+        () => json(409, {}),
+        () => json(409, {}),
+        () => json(409, { error: { code: 'nameAlreadyExists' } }),
+        () => json(200, item(bytes.byteLength, 'other-file')),
+      ]).fetch,
+    });
+    const [left] = await queue.list();
+    expect(left?.permanent).toBe(true);
+    expect(left?.fileName).toBe('P01_20261002T232600123Z-4.jpg');
   });
 });
 
@@ -282,8 +402,10 @@ function queuedRecord(): PhotoQueueRecord {
       fullHeight: 3024,
       previewWidth: 640,
       previewHeight: 480,
-      previewScale: 640 / 4032,
-      pixelCentre: '+0.5',
+      previewScaleX: 640 / 4032,
+      previewScaleY: 480 / 3024,
+      clickMap: 'p/scale',
+      clickSpace: 'upright',
     },
     quickXorHash: hash,
     exif: { Make: 'Apple', DateTimeOriginal: '2026:10:02 23:26:00' },

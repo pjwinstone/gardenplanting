@@ -15,24 +15,32 @@
 import {
   exifCapturedAtIso,
   readAppleMakerNote,
+  readMakerNoteBytes,
   readSurveyExif,
   type AppleMakerNote,
   type SurveyExif,
 } from './photoExif';
-import { PIXEL_CENTRE, type PhotoProvenance } from './photosManifest';
+import { CLICK_MAP, type PhotoProvenance } from './photosManifest';
 import { quickXorHash } from './quickXorHash';
 
 export interface PreviewPixelMap {
+  /** Upright full-resolution size (EXIF orientation applied). */
   fullWidth: number;
   fullHeight: number;
   previewWidth: number;
   previewHeight: number;
-  /** previewEdge / fullEdge. Clicks live in the preview. */
-  previewScale: number;
+  /** previewWidth / fullWidth. Clicks use this axis on their own. */
+  previewScaleX: number;
+  /** previewHeight / fullHeight. */
+  previewScaleY: number;
   /**
-   * Pixel-centre convention: full = (previewPx + 0.5) / previewScale - 0.5.
+   * Clicks are upright edge coordinates: fraction × preview width, from the
+   * pixel edge. fullEdge = previewPx / previewScale. A pixel-centre index is
+   * fullEdge − 0.5.
    */
-  pixelCentre: typeof PIXEL_CENTRE;
+  clickMap: typeof CLICK_MAP;
+  /** Clicks are in upright pixels, after EXIF orientation is applied. */
+  clickSpace: 'upright';
 }
 
 export interface OriginalPhotoDraft {
@@ -105,25 +113,49 @@ export function contentTypeFor(sourceType: string, fileName: string): string {
 
 /**
  * `camera-path` when the input named the file image.jpg / image.jpeg and EXIF has no Make.
- * That is the WebKit Take Photo re-encode. A library pick, including one that is also
- * named image.jpg but still has Make, stays `library`.
+ * That is the WebKit Take Photo re-encode. A file that still has Make is `library`.
+ * Anything else is `unknown` — do not guess library.
  */
 export function inferPhotoProvenance(sourceName: string, exif: SurveyExif): PhotoProvenance {
   const base = sourceName.split(/[/\\]/).pop() ?? sourceName;
   if (/^image\.jpe?g$/i.test(base) && !exif.Make) return 'camera-path';
-  return 'library';
+  if (exif.Make) return 'library';
+  return 'unknown';
 }
 
-/** Make|Model|LensModel|FocalLength|decoded-or-EXIF pixel size. */
+/** True for a 1× main-camera equivalent (about 24–26 mm). 0.5×, 2×, and Pro 28/35 mm crops are not. */
+export function isOneXEquivalent(focalLengthIn35mm: number | undefined): boolean {
+  if (focalLengthIn35mm == null || !Number.isFinite(focalLengthIn35mm)) return false;
+  return focalLengthIn35mm >= 23 && focalLengthIn35mm <= 27;
+}
+
+export function orientationSwapsAxes(orientation: number | undefined): boolean {
+  return orientation != null && orientation >= 5 && orientation <= 8;
+}
+
+/**
+ * Make|Model|LensModel|FocalLength|FocalLengthIn35mmFilm|sensor pixel size.
+ * Pixel size is the sensor orientation (EXIF PixelX/Y), not the upright preview.
+ */
 export function calibrationKeyFor(
   exif: SurveyExif,
   pixels?: { fullWidth?: number; fullHeight?: number },
 ): string {
-  const w = exif.PixelXDimension ?? pixels?.fullWidth;
-  const h = exif.PixelYDimension ?? pixels?.fullHeight;
+  let w = exif.PixelXDimension;
+  let h = exif.PixelYDimension;
+  if ((w == null || h == null) && pixels?.fullWidth && pixels.fullHeight) {
+    if (orientationSwapsAxes(exif.Orientation)) {
+      w = pixels.fullHeight;
+      h = pixels.fullWidth;
+    } else {
+      w = pixels.fullWidth;
+      h = pixels.fullHeight;
+    }
+  }
   const size = w && h ? `${Math.round(w)}x${Math.round(h)}` : '';
   const focal = exif.FocalLength != null ? String(exif.FocalLength) : '';
-  return [exif.Make ?? '', exif.Model ?? '', exif.LensModel ?? '', focal, size].join('|');
+  const film = exif.FocalLengthIn35mmFilm != null ? String(exif.FocalLengthIn35mmFilm) : '';
+  return [exif.Make ?? '', exif.Model ?? '', exif.LensModel ?? '', focal, film, size].join('|');
 }
 
 const SESSION_SLACK_MS = 2 * 60 * 1000;
@@ -140,8 +172,14 @@ export function photoUsabilityNote(opts: {
   now?: string;
 }): string | undefined {
   const parts: string[] = [];
-  if (!opts.exif.LensModel || opts.exif.FocalLength == null) {
-    parts.push('Not usable for focal length.');
+  const lensMissing = !opts.exif.LensModel || opts.exif.FocalLength == null;
+  const oneX = isOneXEquivalent(opts.exif.FocalLengthIn35mmFilm);
+  if (lensMissing || !oneX) {
+    parts.push(
+      !lensMissing && opts.exif.FocalLengthIn35mmFilm != null
+        ? 'Not usable for focal length (not 1×).'
+        : 'Not usable for focal length.',
+    );
   }
   if (captureOutsideSession(opts.capturedAt, opts.sessionStartedAt, opts.sessionEndedAt, opts.now)) {
     parts.push('Not usable for timing.');
@@ -170,9 +208,18 @@ function captureOutsideSession(
   return false;
 }
 
-/** Map a click in the 640 px preview back to full-resolution pixel centres. */
+/**
+ * Map a stored click to upright full-resolution pixels.
+ * The click is fraction × preview size, measured from the pixel edge,
+ * so `full = previewPx / previewScale`. Subtract 0.5 only when a caller
+ * needs a pixel-centre index.
+ */
 export function previewPixelToFull(previewPx: number, previewScale: number): number {
-  return (previewPx + 0.5) / previewScale - 0.5;
+  return previewPx / previewScale;
+}
+
+export function previewPixelToFullCentre(previewPx: number, previewScale: number): number {
+  return previewPx / previewScale - 0.5;
 }
 
 export const DNG_REJECTION =
@@ -250,7 +297,8 @@ export async function inspectOriginalFile(
   if (dng) throw new Error(dng);
   const hash = quickXorHash(bytes);
   const exif = await readSurveyExif(bytes);
-  const makerNote = readAppleMakerNote(bytes);
+  const noteBytes = await readMakerNoteBytes(bytes);
+  const makerNote = readAppleMakerNote(noteBytes ?? bytes);
   const capturedAt = exifCapturedAtIso(exif);
   const provenance = inferPhotoProvenance(name, exif);
   const fileName = originalPhotoFileName(meta.stationId, receivedAt, name, type);
