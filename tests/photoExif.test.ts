@@ -8,6 +8,7 @@ import {
   inferPhotoProvenance,
   inspectOriginalFile,
   migratePreviewPixels,
+  type LegacyPreviewPixels,
   photoUsabilityNote,
   previewPixelToFull,
   previewPixelToFullCentre,
@@ -181,14 +182,15 @@ describe('survey EXIF', () => {
 
   it('relabels a 7a4e268 +0.5 row and leaves the stored click where it was', () => {
     const scale = 640 / 4032;
-    const migrated = migratePreviewPixels({
+    const legacy: LegacyPreviewPixels = {
       fullWidth: 4032,
       fullHeight: 3024,
       previewWidth: 640,
       previewHeight: 480,
       previewScale: scale,
       pixelCentre: '+0.5',
-    });
+    };
+    const migrated = migratePreviewPixels(legacy);
     expect(migrated?.clickMap).toBe('p/scale');
     expect(migrated?.clickMapMigratedFrom).toBe('+0.5');
     expect(migrated?.pixelCentre).toBeUndefined();

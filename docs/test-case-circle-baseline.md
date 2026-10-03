@@ -42,6 +42,8 @@ npm run test:field-circle
 **Skips (exit 0)** when `garden.json` is absent — CI stays green until the fixture arrives.  
 When present, the script loads JSON and asserts baseline + circle-capable points exist (expand assertions once fixture is real).
 
+The fixture records `fxShared: false` (each photo keeps its own focal length). A pass or fail of the circle needs that flag false **and** **STN03**. `fxShared: true` is not graded. A capture that names STN01 and STN02 only is reported and not graded. Shared `fx` is a later change; the raw tapes and clicks stay re-solvable. Branch index 0 is +Y of BAS01→BAS02; the peg side is index 1.
+
 ## Related
 
 - [testing-guide.md](../README.md) / Project store testing-guide § Field fixture — circle vs baseline

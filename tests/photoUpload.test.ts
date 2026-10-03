@@ -424,7 +424,7 @@ describe('drainPhotoQueue', () => {
           previewHeight: 480,
           previewScale: scale,
           pixelCentre: '+0.5',
-        } as PhotoQueueRecord['pixels'],
+        } as unknown as PhotoQueueRecord['pixels'],
       },
     ]);
     expect(migrated?.pixels?.clickMap).toBe('p/scale');
