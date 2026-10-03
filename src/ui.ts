@@ -16,6 +16,7 @@ import { renderPlanSvg } from './planSvg';
 import { renderTagsPrintHtml, triggerPrint } from './tagsPrint';
 import {
   acquireGraphToken,
+  acquireGraphTokenSilent,
   isSignedIn,
   signIn,
   signOut,
@@ -96,6 +97,7 @@ import {
 } from './layers';
 import { GEOMETRY_CHOICES, placeholderThumb, type GeometryType, type PhotoClick } from './model';
 import { imageNaturalSize, suggestTagBlobs, type TagSuggestion } from './tagSuggest';
+import { dngRejectionMessage, type PreviewPixelMap } from './photoOriginal';
 import {
   kickPhotoUploads,
   listQueuedPhotos,
@@ -208,10 +210,20 @@ function bumpPointUiScale(delta: number): void {
 }
 
 /**
- * Survey photos are the file the system camera or photo library returns.
- * `capture=environment` is the shutter path. Library omits `capture` so iOS
- * can hand back a Photos original. The getUserMedia view is aiming only.
+ * Survey photos are the file the system picker returns. We do not re-encode that Blob.
+ *
+ * iOS Safari (WebKit WKFileUploadPanel, main 7fc2aaf): Take Photo
+ * (`capture=environment`) uses UIImageJPEGRepresentation(image, 0.8) and the
+ * name image.jpg. That drops Make, Model, LensModel, FocalLength,
+ * DateTimeOriginal, GPS and MakerNote. Library uses PHPicker Compatible mode
+ * (a converted JPEG) unless PhotoPickerPrefersOriginalImageFormat is set, and
+ * it defaults to false. Actual Size is offered via _setAllowsDownscaling:YES.
+ * WebKit bug 207088 comments 24–25 say EXIF is kept after that conversion;
+ * that is a user report only. Shoot in Camera.app and pick Library at Actual Size.
+ * The getUserMedia view is aiming only.
  */
+/** Set when a background upload needs a tap before it may redirect. */
+let photoUploadNeedsSignIn = false;
 let systemCameraInput: HTMLInputElement | null = null;
 let libraryPhotoInput: HTMLInputElement | null = null;
 let cameraOverlay: HTMLElement | null = null;
@@ -263,9 +275,12 @@ function stopInAppCamera(): void {
 
 /**
  * Live view is an aiming preview. It does not store a frame: a canvas grab has
- * no EXIF and is not the camera file. The shutter opens the system camera;
- * Library opens the photo picker. Both deliver a File we keep byte-for-byte.
+ * no EXIF and is not the camera file. Take photo opens the system camera sheet
+ * (aim-only / camera-path, no lens data). Library opens the photo picker.
+ * The File is kept byte-for-byte, whatever the picker actually delivered.
  */
+const SURVEY_PHOTO_NOTE =
+  'Aiming preview only. For a survey photo, shoot in Camera.app (12 MP, HEIF Max and ProRAW off, location off) and pick it from Library at Actual Size. Take photo is aim-only / camera-path (no lens data).';
 async function openAimingPreview(
   onSystemCamera: () => void,
   onLibrary: () => void,
@@ -322,13 +337,12 @@ async function openAimingPreview(
   const note = document.createElement('p');
   note.className = 'camera-overlay__note';
   note.setAttribute('data-testid', 'camera-aim-note');
-  note.textContent =
-    'Aiming preview only. Take photo stores the camera file. Library stores a photo already on this phone.';
+  note.textContent = SURVEY_PHOTO_NOTE;
 
   const shutter = document.createElement('button');
   shutter.type = 'button';
   shutter.className = 'camera-overlay__shutter';
-  shutter.setAttribute('aria-label', 'Take photo');
+  shutter.setAttribute('aria-label', 'Take photo — aim-only / camera-path (no lens data)');
   shutter.setAttribute('data-testid', 'camera-shutter');
   shutter.addEventListener('click', () => {
     stopInAppCamera();
@@ -371,8 +385,7 @@ function showCameraFallbackSheet(onSystemCamera: () => void, onLibrary: () => vo
 
   const msg = document.createElement('p');
   msg.className = 'camera-fallback__msg';
-  msg.textContent =
-    'Aiming preview unavailable. Take photo uses the system camera. Library picks an existing photo. The file is stored as delivered.';
+  msg.textContent = SURVEY_PHOTO_NOTE;
 
   const row = document.createElement('div');
   row.className = 'camera-fallback__row';
@@ -381,6 +394,8 @@ function showCameraFallbackSheet(onSystemCamera: () => void, onLibrary: () => vo
   pick.type = 'button';
   pick.className = 'btn btn--suggested';
   pick.textContent = 'Take photo';
+  pick.title = 'aim-only / camera-path (no lens data)';
+  pick.setAttribute('aria-label', 'Take photo — aim-only / camera-path (no lens data)');
   pick.setAttribute('data-testid', 'camera-fallback-photo');
   pick.addEventListener('click', () => {
     sheet.remove();
@@ -434,15 +449,20 @@ function launchAgainPhotoCamera(pointId: string): void {
 
 async function handleNewPointCapture(file: File): Promise<void> {
   try {
-    const thumb = await displayPreviewDataUrl(file);
-    await applyNewPointThumb(thumb, file);
+    if (await rejectIfDng(file)) return;
+    const preview = await buildDisplayPreview(file);
+    await applyNewPointThumb(preview.dataUrl, file, preview.pixels);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not read photo.';
     surfaceFail(msg, 'photo');
   }
 }
 
-async function applyNewPointThumb(thumb: string, original?: File): Promise<void> {
+async function applyNewPointThumb(
+  thumb: string,
+  original?: File,
+  pixels?: PreviewPixelMap,
+): Promise<void> {
   try {
     // Ensure + Point dialog / ADD_POINT mode is active before placing.
     if (state.pointDialog !== 'add') {
@@ -495,7 +515,7 @@ async function applyNewPointThumb(thumb: string, original?: File): Promise<void>
       pendingPointThumb: null,
     });
     speakCoachLine(result.doc.session.lastAction ?? 'Point added.', result.doc.session.speakSteps);
-    if (original) await queueCapturedOriginal(original);
+    if (original) await queueCapturedOriginal(original, pixels);
     if (photoId) void openPhotoMark(photoId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not use photo.';
@@ -505,15 +525,21 @@ async function applyNewPointThumb(thumb: string, original?: File): Promise<void>
 
 async function handleAgainPhotoCapture(pointId: string, file: File): Promise<void> {
   try {
-    const thumb = await displayPreviewDataUrl(file);
-    await applyAgainPhotoThumb(pointId, thumb, file);
+    if (await rejectIfDng(file)) return;
+    const preview = await buildDisplayPreview(file);
+    await applyAgainPhotoThumb(pointId, preview.dataUrl, file, preview.pixels);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not read photo.';
     surfaceFail(msg, 'photo');
   }
 }
 
-async function applyAgainPhotoThumb(pointId: string, thumb: string, original?: File): Promise<void> {
+async function applyAgainPhotoThumb(
+  pointId: string,
+  thumb: string,
+  original?: File,
+  pixels?: PreviewPixelMap,
+): Promise<void> {
   try {
     let width: number | undefined;
     let height: number | undefined;
@@ -545,7 +571,7 @@ async function applyAgainPhotoThumb(pointId: string, thumb: string, original?: F
       result.doc.session.lastAction ?? `+ Photo on ${pointId}.`,
       result.doc.session.speakSteps,
     );
-    if (original) await queueCapturedOriginal(original);
+    if (original) await queueCapturedOriginal(original, pixels);
     if (photoId) void openPhotoMark(photoId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not use photo.';
@@ -555,43 +581,77 @@ async function applyAgainPhotoThumb(pointId: string, thumb: string, original?: F
 
 /** Display-only JPEG. The stored survey photo is the original File, queued separately. */
 async function displayPreviewDataUrl(file: File): Promise<string> {
+  return (await buildDisplayPreview(file)).dataUrl;
+}
+
+async function buildDisplayPreview(
+  file: File,
+): Promise<{ dataUrl: string; pixels?: PreviewPixelMap }> {
   try {
-    return await fileToThumbnailDataUrl(file, 640);
+    return await fileToPreview(file, 640);
   } catch {
-    return placeholderThumb('#1a5f7a');
+    return { dataUrl: placeholderThumb('#1a5f7a') };
   }
 }
 
-async function queueCapturedOriginal(file: File): Promise<void> {
+async function rejectIfDng(file: File): Promise<boolean> {
+  const message = dngRejectionMessage(new Uint8Array(await file.arrayBuffer()), file.name, file.type);
+  if (!message) return false;
+  surfaceFail(message, 'photo');
+  return true;
+}
+
+async function queueCapturedOriginal(file: File, pixels?: PreviewPixelMap): Promise<void> {
   const photoId = state.doc.session.selectedPhotoId;
-  const stationId =
-    state.doc.session.currentAddPointId ??
-    state.doc.photos.find((p) => p.id === photoId)?.addPointId;
-  if (!photoId || !stationId) return;
+  const photo = photoId ? state.doc.photos.find((p) => p.id === photoId) : undefined;
+  const stationId = photo?.addPointId;
+  if (!photoId || !photo || !stationId) {
+    surfaceFail('Photo was not tied to a station, so the original was not queued.', 'photo');
+    return;
+  }
   try {
     const observationId = state.doc.observations.find((o) => o.photoId === photoId)?.id;
+    const setup = state.doc.setups.find((s) => s.id === photo.setupId);
     const draft = await rememberOriginalPhoto(file, {
       name: file.name,
       type: file.type,
       photoId,
       stationId,
       observationId,
+      pixels,
+      sessionStartedAt: setup?.startedAt,
+      sessionEndedAt: setup?.endedAt,
     });
-    applyPhotoUploadStatus({
-      photoId,
-      status: 'queued',
-      fileName: draft.fileName,
-      size: draft.size,
-      quickXorHash: draft.quickXorHash,
-      contentType: draft.contentType,
-      capturedAt: draft.capturedAt,
-      exifDateTimeOriginal: draft.exif.DateTimeOriginal,
-    });
+    applyPhotoUploadStatus(statusFromDraft(photoId, draft));
     kickPhotoUploads();
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not queue the original photo.';
     surfaceFail(msg, 'photo');
   }
+}
+
+function statusFromDraft(photoId: string, draft: Awaited<ReturnType<typeof rememberOriginalPhoto>>): PhotoStatusUpdate {
+  return {
+    photoId,
+    status: 'queued',
+    fileName: draft.fileName,
+    size: draft.size,
+    quickXorHash: draft.quickXorHash,
+    sha256: draft.sha256,
+    contentType: draft.contentType,
+    receivedAt: draft.receivedAt,
+    capturedAt: draft.capturedAt,
+    provenance: draft.provenance,
+    calibrationKey: draft.calibrationKey,
+    exifDateTimeOriginal: draft.exif.DateTimeOriginal,
+    usabilityNote: draft.usabilityNote,
+    fullWidth: draft.pixels?.fullWidth,
+    fullHeight: draft.pixels?.fullHeight,
+    previewWidth: draft.pixels?.previewWidth,
+    previewHeight: draft.pixels?.previewHeight,
+    previewScale: draft.pixels?.previewScale,
+    pixelCentre: draft.pixels?.pixelCentre,
+  };
 }
 
 function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
@@ -604,8 +664,19 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
         fileName: update.fileName,
         size: update.size,
         quickXorHash: update.quickXorHash,
+        sha256: update.sha256 ?? p.originalFile?.sha256,
         contentType: update.contentType,
-        capturedAt: update.capturedAt,
+        receivedAt: update.receivedAt || p.originalFile?.receivedAt,
+        capturedAt: update.capturedAt ?? p.originalFile?.capturedAt,
+        provenance: update.provenance ?? p.originalFile?.provenance,
+        calibrationKey: update.calibrationKey ?? p.originalFile?.calibrationKey,
+        fullWidth: update.fullWidth ?? p.originalFile?.fullWidth,
+        fullHeight: update.fullHeight ?? p.originalFile?.fullHeight,
+        previewWidth: update.previewWidth ?? p.originalFile?.previewWidth,
+        previewHeight: update.previewHeight ?? p.originalFile?.previewHeight,
+        previewScale: update.previewScale ?? p.originalFile?.previewScale,
+        pixelCentre: update.pixelCentre ?? p.originalFile?.pixelCentre,
+        usabilityNote: update.usabilityNote ?? p.originalFile?.usabilityNote,
         uploadStatus: update.status,
         uploadError: update.error,
       },
@@ -663,8 +734,19 @@ async function hydratePhotoUploadStatus(): Promise<void> {
           fileName: rec.fileName,
           size: rec.size,
           quickXorHash: rec.quickXorHash,
+          sha256: rec.sha256,
           contentType: rec.contentType,
-          capturedAt: rec.capturedAt,
+          receivedAt: rec.receivedAt || rec.capturedAt,
+          capturedAt: rec.receivedAt ? rec.capturedAt : undefined,
+          provenance: rec.provenance,
+          calibrationKey: rec.calibrationKey,
+          fullWidth: rec.pixels?.fullWidth,
+          fullHeight: rec.pixels?.fullHeight,
+          previewWidth: rec.pixels?.previewWidth,
+          previewHeight: rec.pixels?.previewHeight,
+          previewScale: rec.pixels?.previewScale,
+          pixelCentre: rec.pixels?.pixelCentre,
+          usabilityNote: rec.usabilityNote,
           uploadStatus: rec.status === 'uploading' ? 'queued' : rec.status,
           uploadError: rec.lastError,
         },
@@ -1227,9 +1309,19 @@ export function mount(root: HTMLElement): void {
   render();
   startPhotoUploadLoop({
     getToken: async () => {
-      const auth = await acquireGraphToken();
-      return auth.ok ? auth.token : null;
+      const auth = await acquireGraphTokenSilent();
+      if (auth.ok) {
+        notePhotoSignIn(false);
+        return auth.token;
+      }
+      if (auth.interactionRequired) {
+        notePhotoSignIn(true);
+        return { token: null, interactionRequired: true };
+      }
+      return null;
     },
+    onInteractionRequired: () => notePhotoSignIn(true),
+    onStorageWarning: (message) => setCloudMessage(message),
     onStatus: applyPhotoUploadStatus,
   });
   void hydratePhotoUploadStatus();
@@ -1940,6 +2032,10 @@ function onShellClick(e: Event): void {
     void onSignIn();
     return;
   }
+  if (cmd === 'photo-sign-in-upload') {
+    void onPhotoSignInToUpload();
+    return;
+  }
   if (cmd === 'ms-signout') {
     void onSignOut();
     return;
@@ -1973,6 +2069,37 @@ function onShellClick(e: Event): void {
     }
     return;
   }
+}
+
+function notePhotoSignIn(needed: boolean): void {
+  if (photoUploadNeedsSignIn === needed) {
+    if (needed) setCloudMessage('Sign in to upload.');
+    return;
+  }
+  photoUploadNeedsSignIn = needed;
+  if (needed) setCloudMessage('Sign in to upload.');
+  else setCloudMessage(getCloudStatus().message);
+}
+
+async function onPhotoSignInToUpload(): Promise<void> {
+  setCloudMessage('Opening Microsoft sign-in to upload photos…');
+  if (!isSignedIn()) {
+    const result = await signIn();
+    if (!result.ok) {
+      photoUploadNeedsSignIn = true;
+      setCloudMessage(result.error ?? 'Sign in to upload.');
+    }
+    return;
+  }
+  const auth = await acquireGraphToken();
+  if (auth.ok) {
+    photoUploadNeedsSignIn = false;
+    setCloudMessage('Signed in. Uploading photos…');
+    kickPhotoUploads();
+    return;
+  }
+  photoUploadNeedsSignIn = true;
+  setCloudMessage('Sign in to upload.');
 }
 
 async function onSignIn(): Promise<void> {
@@ -2323,12 +2450,14 @@ function buildPhotoMarkOverlay(doc: GardenDocument): HTMLElement {
   overlay.appendChild(actions);
 
   const uploadWord = photoUploadWord(photo);
+  const usability = photo?.originalFile?.usabilityNote;
   overlay.appendChild(
     el('p', {
       className: 'photo-mark__foot',
       text: uploadWord
-        ? `Point = camera station when A+B confirmed. Upload ${uploadWord}.`
-        : 'Point = camera station when A+B confirmed. A separate object mark needs another sighting or a tape distance.',
+        ? `Point = camera station when A+B confirmed. Upload ${uploadWord}.${usability ? ` ${usability}` : ''}`
+        : `Point = camera station when A+B confirmed. A separate object mark needs another sighting or a tape distance.${usability ? ` ${usability}` : ''}`,
+      attrs: usability ? { 'data-testid': 'photo-usability' } : undefined,
     }),
   );
 
@@ -2907,8 +3036,13 @@ function errorLogSectionStatus(): {
 /**
  * Display-only preview. Never written as the stored survey photo.
  * The original File/Blob is queued separately and uploaded unchanged.
+ * Clicks are stored in this preview. Map them back with the +0.5 pixel-centre
+ * convention: full = (previewPx + 0.5) / scale - 0.5.
  */
-async function fileToThumbnailDataUrl(file: File, maxEdge = 640): Promise<string> {
+async function fileToPreview(
+  file: File,
+  maxEdge = 640,
+): Promise<{ dataUrl: string; pixels: PreviewPixelMap }> {
   const bitmap = await createImageBitmap(file);
   try {
     const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
@@ -2920,7 +3054,17 @@ async function fileToThumbnailDataUrl(file: File, maxEdge = 640): Promise<string
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas unavailable');
     ctx.drawImage(bitmap, 0, 0, w, h);
-    return canvas.toDataURL('image/jpeg', 0.7);
+    return {
+      dataUrl: canvas.toDataURL('image/jpeg', 0.7),
+      pixels: {
+        fullWidth: bitmap.width,
+        fullHeight: bitmap.height,
+        previewWidth: w,
+        previewHeight: h,
+        previewScale: scale,
+        pixelCentre: '+0.5',
+      },
+    };
   } finally {
     bitmap.close();
   }
@@ -3320,6 +3464,15 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
         className: 'point-dialog__mark-hint',
         text: `Upload ${uploadWord}.`,
         attrs: { 'data-testid': 'photo-upload-status' },
+      }),
+    );
+  }
+  if (selectedPhoto?.originalFile?.usabilityNote) {
+    photosSection.appendChild(
+      el('p', {
+        className: 'point-dialog__mark-hint',
+        text: selectedPhoto.originalFile.usabilityNote,
+        attrs: { 'data-testid': 'photo-usability' },
       }),
     );
   }
@@ -3799,7 +3952,10 @@ function buildMenuDrawer(
     ['Layer', 'Grouping plane for items (e.g. walkway, bed).'],
     ['Item', 'Named thing you measure points on.'],
     ['Geometry', 'Shape hint for the item (square, circle, …).'],
-    ['Photo', 'System camera or photo library. The original file is stored and uploaded. The live view is an aiming preview.'],
+    [
+      'Photo',
+      'Survey photos: shoot in Camera.app (12 MP, HEIF Max and ProRAW off, location off), then Library at Actual Size. Take photo is aim-only / camera-path (no lens data). The original file is queued for upload. The live view is an aiming preview.',
+    ],
     ['Pinch / pan', 'Zooms and pans the garden plan only; dialogs and ☰ stay fixed.'],
     ['Menu', 'Idle mode when no workflow dialog is open.'],
   ];
@@ -3994,6 +4150,20 @@ function buildCloudPanel(): HTMLElement {
   }
 
   const row = el('div', { className: 'cloud-status__actions' });
+  if (photoUploadNeedsSignIn) {
+    row.appendChild(
+      el('button', {
+        className: 'btn btn--suggested',
+        text: 'Sign in to upload',
+        attrs: {
+          type: 'button',
+          'data-cmd': 'photo-sign-in-upload',
+          'data-testid': 'photo-sign-in-upload',
+          disabled: cloud.busy ? 'true' : undefined,
+        },
+      }),
+    );
+  }
   if (!cloud.signedIn) {
     row.appendChild(
       el('button', {

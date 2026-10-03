@@ -3,8 +3,10 @@
  * Records survive reload and tab kill. A killed upload is put back to `queued`.
  */
 
-import type { SurveyExif } from './photoExif';
+import type { AppleMakerNote, SurveyExif } from './photoExif';
 import type { PhotoUploadStatus } from './model';
+import type { PhotoProvenance } from './photosManifest';
+import type { PreviewPixelMap } from './photoOriginal';
 
 export const PHOTO_DB_NAME = 'garden-survey-photos';
 export const PHOTO_STORE = 'queue';
@@ -18,12 +20,23 @@ export interface PhotoQueueRecord {
   blob: Blob;
   size: number;
   contentType: string;
-  capturedAt: string;
+  /** Wall clock when the app received the file. */
+  receivedAt: string;
+  /** EXIF capture time when present. Older rows stored the receive time here and omit receivedAt — see receivedAtOf. */
+  capturedAt?: string;
+  provenance?: PhotoProvenance;
+  sha256?: string;
+  calibrationKey?: string;
+  makerNote?: AppleMakerNote;
+  pixels?: PreviewPixelMap;
+  usabilityNote?: string;
   quickXorHash: string;
   exif: SurveyExif;
   status: PhotoUploadStatus;
   attempts: number;
   lastError?: string;
+  /** Hash mismatch or a name that stayed taken. Do not retry. */
+  permanent?: boolean;
   /** True once OneDrive has this exact file (size + quickXorHash). */
   bytesOnDrive: boolean;
   updatedAt: string;

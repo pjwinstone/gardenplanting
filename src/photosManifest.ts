@@ -1,9 +1,23 @@
 /**
  * photos/manifest.json — one entry per original camera file.
  * Writes use If-Match / If-None-Match so two devices don't drop each other's photos.
+ *
+ * Graph GET …:/content answers 302 to a preauthenticated download, and a browser
+ * fetch follows that redirect without the ETag. Read item metadata
+ * (`eTag` and `@microsoft.graph.downloadUrl`) and fetch the download URL.
+ * The metadata eTag is the If-Match value.
  */
 
-import type { SurveyExif } from './photoExif';
+import type { AppleMakerNote, SurveyExif } from './photoExif';
+
+/** `image.jpg` from the system camera sheet, with no Make tag. Otherwise a library pick. */
+export type PhotoProvenance = 'camera-path' | 'library';
+
+/**
+ * Clicks are stored in the display preview's pixel space.
+ * `full = (previewPx + 0.5) / previewScale - 0.5`.
+ */
+export const PIXEL_CENTRE = '+0.5' as const;
 
 export interface ManifestPhoto {
   fileName: string;
@@ -12,8 +26,23 @@ export interface ManifestPhoto {
   observationId?: string;
   size: number;
   quickXorHash: string;
-  capturedAt: string;
+  sha256: string;
+  /** Wall clock when this app received the file. */
+  receivedAt: string;
+  /** EXIF DateTimeOriginal + SubSec + offset, when the file has one. */
+  capturedAt?: string;
+  provenance: PhotoProvenance;
   exif: SurveyExif;
+  makerNote?: AppleMakerNote;
+  /** Make|Model|LensModel|FocalLength|pixel size. */
+  calibrationKey: string;
+  /** Decoded bitmap size (`createImageBitmap`). */
+  fullWidth?: number;
+  fullHeight?: number;
+  previewWidth?: number;
+  previewHeight?: number;
+  previewScale?: number;
+  pixelCentre: typeof PIXEL_CENTRE;
 }
 
 export interface PhotosManifest {
@@ -77,6 +106,10 @@ export async function upsertManifestPhoto(opts: {
   return { ok: false, error: lastError };
 }
 
+/**
+ * Item metadata, then the preauthenticated download URL.
+ * A GET of `:/content` is not used: Graph responds 302 and the ETag is lost.
+ */
 async function readManifest(
   client: GraphRequest,
   manifestPath: string,
@@ -85,15 +118,38 @@ async function readManifest(
   | { ok: false; missing: true }
   | { ok: false; missing?: false; error: string }
 > {
-  const res = await client.fetch(graphItemUrl(manifestPath, ':/content'), {
+  const select = encodeURIComponent('eTag,@microsoft.graph.downloadUrl');
+  const metaUrl = `${graphItemUrl(manifestPath)}?$select=${select}`;
+  const res = await client.fetch(metaUrl, {
     method: 'GET',
     headers: { Authorization: `Bearer ${client.token}` },
   });
   if (res.status === 404) return { ok: false, missing: true };
   if (!res.ok) return { ok: false, error: await graphError(res) };
-  const etag = res.headers.get('etag') || res.headers.get('ETag') || '';
+
+  let meta: { eTag?: unknown; '@microsoft.graph.downloadUrl'?: unknown };
   try {
-    const body = (await res.json()) as PhotosManifest;
+    meta = (await res.json()) as { eTag?: unknown; '@microsoft.graph.downloadUrl'?: unknown };
+  } catch {
+    return { ok: false, error: 'Could not read photos manifest metadata.' };
+  }
+  const etag = typeof meta.eTag === 'string' ? meta.eTag : '';
+  const downloadUrl =
+    typeof meta['@microsoft.graph.downloadUrl'] === 'string' ? meta['@microsoft.graph.downloadUrl'] : '';
+  if (!etag) {
+    return {
+      ok: false,
+      error: 'photos/manifest.json has no eTag, so it was not overwritten.',
+    };
+  }
+  if (!downloadUrl) {
+    return { ok: false, error: 'photos/manifest.json has no download URL.' };
+  }
+
+  const bodyRes = await client.fetch(downloadUrl, { method: 'GET' });
+  if (!bodyRes.ok) return { ok: false, error: await graphError(bodyRes) };
+  try {
+    const body = (await bodyRes.json()) as PhotosManifest;
     const manifest: PhotosManifest = {
       version: 1,
       updatedAt: typeof body?.updatedAt === 'string' ? body.updatedAt : '',
@@ -127,8 +183,19 @@ async function writeManifest(
     return { ok: false, conflict: true, error: 'Manifest changed while saving. Retrying.' };
   }
   if (!res.ok) return { ok: false, error: await graphError(res) };
-  const nextEtag = res.headers.get('etag') || res.headers.get('ETag') || etag || '';
+  const nextEtag = (await etagFromPut(res)) || etag || '';
   return { ok: true, etag: nextEtag };
+}
+
+async function etagFromPut(res: Response): Promise<string> {
+  const header = res.headers.get('etag') || res.headers.get('ETag') || '';
+  if (header) return header;
+  try {
+    const body = (await res.json()) as { eTag?: unknown };
+    return typeof body?.eTag === 'string' ? body.eTag : '';
+  } catch {
+    return '';
+  }
 }
 
 export async function graphError(res: Response): Promise<string> {

@@ -10,11 +10,13 @@
 import { photosFolderPath, photosManifestPath, ONEDRIVE_FOLDER } from './cloudConfig';
 import type { PhotoQueueRecord } from './photoQueue';
 import {
+  PIXEL_CENTRE,
   graphError,
   graphItemUrl,
   upsertManifestPhoto,
   type GraphRequest,
   type ManifestPhoto,
+  type PhotoProvenance,
 } from './photosManifest';
 
 /** Graph simple-upload limit. */
@@ -49,6 +51,11 @@ export function verifyRemoteFile(
 }
 
 export function manifestEntryFromRecord(record: PhotoQueueRecord): ManifestPhoto {
+  const receivedAt = record.receivedAt || record.capturedAt || '';
+  // New rows set receivedAt, and capturedAt is the EXIF time (or absent).
+  // Older rows stored the receive time in capturedAt and have no receivedAt.
+  const capturedAt = record.receivedAt ? record.capturedAt : undefined;
+  const provenance: PhotoProvenance = record.provenance ?? 'library';
   return {
     fileName: record.fileName,
     photoId: record.photoId,
@@ -56,8 +63,19 @@ export function manifestEntryFromRecord(record: PhotoQueueRecord): ManifestPhoto
     observationId: record.observationId,
     size: record.size,
     quickXorHash: record.quickXorHash,
-    capturedAt: record.capturedAt,
+    sha256: record.sha256 ?? '',
+    receivedAt,
+    capturedAt: capturedAt || undefined,
+    provenance,
     exif: record.exif,
+    makerNote: record.makerNote,
+    calibrationKey: record.calibrationKey ?? '',
+    fullWidth: record.pixels?.fullWidth,
+    fullHeight: record.pixels?.fullHeight,
+    previewWidth: record.pixels?.previewWidth,
+    previewHeight: record.pixels?.previewHeight,
+    previewScale: record.pixels?.previewScale,
+    pixelCentre: PIXEL_CENTRE,
   };
 }
 
@@ -74,7 +92,10 @@ export async function uploadAndVerifyOriginal(opts: {
   simpleUploadMaxBytes?: number;
   /** Test hook. Production chunks are multiples of 320 KiB. */
   chunkBytes?: number;
-}): Promise<{ ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string }> {
+}): Promise<
+  | { ok: true; remote: RemoteFileInfo; existed: boolean }
+  | { ok: false; error: string; permanent?: boolean; conflict?: boolean }
+> {
   const folder = await ensurePhotosFolder(opts.client);
   if (!folder.ok) return folder;
 
@@ -90,7 +111,14 @@ export async function uploadAndVerifyOriginal(opts: {
     { size: opts.bytes.byteLength, quickXorHash: opts.localHash },
     uploaded.remote,
   );
-  if (!check.ok) return { ok: false, error: check.reason };
+  if (!check.ok) {
+    return {
+      ok: false,
+      error: check.reason,
+      permanent: true,
+      conflict: uploaded.existed,
+    };
+  }
   return { ok: true, remote: uploaded.remote, existed: uploaded.existed };
 }
 

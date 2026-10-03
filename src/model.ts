@@ -155,8 +155,23 @@ export interface PhotoOriginalFile {
   fileName: string;
   size: number;
   quickXorHash: string;
+  sha256?: string;
   contentType?: string;
+  /** Wall clock when the app received the file. */
+  receivedAt?: string;
+  /** EXIF DateTimeOriginal + SubSec + offset, when present. */
   capturedAt?: string;
+  provenance?: 'camera-path' | 'library';
+  calibrationKey?: string;
+  fullWidth?: number;
+  fullHeight?: number;
+  previewWidth?: number;
+  previewHeight?: number;
+  previewScale?: number;
+  /** full = (previewPx + 0.5) / previewScale - 0.5 */
+  pixelCentre?: '+0.5';
+  /** Missing lens data, or capture time outside the station setup. */
+  usabilityNote?: string;
   uploadStatus?: PhotoUploadStatus;
   uploadError?: string;
 }

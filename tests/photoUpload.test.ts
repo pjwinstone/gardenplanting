@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { quickXorHash } from '../src/quickXorHash';
 import { createMemoryPhotoQueue, type PhotoQueueRecord } from '../src/photoQueue';
 import { SIMPLE_UPLOAD_MAX_BYTES, uploadAndVerifyOriginal } from '../src/photoUpload';
-import { drainPhotoQueue } from '../src/photoSync';
+import { PHOTO_UPLOAD_MAX_ATTEMPTS, drainPhotoQueue, photoUploadBackoffMs } from '../src/photoSync';
 import type { GraphRequest } from '../src/photosManifest';
 
 const bytes = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 11, 12]);
@@ -48,7 +48,32 @@ describe('uploadAndVerifyOriginal', () => {
       localHash: hash,
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/quickXorHash/);
+    if (!result.ok) {
+      expect(result.error).toMatch(/quickXorHash/);
+      expect(result.permanent).toBe(true);
+      expect(result.conflict).toBe(false);
+    }
+  });
+
+  it('marks a 409 whose hash does not match as a name conflict', async () => {
+    const client = scripted([
+      () => json(409, {}),
+      () => json(409, {}),
+      () => json(409, { error: { code: 'nameAlreadyExists' } }),
+      () => json(200, item(bytes.byteLength, 'other-file')),
+    ]);
+    const result = await uploadAndVerifyOriginal({
+      client,
+      bytes,
+      fileName: 'P01_x.jpg',
+      contentType: 'image/jpeg',
+      localHash: hash,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.permanent).toBe(true);
+      expect(result.conflict).toBe(true);
+    }
   });
 
   it('accepts a conflict when the existing item matches', async () => {
@@ -134,7 +159,86 @@ describe('drainPhotoQueue', () => {
     expect(await queue.list()).toEqual([]);
     expect(manifestBody).toContain(record.fileName);
     expect(manifestBody).toContain('"stationId": "P01"');
+    expect(manifestBody).toContain('"receivedAt"');
+    expect(manifestBody).toContain('"+0.5"');
     expect(manifestBody).toContain(hash);
+  });
+
+  it('does not ask for a token when the queue is empty or every failure is permanent', async () => {
+    const empty = createMemoryPhotoQueue();
+    let tokens = 0;
+    const getToken = async () => {
+      tokens += 1;
+      return 'tok';
+    };
+    expect(await drainPhotoQueue({ queue: empty, getToken, onStatus: () => undefined })).toBe(0);
+    expect(tokens).toBe(0);
+
+    const capped = createMemoryPhotoQueue();
+    await capped.put({
+      ...queuedRecord(),
+      status: 'failed',
+      attempts: PHOTO_UPLOAD_MAX_ATTEMPTS,
+      permanent: true,
+      lastError: 'quickXorHash does not match the local file.',
+    });
+    expect(await drainPhotoQueue({ queue: capped, getToken, onStatus: () => undefined })).toBe(0);
+    expect(tokens).toBe(0);
+  });
+
+  it('leaves the queue untouched when sign-in interaction is required', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put(queuedRecord());
+    let taps = 0;
+    const failed = await drainPhotoQueue({
+      queue,
+      getToken: async () => ({ token: null, interactionRequired: true }),
+      onInteractionRequired: () => {
+        taps += 1;
+      },
+      onStatus: () => undefined,
+    });
+    expect(failed).toBe(0);
+    expect(taps).toBe(1);
+    const [left] = await queue.list();
+    expect(left?.status).toBe('queued');
+    expect(left?.attempts).toBe(0);
+  });
+
+  it('stops a hash mismatch instead of retrying the same name, and uploads a suffixed name', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put(queuedRecord());
+    const names: string[] = [];
+    const failed = await drainPhotoQueue({
+      queue,
+      getToken: async () => 'tok',
+      now: () => '2026-10-02T23:30:00.000Z',
+      onStatus: () => undefined,
+      fetchImpl: scripted([
+        () => json(409, {}),
+        () => json(409, {}),
+        (url) => {
+          names.push(url);
+          return json(409, { error: { code: 'nameAlreadyExists' } });
+        },
+        () => json(200, item(bytes.byteLength, 'different-hash')),
+        () => json(409, {}),
+        () => json(409, {}),
+        (url) => {
+          names.push(url);
+          return json(200, item(bytes.byteLength, hash));
+        },
+        () => json(404, {}),
+        () => json(200, { eTag: '"m1"' }),
+      ]).fetch,
+    });
+    expect(failed).toBe(0);
+    expect(names[0]).toContain('P01_20261002T232600123Z.jpg');
+    expect(names[1]).toContain('P01_20261002T232600123Z-2.jpg');
+    expect(await queue.list()).toEqual([]);
+    expect(photoUploadBackoffMs(1)).toBe(2000);
+    expect(photoUploadBackoffMs(2)).toBe(4000);
+    expect(photoUploadBackoffMs(8)).toBe(60_000);
   });
 
   it('keeps a failed upload for a later retry', async () => {
@@ -168,7 +272,19 @@ function queuedRecord(): PhotoQueueRecord {
     blob: new Blob([bytes], { type: 'image/jpeg' }),
     size: bytes.byteLength,
     contentType: 'image/jpeg',
-    capturedAt: '2026-10-02T23:26:00.123Z',
+    receivedAt: '2026-10-02T23:26:00.123Z',
+    capturedAt: '2026-10-02T23:26:00.123+01:00',
+    provenance: 'library',
+    sha256: 'abc',
+    calibrationKey: 'Apple|iPhone|||',
+    pixels: {
+      fullWidth: 4032,
+      fullHeight: 3024,
+      previewWidth: 640,
+      previewHeight: 480,
+      previewScale: 640 / 4032,
+      pixelCentre: '+0.5',
+    },
     quickXorHash: hash,
     exif: { Make: 'Apple', DateTimeOriginal: '2026:10:02 23:26:00' },
     status: 'queued',
