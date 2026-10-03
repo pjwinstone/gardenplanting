@@ -219,8 +219,12 @@ describe('applyRedirectOwedSave', () => {
       expect(outcome.preservedAs).toContain(CONFLICT_NAME);
       expect(outcome.message).toContain(CONFLICT_NAME);
       expect(outcome.message).toContain('/Garden Survey/');
+      expect(outcome.preservedRevision).toBe(gardenRevision(storage));
     }
-    expect(readOwedGardenSave(storage)).toBeNull();
+    // The UI clears the owed flag when it replaces the garden, in the same turn.
+    expect(readOwedGardenSave(storage)).not.toBeNull();
+    expect(readOwedGardenSave(storage)?.baseETag).toBe('"v1"');
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('');
   });
 
   it('Cancel at a 412 writes nothing further and adopts nothing', async () => {
@@ -946,7 +950,11 @@ describe('conflict copy stays current', () => {
     ]);
     expect(conflicts[1]?.body.name).toBe('Added during upload');
     expect(conflicts[1]?.body.points.map((point) => point.id)).toEqual(['HSE01', 'HSE02']);
-    expect(gardenIsDirty(storage)).toBe(false);
+    if (outcome.ok && !outcome.wrote) expect(outcome.preservedRevision).toBe(gardenRevision(storage));
+    // Dirty and the base eTag stay until the UI replaces the garden.
+    expect(gardenIsDirty(storage)).toBe(true);
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('');
+    expect(remote.events.some((event) => event.includes('manifest') || event.includes('deleted'))).toBe(false);
   });
 
   it('does not adopt when the garden is still changing after the conflict copy is retried', async () => {

@@ -250,7 +250,7 @@ const MAX_DELETED_PAGES = 50;
 
 /** Names in a drive folder, following `@odata.nextLink` past the first page. */
 async function listChildNames(client: GraphRequest, folderPath: string): Promise<string[]> {
-  const names: string[] = [];
+  const names = new Set<string>();
   let url: string | undefined = `${graphItemUrl(folderPath)}:/children?$select=name&$top=200`;
   const seen = new Set<string>();
   for (let page = 0; url && page < MAX_DELETED_PAGES; page++) {
@@ -268,12 +268,12 @@ async function listChildNames(client: GraphRequest, folderPath: string): Promise
       break;
     }
     for (const item of body.value ?? []) {
-      if (typeof item?.name === 'string' && item.name && !names.includes(item.name)) names.push(item.name);
+      if (typeof item?.name === 'string' && item.name) names.add(item.name);
     }
     const next = body['@odata.nextLink'];
     url = typeof next === 'string' && next ? next : undefined;
   }
-  return names;
+  return [...names];
 }
 
 async function writeManifest(

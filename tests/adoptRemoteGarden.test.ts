@@ -535,6 +535,85 @@ describe('adopt remote garden', () => {
       if (descriptor) Object.defineProperty(AbortSignal, 'timeout', descriptor);
     }
   });
+
+  it('keeps an edit made after the save lock resolves and before the garden is replaced', async () => {
+    vi.stubGlobal('window', { confirm: () => true, alert: () => {} });
+    const remoteBody = namedGarden('OneDrive copy');
+    let grants = 0;
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (
+          _name: string,
+          optionsOrCallback: { signal?: AbortSignal } | (() => Promise<unknown>),
+          maybeCallback?: () => Promise<unknown>,
+        ) => {
+          const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+          if (!callback) throw new Error('lock request needs a callback');
+          const result = await callback();
+          grants += 1;
+          // The Web Locks promise resolves in a later task. An edit here is the
+          // input that can land after settle returns and before adopt runs.
+          if (grants === 2) {
+            const edited = namedGarden('Edited after the lock');
+            edited.points = [
+              { id: 'HSE01', kind: 'HSE', label: 'Edited after the lock' },
+              { id: 'HSE02', kind: 'HSE', label: 'Added after the lock' },
+            ];
+            gardenCloudUiForTests.edit(edited);
+          }
+          return result;
+        },
+      },
+    });
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? 'GET';
+      if (method === 'POST') return new Response('', { status: 409 });
+      if (method === 'GET' && url.includes('$select=')) {
+        return new Response(
+          JSON.stringify({
+            eTag: '"v9"',
+            lastModifiedDateTime: remoteBody.updatedAt,
+            '@microsoft.graph.downloadUrl': 'https://download.example/garden',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.startsWith('https://download.example/garden')) {
+        return new Response(JSON.stringify(remoteBody), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (method === 'PUT') {
+        return new Response(JSON.stringify({ eTag: '"filed"' }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json', etag: '"filed"' },
+        });
+      }
+      return new Response(JSON.stringify({ error: { message: 'missing' } }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    const fileName = getGardenCloudFileName();
+    authFlag.signedIn = false;
+    gardenCloudUiForTests.edit(namedGarden('Before save'));
+    authFlag.signedIn = true;
+    rememberDriveETag('home-account', fileName, '"v1"');
+    await gardenCloudUiForTests.saveNow();
+
+    expect(grants).toBe(2);
+    expect(getState().doc.name).toBe('Edited after the lock');
+    expect(getState().doc.points.map((point) => point.id)).toEqual(['HSE01', 'HSE02']);
+    expect(gardenIsDirty()).toBe(true);
+    expect(gardenSaveIsOwed()).toBe(true);
+    expect(rememberedDriveETag('home-account', fileName)).toBe('"v1"');
+    expect(getCloudStatus().message).toBe(
+      'This browser changed while OneDrive was being adopted. Nothing was replaced. Tap Save to retry.',
+    );
+  });
 });
 
 function pointPhoto(id: string, addPointId: string, thumbnailDataUrl?: string): Photo {

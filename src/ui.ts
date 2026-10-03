@@ -1362,7 +1362,19 @@ function adoptRemoteGarden(
   eTag?: string,
   localOnlyPhotos: Photo[] = [],
   preservedAs?: string,
-): void {
+  preservedRevision?: number,
+): boolean {
+  // Web Locks resolve in a later task, so an edit can land after the lock
+  // returns and before this runs. The revision check, the dirty clear, the
+  // eTag store, and the replacement are one synchronous block. Nothing above
+  // has cleared dirty or stored this eTag.
+  if (preservedRevision !== undefined && gardenRevision() !== preservedRevision) {
+    noteOwedGardenSave(state.doc);
+    setCloudMessage(
+      'This browser changed while OneDrive was being adopted. Nothing was replaced. Tap Save to retry.',
+    );
+    return false;
+  }
   // In-flight saves that finish after this must not store their eTag or clear dirty.
   // Photo rows whose originals are still uploading stay in the conflict copy
   // (filed before adopt). This replace does not delete photos/manifest.json entries.
@@ -1370,10 +1382,12 @@ function adoptRemoteGarden(
   noteRemoteGardenApplied();
   const account = accountKey() ?? '';
   if (eTag) rememberDriveETag(account, fileName, eTag);
+  clearGardenSaveOwed();
   setGardenCloudFileName(fileName);
   notifyCloudPrefsChanged();
   setState({ doc, refuseMessage: null }, { fromRemote: true });
   offerReattachLocalPhotos(localOnlyPhotos, preservedAs, localPoints);
+  return true;
 }
 
 /**
@@ -1486,8 +1500,9 @@ export const gardenCloudUiForTests = {
     eTag?: string,
     localOnlyPhotos?: Photo[],
     preservedAs?: string,
-  ): void {
-    adoptRemoteGarden(doc, fileName, eTag, localOnlyPhotos, preservedAs);
+    preservedRevision?: number,
+  ): boolean {
+    return adoptRemoteGarden(doc, fileName, eTag, localOnlyPhotos, preservedAs, preservedRevision);
   },
   saveScheduled(): boolean {
     return cloudSaveTimer !== null;
@@ -1760,14 +1775,15 @@ async function executeGardenSave(job: PendingSave): Promise<void> {
     return;
   }
   if (result.ok && !result.wrote) {
-    clearGardenSaveOwed();
-    adoptRemoteGarden(
+    const replaced = adoptRemoteGarden(
       result.doc,
       result.fileName,
       result.eTag,
       result.localOnlyPhotos,
       result.preservedAs,
+      result.preservedRevision,
     );
+    if (!replaced) return;
     setCloudMessage(result.message);
     if (job.manual) void refreshGardenFileList();
     return;
@@ -1908,13 +1924,15 @@ async function restoreGardenAfterSignIn(): Promise<void> {
       return;
     }
     if (outcome.kind === 'kept-remote') {
-      adoptRemoteGarden(
+      const replaced = adoptRemoteGarden(
         outcome.doc,
         outcome.fileName,
         outcome.eTag,
         outcome.localOnlyPhotos,
         outcome.preservedAs,
+        outcome.preservedRevision,
       );
+      if (!replaced) return;
       setCloudMessage(outcome.message);
       return;
     }
@@ -2766,13 +2784,15 @@ async function runGardenLoad(target: string): Promise<void> {
 
 function applyLoadedGarden(decision: GardenReconcileResult, source: 'sign-in' | 'load'): void {
   if (decision.kind === 'adopted' || decision.kind === 'kept-remote') {
-    adoptRemoteGarden(
+    const replaced = adoptRemoteGarden(
       decision.doc,
       decision.fileName,
       decision.eTag,
       decision.kind === 'kept-remote' ? decision.localOnlyPhotos : [],
       decision.kind === 'kept-remote' ? decision.preservedAs : undefined,
+      decision.kind === 'kept-remote' ? decision.preservedRevision : undefined,
     );
+    if (!replaced) return;
     if (decision.kind === 'adopted') {
       const via = loadFallbackNote(decision);
       setCloudMessage(

@@ -83,6 +83,11 @@ export type GardenCommitResult =
       message: string;
       /** Photo rows in the filed local copy that the OneDrive garden does not have. */
       localOnlyPhotos: Photo[];
+      /**
+       * Revision of the filed copy. The garden is replaced only when this still
+       * matches, in the same turn as the dirty clear and the eTag store.
+       */
+      preservedRevision: number;
     }
   | {
       ok: false;
@@ -673,11 +678,16 @@ async function settleRemoteChoice(
 
   // Network I/O finishes before the conflict copy. An edit during this read is
   // still in the garden when the copy is built, so it is not dropped.
-  const deleted = await loadDeletedPhotoKeys({
-    client: { fetch: opts.fetchImpl ?? fetch, token: opts.token },
-    manifestPath: photosManifestPath(),
-    deletedFolderPath: deletedPhotosFolderPath(),
-  });
+  // No local-only photos means there is nothing to filter, so skip the round trip.
+  const beforeCopy = currentLocal(opts);
+  const deleted =
+    photosOnlyInLocal(beforeCopy.doc, again.doc).length === 0
+      ? { photoIds: [] as string[], fileNames: [] as string[] }
+      : await loadDeletedPhotoKeys({
+          client: { fetch: opts.fetchImpl ?? fetch, token: opts.token },
+          manifestPath: photosManifestPath(),
+          deletedFolderPath: deletedPhotosFolderPath(),
+        });
 
   let preserved = await preserveMatchingCopy(opts, fileName);
   if (!preserved.ok) return { kind: 'result', result: preserveFailure(preserved) };
@@ -712,9 +722,11 @@ function preserveFailure(preserved: { error: string; aborted?: boolean }): Garde
 }
 
 /**
- * Revision check, adopt, dirty clear, and eTag store. No await in this function:
- * an edit cannot land between the check and the adopt.
- * Returns null when the garden moved, so the caller files another copy or asks again.
+ * Build the kept-remote result when the filed copy is still current.
+ * Does not clear dirty or store the eTag: the Web Locks callback resolves in a
+ * later task, and the garden is replaced only after that. The UI repeats this
+ * revision check in the same turn as setState.
+ * Returns null when the garden moved, so the caller files another copy.
  */
 function finishRemoteAdopt(
   opts: {
@@ -731,11 +743,8 @@ function finishRemoteAdopt(
 ): GardenCommitResult | null {
   const still = currentLocal(opts);
   if (still.revision !== preserved.revision) return null;
-  noteRemoteGardenApplied();
   clearPrompted(opts.storage);
-  clearGardenDirty(opts.storage);
   const remoteFile = again.fileName || fileName;
-  if (again.eTag && opts.account) rememberDriveETag(opts.account, remoteFile, again.eTag, opts.storage);
   const remoteUpdatedAt = again.remoteUpdatedAt || again.doc.updatedAt || '';
   return {
     ok: true,
@@ -750,6 +759,7 @@ function finishRemoteAdopt(
     preservedAs: preserved.where,
     message: preserved.message,
     localOnlyPhotos: photosOnlyInLocal(preserved.doc, again.doc, deleted),
+    preservedRevision: preserved.revision,
   };
 }
 
@@ -866,6 +876,7 @@ export type RedirectOwedResult =
       preservedAs: string;
       message: string;
       localOnlyPhotos: Photo[];
+      preservedRevision: number;
     }
   | { kind: 'cancelled'; message: string }
   | { kind: 'failed'; error: string };
@@ -937,8 +948,7 @@ export async function applyRedirectOwedSave(opts: {
       superseded: result.superseded,
     };
   }
-  clearGardenSaveOwed(opts.storage);
-  if (result.eTag) rememberDriveETag(opts.account, result.fileName, result.eTag, opts.storage);
+  // Dirty, the owed flag, and the base eTag stay until the UI replaces the garden.
   return {
     kind: 'kept-remote',
     doc: result.doc,
@@ -949,6 +959,7 @@ export async function applyRedirectOwedSave(opts: {
     preservedAs: result.preservedAs,
     message: result.message,
     localOnlyPhotos: result.localOnlyPhotos,
+    preservedRevision: result.preservedRevision,
   };
 }
 
@@ -974,6 +985,7 @@ export type GardenReconcileResult =
       preservedAs: string;
       message: string;
       localOnlyPhotos: Photo[];
+      preservedRevision: number;
     }
   | { kind: 'cancelled'; message: string };
 
@@ -1053,10 +1065,6 @@ export async function reconcileGardenOnLoad(opts: {
       error: `Could not choose a copy of ${remoteFile}.`,
     };
   }
-  if (resolved.eTag && opts.account) {
-    rememberDriveETag(opts.account, resolved.fileName, resolved.eTag, opts.storage);
-  }
-  clearGardenSaveOwed(opts.storage);
   return {
     kind: 'kept-remote',
     silent: false,
@@ -1066,6 +1074,7 @@ export async function reconcileGardenOnLoad(opts: {
     preservedAs: resolved.preservedAs,
     message: resolved.message,
     localOnlyPhotos: resolved.localOnlyPhotos,
+    preservedRevision: resolved.preservedRevision,
   };
 }
 
