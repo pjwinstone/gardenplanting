@@ -23,7 +23,15 @@ function memoryStorage(): OwedSaveStorage {
 describe('completeCloudSignIn', () => {
   it('saves the garden after sign-in when auto-save was blocked, even with nothing queued', async () => {
     const storage = memoryStorage();
-    markGardenSaveOwed(storage);
+    markGardenSaveOwed(
+      {
+        account: 'acct',
+        fileName: 'garden-v1.json',
+        baseETag: '"etag"',
+        docUpdatedAt: '2026-10-03T10:00:00.000Z',
+      },
+      storage,
+    );
     expect(gardenSaveIsOwed(storage)).toBe(true);
 
     let resumes = 0;

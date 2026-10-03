@@ -15,6 +15,7 @@ import { buildCoach, speakCoachLine } from './coach';
 import { renderPlanSvg } from './planSvg';
 import { renderTagsPrintHtml, triggerPrint } from './tagsPrint';
 import {
+  accountKey,
   acquireGraphToken,
   acquireGraphTokenSilent,
   isSignedIn,
@@ -62,7 +63,6 @@ import {
   loadCachedGarden,
   createEmptyGarden,
   runAdjust as toolboxRunAdjust,
-  saveGardenCloud,
   loadGardenCloud,
   type ModeAction,
 } from './toolbox';
@@ -103,14 +103,23 @@ import {
   kickPhotoUploads,
   listQueuedPhotos,
   photosManifestLink,
+  releaseSurveyPhotos,
   rememberOriginalPhoto,
   resumePhotoUploads,
   retryPhotoUpload,
   startPhotoUploadLoop,
+  surveyPhotoIdsForPoint,
   type PhotoStatusUpdate,
 } from './photoSync';
-import { completeCloudSignIn, gardenSaveIsOwed, markGardenSaveOwed, clearGardenSaveOwed } from './cloudSignIn';
+import { completeCloudSignIn, readOwedGardenSave, markGardenSaveOwed, clearGardenSaveOwed } from './cloudSignIn';
 import { silentGraphToken } from './onedrive';
+import {
+  applyRedirectOwedSave,
+  commitGardenSave,
+  rememberedDriveETag,
+  rememberDriveETag,
+  type GardenCopyChoice,
+} from './gardenCloudSave';
 
 export type View = 'survey' | 'tags';
 
@@ -690,7 +699,14 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
       },
     };
   });
-  if (!photos.some((p) => p.id === update.photoId)) return;
+  if (!photos.some((p) => p.id === update.photoId)) {
+    if (update.error) {
+      const msg = `Photo ${update.fileName}: ${update.error}`;
+      logError(msg, { source: 'photo-delete' });
+      setCloudMessage(msg);
+    }
+    return;
+  }
   setDoc(
     {
       ...state.doc,
@@ -757,7 +773,8 @@ async function hydratePhotoUploadStatus(): Promise<void> {
           clickMap: rec.pixels?.clickMap,
           uploadPermanent: rec.permanent,
           usabilityNote: rec.usabilityNote,
-          uploadStatus: rec.status === 'uploading' ? 'queued' : rec.status,
+          uploadStatus:
+            rec.status === 'uploading' ? 'queued' : rec.status === 'retire' ? 'failed' : rec.status,
           uploadError: rec.lastError,
         },
       };
@@ -1208,18 +1225,24 @@ export function subscribe(fn: Listener): () => void {
   };
 }
 
+function withDocTimestamp(previous: GardenDocument, next: GardenDocument): GardenDocument {
+  if (next.updatedAt !== previous.updatedAt) return next;
+  return { ...next, updatedAt: new Date().toISOString() };
+}
+
 function setState(partial: Partial<UiState>): void {
-  state = { ...state, ...partial };
+  const doc = partial.doc ? withDocTimestamp(state.doc, partial.doc) : undefined;
+  state = { ...state, ...partial, ...(doc ? { doc } : {}) };
   // Always notify listeners even if persistence fails — otherwise the UI freezes
   // on legal transitions while illegal refusals (no save) still appear to work.
-  if (partial.doc) {
-    const saved = persistGardenLocal(partial.doc);
+  if (doc) {
+    const saved = persistGardenLocal(doc);
     if (!saved.ok) {
-      handleLocalPersistFailure(partial.doc, saved);
+      handleLocalPersistFailure(doc, saved);
     } else if (state.refuseMessage && /browser|quota|storage/i.test(state.refuseMessage)) {
       state = { ...state, refuseMessage: null };
     }
-    scheduleCloudBackup(partial.doc);
+    scheduleCloudBackup(doc);
   }
   for (const fn of [...listeners]) fn();
 }
@@ -1271,6 +1294,30 @@ function scheduleCloudBackup(doc: GardenDocument): void {
   }, 2500);
 }
 
+function noteOwedGardenSave(doc: GardenDocument): void {
+  const account = accountKey() ?? '';
+  const fileName = getGardenCloudFileName();
+  markGardenSaveOwed({
+    account,
+    fileName,
+    baseETag: rememberedDriveETag(account, fileName),
+    docUpdatedAt: doc.updatedAt ?? '',
+  });
+}
+
+function askWhichGardenCopy(choice: GardenCopyChoice): Promise<'local' | 'remote'> {
+  const keepRemote = window.confirm(choice.message);
+  return Promise.resolve(keepRemote ? 'remote' : 'local');
+}
+
+function adoptRemoteGarden(doc: GardenDocument, fileName: string, eTag?: string): void {
+  const account = accountKey() ?? '';
+  if (eTag) rememberDriveETag(account, fileName, eTag);
+  setGardenCloudFileName(fileName);
+  notifyCloudPrefsChanged();
+  setDoc(doc, null);
+}
+
 async function quietCloudSave(
   doc: GardenDocument,
   opts: { afterLocalQuota?: boolean; token?: string } = {},
@@ -1281,7 +1328,7 @@ async function quietCloudSave(
     const auth = await silentGraphToken();
     if (!auth.ok) {
       if (auth.interactionRequired) {
-        markGardenSaveOwed();
+        noteOwedGardenSave(doc);
         notePhotoSignIn(true);
         setCloudMessage('Sign in to save.');
         return;
@@ -1295,9 +1342,19 @@ async function quietCloudSave(
     }
     token = auth.token;
   }
-  const result = await saveGardenCloud(doc, undefined, token);
-  if (result.ok) {
+  const account = accountKey() ?? '';
+  const fileName = getGardenCloudFileName();
+  const result = await commitGardenSave({
+    doc,
+    fileName,
+    token,
+    ifMatch: rememberedDriveETag(account, fileName) || undefined,
+    choose: askWhichGardenCopy,
+    account,
+  });
+  if (result.ok && result.wrote) {
     clearGardenSaveOwed();
+    if (result.eTag) rememberDriveETag(account, result.fileName, result.eTag);
     setLastSaveIso(result.savedAt);
     if (opts.afterLocalQuota) {
       setCloudMessage(
@@ -1310,13 +1367,24 @@ async function quietCloudSave(
     } else {
       setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
     }
-  } else {
-    setCloudMessage(
-      opts.afterLocalQuota
-        ? `Browser storage full, and OneDrive save failed: ${result.error}. Export garden.json now.`
-        : `Could not auto-save to OneDrive: ${result.error}`,
-    );
+    return;
   }
+  if (result.ok && !result.wrote) {
+    clearGardenSaveOwed();
+    adoptRemoteGarden(result.doc, result.fileName, result.eTag);
+    setCloudMessage(result.message);
+    return;
+  }
+  if (result.refused === 'empty' || result.refused === 'stale') {
+    clearGardenSaveOwed();
+  } else {
+    noteOwedGardenSave(doc);
+  }
+  setCloudMessage(
+    opts.afterLocalQuota
+      ? `Browser storage full, and OneDrive save failed: ${result.error}. Export garden.json now.`
+      : result.error,
+  );
 }
 
 export function mount(root: HTMLElement): void {
@@ -1388,18 +1456,44 @@ export function applyAuthReady(init: AuthInitResult): void {
 
 async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   if (!isSignedIn()) return;
-  if (gardenSaveIsOwed()) {
+  await resumePhotoUploads();
+  const account = accountKey() ?? '';
+  const preferred = getGardenCloudFileName();
+  if (readOwedGardenSave()) {
+    const auth = await silentGraphToken();
+    if (!auth.ok) {
+      if (auth.interactionRequired) notePhotoSignIn(true);
+      setCloudMessage(auth.interactionRequired ? 'Sign in to save.' : auth.error);
+      return;
+    }
     setCloudBusy(true);
-    await completeCloudSignIn({
-      resumeUploads: () => resumePhotoUploads(),
-      saveGarden: () => quietCloudSave(state.doc),
-      setMessage: setCloudMessage,
+    const outcome = await applyRedirectOwedSave({
+      account,
+      fileName: preferred,
+      localDoc: state.doc,
+      token: auth.token,
+      choose: askWhichGardenCopy,
     });
     setCloudBusy(false);
     void refreshGardenFileList();
-    return;
+    if (outcome.kind === 'saved') {
+      if (outcome.eTag) rememberDriveETag(account, outcome.fileName, outcome.eTag);
+      setLastSaveIso(outcome.savedAt);
+      setCloudMessage(`Signed in. Saved ${outcome.fileName} to OneDrive.`);
+      return;
+    }
+    if (outcome.kind === 'kept-remote') {
+      adoptRemoteGarden(outcome.doc, outcome.fileName, outcome.eTag);
+      setCloudMessage(outcome.message);
+      return;
+    }
+    if (outcome.kind === 'failed') {
+      logError(outcome.error, { source: 'onedrive' });
+      setCloudMessage(outcome.error);
+      return;
+    }
+    // Mismatch, empty, or an unreadable flag: load OneDrive instead of writing.
   }
-  const preferred = getGardenCloudFileName();
   setCloudBusy(true);
   const result = await loadGardenCloud(preferred);
   setCloudBusy(false);
@@ -1420,6 +1514,7 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   // Remember what was actually opened so the next startup auto-loads it.
   setGardenCloudFileName(result.fileName);
   notifyCloudPrefsChanged();
+  if (result.eTag) rememberDriveETag(account, result.fileName, result.eTag);
   setDoc(result.doc, null);
   const via =
     result.fallbackFrom && result.fallbackFrom !== result.fileName
@@ -1430,7 +1525,7 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   setCloudMessage(`Signed in. Loaded ${result.fileName}${via}.`);
 }
 
-function onShellClick(e: Event): void {
+async function onShellClick(e: Event): Promise<void> {
   const target = (e.target as HTMLElement | null)?.closest?.('[data-cmd]') as HTMLElement | null;
   if (!target) return;
   const cmd = target.getAttribute('data-cmd');
@@ -1713,52 +1808,11 @@ function onShellClick(e: Event): void {
     return;
   }
   if (cmd === 'delete-photo') {
-    const pointId =
-      state.doc.session.inspectingPointId ?? state.doc.session.currentAddPointId;
-    const photoId = state.doc.session.selectedPhotoId;
-    if (!pointId || !photoId) {
-      surfaceFail('Select a photo to delete.', 'photo');
-      return;
-    }
-    if (!window.confirm('Delete this photo from the point?')) return;
-    const result = deletePhotoFromPoint(state.doc, pointId, photoId);
-    if (result.reason) {
-      surfaceFail(result.reason, 'delete-photo');
-      setDoc(result.doc, result.reason);
-      return;
-    }
-    setDoc(result.doc, null);
-    void discardQueuedPhoto(photoId);
-    setState({
-      pointDialog: state.pointDialog === 'inspect' ? 'inspect' : 'add',
-      pendingPointThumb: null,
-      menuOpen: false,
-    });
-    speakCoachLine(
-      result.doc.session.lastAction ?? 'Photo deleted.',
-      result.doc.session.speakSteps,
-    );
+    await onDeleteSelectedPhoto();
     return;
   }
   if (cmd === 'delete-point') {
-    const pointId = state.doc.session.inspectingPointId;
-    if (!pointId || state.pointDialog !== 'inspect') return;
-    if (!window.confirm(`Delete point ${pointId}? This cannot be undone.`)) return;
-    const point = state.doc.points.find((p) => p.id === pointId);
-    const droppedPhotoIds = [
-      ...(point?.photoIds ?? []),
-      ...state.doc.photos.filter((ph) => ph.addPointId === pointId).map((ph) => ph.id),
-    ];
-    const result = deletePointMeasurement(state.doc, pointId);
-    if (result.reason) {
-      surfaceFail(result.reason, 'delete-point');
-      setDoc(result.doc, result.reason);
-      return;
-    }
-    setDoc(result.doc, null);
-    for (const id of droppedPhotoIds) void discardQueuedPhoto(id);
-    setState({ pointDialog: null, pendingPointThumb: null, menuOpen: false });
-    speakCoachLine(result.doc.session.lastAction ?? `Deleted ${pointId}.`, result.doc.session.speakSteps);
+    await onDeleteSelectedPoint();
     return;
   }
   if (cmd === 'create-layer') {
@@ -2183,20 +2237,105 @@ async function onSignOut(): Promise<void> {
   }
 }
 
+async function onDeleteSelectedPhoto(): Promise<void> {
+  const pointId = state.doc.session.inspectingPointId ?? state.doc.session.currentAddPointId;
+  const photoId = state.doc.session.selectedPhotoId;
+  if (!pointId || !photoId) {
+    surfaceFail('Select a photo to delete.', 'photo');
+    return;
+  }
+  if (!window.confirm('Delete this photo from the point?')) return;
+  const photo = state.doc.photos.find((item) => item.id === photoId);
+  const result = deletePhotoFromPoint(state.doc, pointId, photoId);
+  if (result.reason) {
+    surfaceFail(result.reason, 'delete-photo');
+    setDoc(result.doc, result.reason);
+    return;
+  }
+  setDoc(result.doc, null);
+  const release = await discardQueuedPhoto(photoId, undefined, {
+    driveFileName: photo?.originalFile?.uploadStatus === 'verified' ? photo.originalFile.fileName : undefined,
+    original: photo?.originalFile,
+    stationId: photo?.addPointId,
+  });
+  if (!release.ok && release.error) {
+    logError(release.error, { source: 'photo-delete' });
+    setCloudMessage(release.error);
+  }
+  setState({
+    pointDialog: state.pointDialog === 'inspect' ? 'inspect' : 'add',
+    pendingPointThumb: null,
+    menuOpen: false,
+  });
+  speakCoachLine(result.doc.session.lastAction ?? 'Photo deleted.', result.doc.session.speakSteps);
+}
+
+async function onDeleteSelectedPoint(): Promise<void> {
+  const pointId = state.doc.session.inspectingPointId;
+  if (!pointId || state.pointDialog !== 'inspect') return;
+  if (!window.confirm(`Delete point ${pointId}? This cannot be undone.`)) return;
+  const photoIds = surveyPhotoIdsForPoint(state.doc, pointId);
+  const photos = state.doc.photos;
+  const result = deletePointMeasurement(state.doc, pointId);
+  if (result.reason) {
+    surfaceFail(result.reason, 'delete-point');
+    setDoc(result.doc, result.reason);
+    return;
+  }
+  setDoc(result.doc, null);
+  const release = await releaseSurveyPhotos(photos, photoIds);
+  if (!release.ok && release.error) {
+    logError(release.error, { source: 'photo-delete' });
+    setCloudMessage(release.error);
+  }
+  setState({ pointDialog: null, pendingPointThumb: null, menuOpen: false });
+  speakCoachLine(result.doc.session.lastAction ?? `Deleted ${pointId}.`, result.doc.session.speakSteps);
+}
+
 async function onOneDriveSave(): Promise<void> {
   const fileName = getGardenCloudFileName();
   setCloudBusy(true);
   setCloudMessage(`Saving ${fileName} to OneDrive…`);
-  const result = await saveGardenCloud(state.doc, fileName);
+  const auth = await silentGraphToken();
+  if (!auth.ok) {
+    setCloudBusy(false);
+    if (auth.interactionRequired) {
+      noteOwedGardenSave(state.doc);
+      notePhotoSignIn(true);
+    }
+    const msg = auth.interactionRequired ? 'Sign in to save.' : auth.error;
+    logError(msg, { source: 'onedrive' });
+    setCloudMessage(msg);
+    return;
+  }
+  const account = accountKey() ?? '';
+  const result = await commitGardenSave({
+    doc: state.doc,
+    fileName,
+    token: auth.token,
+    ifMatch: rememberedDriveETag(account, fileName) || undefined,
+    choose: askWhichGardenCopy,
+    account,
+  });
   setCloudBusy(false);
-  if (result.ok) {
+  if (result.ok && result.wrote) {
+    clearGardenSaveOwed();
+    if (result.eTag) rememberDriveETag(account, result.fileName, result.eTag);
     setLastSaveIso(result.savedAt);
     setCloudMessage(`Saved ${result.fileName} to OneDrive (${getCloudStatus().pathHint}).`);
     void refreshGardenFileList();
-  } else {
-    logError(result.error, { source: 'onedrive' });
-    setCloudMessage(result.error);
+    return;
   }
+  if (result.ok && !result.wrote) {
+    clearGardenSaveOwed();
+    adoptRemoteGarden(result.doc, result.fileName, result.eTag);
+    setCloudMessage(result.message);
+    void refreshGardenFileList();
+    return;
+  }
+  if (result.refused) clearGardenSaveOwed();
+  logError(result.error, { source: 'onedrive' });
+  setCloudMessage(result.error);
 }
 
 async function onOneDriveLoad(fileName?: string): Promise<void> {
@@ -2213,6 +2352,7 @@ async function onOneDriveLoad(fileName?: string): Promise<void> {
   }
   setGardenCloudFileName(result.fileName);
   notifyCloudPrefsChanged();
+  if (result.eTag) rememberDriveETag(accountKey() ?? '', result.fileName, result.eTag);
   setDoc(result.doc, null);
   const via =
     result.fallbackFrom && result.fallbackFrom !== result.fileName

@@ -256,6 +256,8 @@ export interface GardenDocument {
   version: 1;
   name: string;
   createdAt: string;
+  /** ISO time of the last local edit. Compared with OneDrive before a save. */
+  updatedAt?: string;
   points: Point[];
   lines: Line[];
   polygons: Polygon[];

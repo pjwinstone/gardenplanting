@@ -87,6 +87,13 @@ export function isSignedIn(): boolean {
   return getAccount() !== null;
 }
 
+/** Stable id for the active Microsoft account. Empty when nobody is signed in. */
+export function accountKey(): string | null {
+  const account = graphTokenTestClient?.account ?? getAccount();
+  if (!account) return null;
+  return account.homeAccountId || account.localAccountId || account.username || null;
+}
+
 export function displayName(): string | null {
   const a = getAccount();
   if (!a) return null;

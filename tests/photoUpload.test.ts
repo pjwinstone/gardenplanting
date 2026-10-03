@@ -431,33 +431,39 @@ describe('drainPhotoQueue', () => {
     expect(await queue.list()).toEqual([]);
   });
 
-  it('does not write the manifest when the photo is deleted during upload', async () => {
+  it('moves a photo deleted during upload and keeps the manifest row', async () => {
     const queue = createMemoryPhotoQueue();
     await queue.put(queuedRecord());
-    const urls: string[] = [];
-    const statuses: string[] = [];
+    const methods: string[] = [];
+    let manifestBody = '';
     const failed = await drainPhotoQueue({
       queue,
       getToken: async () => 'tok',
-      onStatus: (update) => statuses.push(update.status),
-      fetchImpl: scripted([
-        () => json(409, {}),
-        () => json(409, {}),
-        async (url) => {
-          urls.push(url);
+      onStatus: () => undefined,
+      now: () => '2026-10-02T23:30:00.000Z',
+      fetchImpl: async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const method = init?.method ?? 'GET';
+        methods.push(method);
+        if (method === 'POST') return json(409, {});
+        if (method === 'PUT' && url.includes('.jpg')) {
           await discardQueuedPhoto('ph-1', queue);
           return json(200, item(bytes.byteLength, hash));
-        },
-        (url, init) => {
-          urls.push(`${init?.method ?? 'GET'} ${url}`);
-          return json(204, {});
-        },
-      ]).fetch,
+        }
+        if (method === 'PATCH') return json(200, {});
+        if (method === 'GET') return json(404, {});
+        if (method === 'PUT' && url.includes('manifest.json')) {
+          manifestBody = String(init?.body ?? '');
+          return json(200, { eTag: '"m1"' }, { etag: '"m1"' });
+        }
+        return json(500, { error: { message: `unexpected ${method} ${url}` } });
+      },
     });
     expect(failed).toBe(0);
-    expect(statuses).toEqual(['uploading']);
-    expect(urls.some((url) => url.includes('manifest.json'))).toBe(false);
-    expect(urls.some((url) => url.startsWith('DELETE '))).toBe(true);
+    expect(methods).not.toContain('DELETE');
+    expect(methods).toContain('PATCH');
+    expect(manifestBody).toContain('"deletedAt"');
+    expect(manifestBody).toContain(queuedRecord().fileName);
     expect(await queue.list()).toEqual([]);
   });
 
