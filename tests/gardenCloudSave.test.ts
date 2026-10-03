@@ -1205,6 +1205,8 @@ describe('conflict prompt and local-only photos', () => {
     const storage = memoryStorage();
     noteLocalGardenEdit(storage);
     let live = garden(LOCAL_AT, 'Before lookup');
+    // A local-only photo is what makes the deleted-photo lookup run.
+    live.photos = [uploadingPhoto('ph-roll')];
     const remote = graph({
       remotes: [garden(IPAD_AT, 'OneDrive copy')],
       etags: ['"v9"'],
