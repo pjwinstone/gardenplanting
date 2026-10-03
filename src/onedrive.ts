@@ -7,7 +7,7 @@ import {
   getGardenCloudFileName,
   onedrivePathFor,
 } from './cloudConfig';
-import { acquireGraphToken } from './msalAuth';
+import { acquireGraphToken, acquireGraphTokenSilent } from './msalAuth';
 import { normalizeDocument } from './model';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -48,6 +48,13 @@ async function withToken(): Promise<
   return acquireGraphToken();
 }
 
+/** Silent token for background saves. Never redirects. */
+export async function silentGraphToken(): Promise<
+  { ok: true; token: string } | { ok: false; interactionRequired: boolean; error: string }
+> {
+  return acquireGraphTokenSilent();
+}
+
 async function ensureFolder(token: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const res = await fetch(`${GRAPH}/me/drive/root/children`, {
     method: 'POST',
@@ -74,8 +81,9 @@ async function ensureFolder(token: string): Promise<{ ok: true } | { ok: false; 
 export async function saveGardenToOneDrive(
   doc: GardenDocument,
   fileName = getGardenCloudFileName(),
+  token?: string,
 ): Promise<CloudSaveResult> {
-  const auth = await withToken();
+  const auth = token ? { ok: true as const, token } : await withToken();
   if (!auth.ok) return { ok: false, error: auth.error };
 
   const folder = await ensureFolder(auth.token);
