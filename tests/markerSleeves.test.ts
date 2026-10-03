@@ -254,23 +254,29 @@ describe('marker sleeves', () => {
     if (!pdftoppmAvailable()) context.skip();
     const dir = mkdtempSync(join(tmpdir(), 'sleeve-render-'));
     try {
-      const pdf = join(markersDir, 'all-sleeves.pdf');
-      execFileSync('pdftoppm', ['-r', '300', pdf, join(dir, 'page')], { stdio: 'ignore' });
-      CIRCLE_SLEEVES.forEach((sleeve, index) => {
-        const page = parsePpm(readFileSync(join(dir, `page-${index + 1}.ppm`)));
-        expect(Math.abs(page.width - (210 / 25.4) * 300)).toBeLessThanOrEqual(2);
-        expect(Math.abs(page.height - (297 / 25.4) * 300)).toBeLessThanOrEqual(2);
-        expect(readPixels(page)).toBe(expectedBits(sleeve.id));
-        const barMm = (blackRunNear(page, 285.8, 22) / page.width) * 210;
-        expect(Math.abs(barMm - 100)).toBeLessThanOrEqual(0.5);
-        expect(isBlack(page, mmX(page, 204.85), mmY(page, 18))).toBe(false);
-        expect(isBlack(page, mmX(page, 204.85), mmY(page, 273))).toBe(false);
-      });
+      assertRenderedSleeves(join(dir, 'all'), join(markersDir, 'all-sleeves.pdf'), CIRCLE_SLEEVES);
+      for (const sleeve of CIRCLE_SLEEVES) {
+        assertRenderedSleeves(join(dir, sleeve.point), join(markersDir, `${sleeve.point}.pdf`), [sleeve]);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 });
+
+function assertRenderedSleeves(prefix: string, pdf: string, sleeves: typeof CIRCLE_SLEEVES) {
+  execFileSync('pdftoppm', ['-r', '300', pdf, prefix], { stdio: 'ignore' });
+  sleeves.forEach((sleeve, index) => {
+    const page = parsePpm(readFileSync(`${prefix}-${index + 1}.ppm`));
+    expect(Math.abs(page.width - (210 / 25.4) * 300)).toBeLessThanOrEqual(2);
+    expect(Math.abs(page.height - (297 / 25.4) * 300)).toBeLessThanOrEqual(2);
+    expect(readPixels(page)).toBe(expectedBits(sleeve.id));
+    const barMm = (blackRunNear(page, 285.8, 22) / page.width) * 210;
+    expect(Math.abs(barMm - 100)).toBeLessThanOrEqual(0.5);
+    expect(isBlack(page, mmX(page, 204.85), mmY(page, 18))).toBe(false);
+    expect(isBlack(page, mmX(page, 204.85), mmY(page, 273))).toBe(false);
+  });
+}
 
 function differsOnlyInFourBandBurst(a: number, b: number) {
   const positions: number[] = [];
