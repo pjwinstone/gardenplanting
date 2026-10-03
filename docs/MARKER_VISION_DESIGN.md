@@ -12,7 +12,7 @@ The stored point is the **axis of the stick at the ground**. The paper is a slee
 
 Print one **A4 portrait** sheet per mark. Horizontal bands run across the sheet. Wrap the sheet tight around the dowel and glue it to the wood. Any direction around the stick shows the same code.
 
-Do not print an AprilTag, an ArUco, or any other flat tag. A face-on square code fails at a grazing angle, which is most of a walk around the garden, and it is not the focal-length prior. The sleeve gives a bearing to the axis (section 6). Focal length is one shared value per phone and 1× lens, solved in the adjustment from a checkerboard prior plus the raw sleeve elevations (section 6.3).
+Do not print an AprilTag, an ArUco, or any other flat tag. A face-on square code fails at a grazing angle, which is most of a walk around the garden, and it is not the focal-length prior. The sleeve gives a bearing to the axis (section 6). The merged solver keeps a separate focal prior on each photo. One shared value per phone and 1× lens, from a checkerboard prior plus the raw sleeve elevations, is the planned follow-up after the circle field trial (section 6.3).
 
 The sleeve is glued tight to the 60 mm dowel. A loose tube puts the silhouette on the paper, not on the stick.
 
@@ -174,7 +174,7 @@ With `fx = 3028` and `σ_e = 1 px`, `σ_β = 0.013°`. That **pixel** term is a 
 
 Two larger terms sit on the same ray:
 
-- **`fx`.** A 1% focal-length error moves a bearing by `sin β cos β × 1%`: **0.05° at 5° off-centre, 0.18° at 20°, and 0.26° at the edge**. Centreline noise at 1 px is **0.013°**, so the focal term is **4–20×** larger, and it is the same for every photo from that phone. At 20° off-centre the lateral miss is **6 mm at 2 m, 16 mm at 5 m, 26 mm at 8 m and 48 mm at 15 m**. `fx` is solved per phone and lens inside the adjustment (section 6.3). Do not quote the pixel row as the ray.
+- **`fx`.** A 1% focal-length error moves a bearing by `sin β cos β × 1%`: **0.05° at 5° off-centre, 0.18° at 20°, and 0.26° at the edge**. Centreline noise at 1 px is **0.013°**, so the focal term is **4–20×** larger, and it is the same for every photo from that phone. At 20° off-centre the lateral miss is **6 mm at 2 m, 16 mm at 5 m, 26 mm at 8 m and 48 mm at 15 m**. The merged solver still keeps a separate focal prior on each photo. One value per phone and lens is the follow-up in section 6.3. Do not quote the pixel row as the ray.
 - **Lean and a sleeve off the stick**, via `sigmaCentringM` (section 3). At the marked 0.45 m height that is 8 mm at 1° and 24 mm at 3°. The sleeve is glued to the dowel, so a sleeve that can still shift is not a published bearing. Fit the sideways lean. The along-sight part stays in the centring term.
 
 The centreline is a valid Phase 1 ray across 2–15 m whenever both edges pass the width check in section 3. Without an ID there is still no point to attach it to, unless this sleeve is the only one in the frame and the user confirms the name.
@@ -231,7 +231,7 @@ On the 7 m baseline at 20°, a 15 m tape to A, the ranges from the two candidate
 | 20 m | 20.3 / 17.3 m | 4.3σ | 2.2σ (13% wrong) | 1.8σ (19% wrong) |
 | 20.4 m | 19.7 / 18.6 m | 1.7σ (20% wrong) | 0.9σ | 0.7σ |
 
-`P(wrong) = Φ(−Δ / 2σ)` for a pick of the nearer candidate. Accept a pick only when **`Δ ≥ 6σ`** (about 0.13% wrong) **and** the observed range is within **2.5σ** of the chosen candidate. Otherwise leave the station unset or ask. **Label the pick unchecked** either way: a branch choice has no spare observation. The `σ` in that test is the observation’s own σ (edge fit, shared `fx`, and `σ_λ`), not the noise column alone.
+`P(wrong) = Φ(−Δ / 2σ)` for a pick of the nearer candidate. Accept a pick only when **`Δ ≥ 6σ`** (about 0.13% wrong) **and** the observed range is within **2.5σ** of the chosen candidate. Otherwise leave the station unset or ask. **Label the pick unchecked** either way: a branch choice has no spare observation. The `σ` in that test is the observation’s own σ (edge fit, the focal prior, and `σ_λ`), not the noise column alone. Until the shared-`fx` follow-up, that focal prior is separate on each photo.
 
 ### 6.3 Focal length, as raw observations
 
@@ -243,12 +243,12 @@ Enter the adjustment with the raw pieces, not a derived range and not a derived 
 
 - The tape as a distance. It is the horizontal distance from the **lens** to the axis (surface reading, slope reduced, then `+R`). A 10 mm mistake in where the lens is costs 0.2% at 5 m.
 - Each sleeve end as a levelled elevation. Equivalently `tan e_top − tan e_bot = H / (d ± R)`, with the rim choice above. σ comes from the edge fit plus `σ_λ`.
-- **One `fx` per phone and per lens**, the 1× lens only, shared by every photo from that phone and solved in the adjustment with a prior. A gate that merely checks `fx` is already within 1% is not that solve. The prior is a **checkerboard** of known square size, several views, repeated on different days, including distortion and focus breathing (about **0.3%** at 2 m). The taped-rod calibration in [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) §3.5 is the other acceptable prior. EXIF `FocalLengthIn35mmFormat` is an integer, about **±1.9%** at 26 mm, and a Pro phone may be 24, 28 or 35 mm, so EXIF only checks that the shot is 1×. It is not the prior. A separate `fx` on each photo cannot carry a taped sleeve in photo `k` into photo `j`.
+- **Focal length.** The merged solver keeps a separate prior on each photo: when a relative σ is given, `fx = fx₀(1+s)` with prior residual `−s`. One shared `fx` per phone and per 1× lens, with the taped-rod or checkerboard result as its prior, is the planned follow-up after the circle field trial. The maths advisor estimates radius σ falls from about 15 mm to about 6.5 mm once photos from one phone share that parameter. A gate that merely checks `fx` is already within 1% is not that solve. The prior for the follow-up is a **checkerboard** of known square size, several views, repeated on different days, including distortion and focus breathing (about **0.3%** at 2 m). The taped-rod calibration in [GEOMETRY_DESIGN.md](GEOMETRY_DESIGN.md) §3.5 is the other acceptable prior. EXIF `FocalLengthIn35mmFormat` is an integer, about **±1.9%** at 26 mm, and a Pro phone may be 24, 28 or 35 mm, so EXIF only checks that the shot is 1×. It is not the prior. A separate prior on each photo cannot carry a taped sleeve in photo `k` into photo `j`; that is why the shared parameter is the follow-up.
 - The measured `H` and `D` of **that sleeve**, stored with the mark after the rulers are checked. A shared paper-stock parameter is only a fallback. In a ratio of two observations from the same sleeve, `H` cancels. The rulers (section 7) are what tell you the sheet was not scaled before those measurements are stored.
 
 Ranging photo `k` with an `fx` taken from photo `k` only returns the tape. It is not a new observation. Publishing that range, and also publishing `fx` as a prior while photo `k` is still in the network, counts the same pixels twice. Derived ranges that all share one calibration photo also share that photo’s tape and edge errors; entering them as independent distances hides the correlation.
 
-With the elevation model, the rim model, a plumbed rod, the checkerboard prior and this shared `fx`, about **1% is reachable at 3–5 m**. Several sleeves from different directions let the unseen lean average rather than sit in one photo. An AprilTag is not part of that calibration and is not printed.
+With the elevation model, the rim model, a plumbed rod, the checkerboard prior and the planned shared `fx`, about **1% is reachable at 3–5 m**. Several sleeves from different directions let the unseen lean average rather than sit in one photo. An AprilTag is not part of that calibration and is not printed.
 
 ## 7. Print template
 
@@ -291,11 +291,11 @@ Stay in the central 60% of the frame. Rolling shutter at about 3°/s across a 15
 
 The profile follows the fitted axis, not image y. Bands are placed by the projective fit in section 5. A run that misses those positions, a second run of four blacks, or a word that is not in the list is a miss. Text beyond the stop is ignored. Sun on gloss toner is why the stock in section 7 is matte.
 
-A flat tag is not in this comparison as a thing we might still print. A square fiducial the size of this sheet (about 180 mm) is about 109 px at 5 m and 36 px at 15 m, and it is only usable within about ±45° of straight-on. That is the wrong tool on a stick you walk around. Intrinsics come from the checkerboard, once per phone and lens, not from a tag in the garden.
+A flat tag is not in this comparison as a thing we might still print. A square fiducial the size of this sheet (about 180 mm) is about 109 px at 5 m and 36 px at 15 m, and it is only usable within about ±45° of straight-on. That is the wrong tool on a stick you walk around. The planned shared intrinsics come from the checkerboard, once per phone and lens, not from a tag in the garden. The merged solver still keeps a separate focal prior on each photo.
 
 ## 9. What is still open
 
 Both reviews are applied. What is left is practical, not a second code:
 
 1. Count the long-range marks before printing. Sixty-one covers rods, the house and a fence, with reprints left. The five-black bank is not printed. If it is ever reconsidered, both layouts have to be fitted and only a clear winner kept, the synthetic test has to include bank confusion, and the ID stays at 5 m or closer until that test exists. Twenty bands squeeze the legend to 11 mm, and Hamming distance does not separate the banks. Beds and paths stay unnamed by this sleeve.
-2. The checkerboard prior and `sigmaCentringM` have to be in the solver when Phase 2 wires detections into it. This note does not change PR #3.
+2. The checkerboard prior and `sigmaCentringM` have to be in the solver when Phase 2 wires detections into it. One shared `fx` per phone and lens is the follow-up after the circle field trial, not what the merged solver does. This note does not change that solver.
