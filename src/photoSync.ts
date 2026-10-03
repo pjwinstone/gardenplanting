@@ -224,7 +224,9 @@ export function startPhotoUploadLoop(
       void resumePhotoUploads();
     });
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') void resumePhotoUploads();
+      if (document.visibilityState !== 'visible') return;
+      // Coming back must not drop a 429 Retry-After wait.
+      void resumePhotoUploads({ keepRetryAfter: true });
     });
     const persist = navigator.storage?.persist?.bind(navigator.storage);
     if (persist) {
@@ -242,10 +244,12 @@ export function startPhotoUploadLoop(
 /**
  * Clear the attempt counter on every non-permanent row and queue failed ones again.
  * Used on app start, online, visibility, sign-in, and the Retry button.
+ * `keepRetryAfter` leaves `retryNotBefore` in place (visibilitychange).
  */
 export async function resetPhotoUploadAttempts(
   queue: PhotoQueue,
   now = new Date().toISOString(),
+  opts: { keepRetryAfter?: boolean } = {},
 ): Promise<void> {
   const records = await queue.list();
   for (const record of records) {
@@ -255,7 +259,7 @@ export async function resetPhotoUploadAttempts(
       ...record,
       status: record.status === 'failed' || record.status === 'uploading' ? 'queued' : record.status,
       attempts: 0,
-      retryNotBefore: undefined,
+      retryNotBefore: opts.keepRetryAfter ? record.retryNotBefore : undefined,
       lastError: record.status === 'failed' ? undefined : record.lastError,
       updatedAt: now,
     });
@@ -263,10 +267,10 @@ export async function resetPhotoUploadAttempts(
 }
 
 /** Reset attempts, then upload. Does not clear a hash mismatch. */
-export async function resumePhotoUploads(): Promise<void> {
+export async function resumePhotoUploads(opts: { keepRetryAfter?: boolean } = {}): Promise<void> {
   const active = loopDeps;
   if (!active) return;
-  await resetPhotoUploadAttempts(active.queue, active.now?.() ?? new Date().toISOString());
+  await resetPhotoUploadAttempts(active.queue, active.now?.() ?? new Date().toISOString(), opts);
   kickPhotoUploads();
 }
 
@@ -302,7 +306,7 @@ export function kickPhotoUploads(): void {
   const deps = loopDeps;
   void drainPhotoQueue(deps)
     .then(async (failed) => {
-      if (failed > 0) await scheduleRetryIfNeeded(deps);
+      if (failed > 0 || (await queueHasHeldRetry(deps))) await scheduleRetryIfNeeded(deps);
     })
     .finally(() => {
       running = false;
@@ -315,10 +319,10 @@ export function kickPhotoUploads(): void {
 
 async function scheduleRetryIfNeeded(deps: PhotoUploadDeps): Promise<void> {
   const records = await deps.queue.list();
-  const retryable = records.filter(isRetryable);
-  if (!retryable.length) return;
-  const now = Date.now();
-  const wait = Math.min(...retryable.map((r) => retryWaitMs(r, now)));
+  const now = nowMs(deps);
+  const open = records.filter(attemptStillOpen);
+  if (!open.length) return;
+  const wait = Math.min(...open.map((r) => retryWaitMs(r, now)));
   if (retryTimer != null) return;
   retryTimer = setTimeout(() => {
     retryTimer = null;
@@ -326,11 +330,33 @@ async function scheduleRetryIfNeeded(deps: PhotoUploadDeps): Promise<void> {
   }, wait);
 }
 
-function isRetryable(record: PhotoQueueRecord): boolean {
+function attemptStillOpen(record: PhotoQueueRecord): boolean {
   if (record.permanent) return false;
   if (record.status === 'queued') return true;
   if (record.status === 'failed' && record.attempts < PHOTO_UPLOAD_MAX_ATTEMPTS) return true;
   return false;
+}
+
+function retryHeld(record: PhotoQueueRecord, now: number): boolean {
+  if (!record.retryNotBefore) return false;
+  const until = Date.parse(record.retryNotBefore);
+  return Number.isFinite(until) && until > now;
+}
+
+function isRetryable(record: PhotoQueueRecord, now: number): boolean {
+  return attemptStillOpen(record) && !retryHeld(record, now);
+}
+
+async function queueHasHeldRetry(deps: PhotoUploadDeps): Promise<boolean> {
+  const now = nowMs(deps);
+  const records = await deps.queue.list();
+  return records.some((record) => attemptStillOpen(record) && retryHeld(record, now));
+}
+
+function nowMs(deps: PhotoUploadDeps): number {
+  if (!deps.now) return Date.now();
+  const parsed = Date.parse(deps.now());
+  return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
 /**
@@ -342,7 +368,11 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
   const recovered = normalizeQueueAfterRestart(await deps.queue.list());
   for (const record of recovered) {
     const previous = await deps.queue.get(record.id);
-    if (previous?.status === 'uploading') {
+    if (!previous) continue;
+    const pixelsChanged =
+      previous.pixels?.clickMap !== record.pixels?.clickMap ||
+      previous.pixels?.clickMapMigratedFrom !== record.pixels?.clickMapMigratedFrom;
+    if (previous.status === 'uploading' || pixelsChanged) {
       await deps.queue.put({
         ...record,
         updatedAt: deps.now?.() ?? new Date().toISOString(),
@@ -357,7 +387,8 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
     deps.onStatus(statusOf(record, 'verified'));
   }
 
-  const pending = (await deps.queue.list()).filter(isRetryable);
+  const now = nowMs(deps);
+  const pending = (await deps.queue.list()).filter((record) => isRetryable(record, now));
   if (!pending.length) return 0;
   if (!isOnline(deps)) return 0;
 
@@ -372,7 +403,7 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
   let failed = 0;
   const records = await deps.queue.list();
   for (const record of records) {
-    if (!isRetryable(record)) continue;
+    if (!isRetryable(record, now)) continue;
     if (!isOnline(deps)) return failed;
 
     const stamp = deps.now?.() ?? new Date().toISOString();

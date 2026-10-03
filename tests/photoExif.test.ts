@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { exifCapturedAtIso, readAppleMakerNote, readMakerNoteBytes, readSurveyExif } from '../src/photoExif';
+import { emptyDocument, normalizeDocument } from '../src/model';
 import {
   calibrationKeyFor,
   dngRejectionMessage,
   inferPhotoProvenance,
   inspectOriginalFile,
+  migratePreviewPixels,
   photoUsabilityNote,
   previewPixelToFull,
   previewPixelToFullCentre,
@@ -118,9 +120,8 @@ describe('survey EXIF', () => {
   });
 
   it('parses a real iPhone 7 maker note from ExifTool’s Apple.jpg', async () => {
-    // Source: https://github.com/exiftool/exiftool/blob/master/t/images/Apple.jpg
-    // Licence: ExifTool is dual-licensed under the GPL and the Artistic License.
-    // This is ExifTool’s published test image, not a personal photo.
+    // Source, commit, © Phil Harvey, and licence: tests/fixtures/README.md.
+    // Independent parser check. Test data only, not a personal photo.
     const file = readFileSync(new URL('./fixtures/exiftool-apple-iphone7.jpg', import.meta.url));
     const note = await readMakerNoteBytes(file);
     expect(note?.[0]).toBe(0x41);
@@ -152,10 +153,70 @@ describe('survey EXIF', () => {
     const scale = 640 / 4032;
     expect(previewPixelToFull(10, scale)).toBeCloseTo(10 / scale);
     expect(previewPixelToFullCentre(10, scale)).toBeCloseTo(10 / scale - 0.5);
+    expect(
+      photoUsabilityNote({
+        exif: {
+          LensModel: 'iPhone 14 front camera 2.71mm f/1.9',
+          FocalLength: 2.71,
+          FocalLengthIn35mmFilm: 23,
+        },
+        capturedAt: '2026-10-02T12:00:00.000Z',
+        sessionStartedAt: '2026-10-02T12:00:00.000Z',
+        now: '2026-10-02T12:00:00.000Z',
+      }),
+    ).toMatch(/not 1×/);
+    expect(
+      photoUsabilityNote({
+        exif: { LensModel: 'iPhone 14 back camera', FocalLength: 5.7, FocalLengthIn35mmFilm: 26 },
+        capturedAt: '2026-10-02T12:00:00.000Z',
+        sessionStartedAt: '2026-10-02T12:00:00.000Z',
+        now: '2026-10-02T12:00:00.000Z',
+      }),
+    ).toBeUndefined();
     const oldCentre = (10 + 0.5) / scale - 0.5;
     expect(oldCentre - previewPixelToFullCentre(10, scale)).toBeCloseTo(0.5 / scale, 5);
     expect(suffixedPhotoFileName('P01_20261002T232600123Z.jpg')).toBe('P01_20261002T232600123Z-2.jpg');
     expect(suffixedPhotoFileName('P01_20261002T232600123Z-4.jpg')).toBeNull();
+  });
+
+  it('relabels a 7a4e268 +0.5 row and leaves the stored click where it was', () => {
+    const scale = 640 / 4032;
+    const migrated = migratePreviewPixels({
+      fullWidth: 4032,
+      fullHeight: 3024,
+      previewWidth: 640,
+      previewHeight: 480,
+      previewScale: scale,
+      pixelCentre: '+0.5',
+    });
+    expect(migrated?.clickMap).toBe('p/scale');
+    expect(migrated?.clickMapMigratedFrom).toBe('+0.5');
+    expect(migrated?.pixelCentre).toBeUndefined();
+    expect(migrated?.previewScaleX).toBeCloseTo(scale);
+    expect(migrated?.previewScaleY).toBeCloseTo(scale);
+    const doc = normalizeDocument({
+      ...emptyDocument(),
+      photos: [
+        {
+          id: 'ph-old',
+          setupId: 'setup-1',
+          width: 640,
+          height: 480,
+          clicks: [{ pointId: 'A', px: 10, py: 4 }],
+          originalFile: {
+            fileName: 'old.jpg',
+            size: 12,
+            quickXorHash: 'h',
+            previewScale: scale,
+            pixelCentre: '+0.5',
+          },
+        },
+      ],
+    });
+    expect(doc.photos[0]?.clicks[0]?.px).toBe(10);
+    expect(doc.photos[0]?.originalFile?.clickMap).toBe('p/scale');
+    expect(previewPixelToFull(10, scale)).toBeCloseTo(10 / scale);
+    expect(previewPixelToFull(10, scale)).not.toBeCloseTo((10 + 0.5) / scale - 0.5);
   });
 });
 

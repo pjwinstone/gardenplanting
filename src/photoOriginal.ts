@@ -24,7 +24,7 @@ import { CLICK_MAP, type PhotoProvenance } from './photosManifest';
 import { quickXorHash } from './quickXorHash';
 
 export interface PreviewPixelMap {
-  /** Upright full-resolution size (EXIF orientation applied). */
+  /** Upright full size of the decoded bitmap after EXIF orientation, not PixelX/YDimension. */
   fullWidth: number;
   fullHeight: number;
   previewWidth: number;
@@ -41,6 +41,11 @@ export interface PreviewPixelMap {
   clickMap: typeof CLICK_MAP;
   /** Clicks are in upright pixels, after EXIF orientation is applied. */
   clickSpace: 'upright';
+  /**
+   * A 7a4e268 row published `+0.5`. Clicks were already edge coordinates, so
+   * px/py were left as stored and this row now maps with `p/scale`.
+   */
+  clickMapMigratedFrom?: '+0.5';
 }
 
 export interface OriginalPhotoDraft {
@@ -123,8 +128,18 @@ export function inferPhotoProvenance(sourceName: string, exif: SurveyExif): Phot
   return 'unknown';
 }
 
-/** True for a 1× main-camera equivalent (about 24–26 mm). 0.5×, 2×, and Pro 28/35 mm crops are not. */
-export function isOneXEquivalent(focalLengthIn35mm: number | undefined): boolean {
+/**
+ * 1× back camera, about 24–26 mm equivalent (accepted band 23–27).
+ * `LensModel` must contain "back", so a front camera near 23 mm does not pass.
+ * Phones up to iPhone 8 and iPhone X report 28 mm for the back camera. That is
+ * outside this band, so those phones are not used for the shared fx.
+ * 0.5×, 2×, and Pro 28/35 mm crops are not 1×.
+ */
+export function isOneXEquivalent(
+  focalLengthIn35mm: number | undefined,
+  lensModel?: string,
+): boolean {
+  if (!lensModel || !/back/i.test(lensModel)) return false;
   if (focalLengthIn35mm == null || !Number.isFinite(focalLengthIn35mm)) return false;
   return focalLengthIn35mm >= 23 && focalLengthIn35mm <= 27;
 }
@@ -161,7 +176,9 @@ export function calibrationKeyFor(
 const SESSION_SLACK_MS = 2 * 60 * 1000;
 
 /**
- * Missing LensModel or FocalLength → not usable for focal length.
+ * Missing LensModel or FocalLength, a lens that is not the back camera, or a
+ * 35 mm equivalent outside 23–27 → not usable for focal length.
+ * Phones up to iPhone 8 and iPhone X report 28 mm and are excluded.
  * Missing DateTimeOriginal, or a capture time outside the station setup window, → not usable for timing.
  */
 export function photoUsabilityNote(opts: {
@@ -173,7 +190,7 @@ export function photoUsabilityNote(opts: {
 }): string | undefined {
   const parts: string[] = [];
   const lensMissing = !opts.exif.LensModel || opts.exif.FocalLength == null;
-  const oneX = isOneXEquivalent(opts.exif.FocalLengthIn35mmFilm);
+  const oneX = isOneXEquivalent(opts.exif.FocalLengthIn35mmFilm, opts.exif.LensModel);
   if (lensMissing || !oneX) {
     parts.push(
       !lensMissing && opts.exif.FocalLengthIn35mmFilm != null
@@ -220,6 +237,50 @@ export function previewPixelToFull(previewPx: number, previewScale: number): num
 
 export function previewPixelToFullCentre(previewPx: number, previewScale: number): number {
   return previewPx / previewScale - 0.5;
+}
+
+/** Fields a 7a4e268 queue row stored beside the real preview size. */
+export interface LegacyPreviewPixels {
+  fullWidth?: number;
+  fullHeight?: number;
+  previewWidth?: number;
+  previewHeight?: number;
+  previewScale?: number;
+  previewScaleX?: number;
+  previewScaleY?: number;
+  /** Published by 7a4e268. The stored clicks were still edge coordinates. */
+  pixelCentre?: '+0.5' | string;
+  clickMap?: 'p/scale';
+  clickSpace?: 'upright';
+  /** Set when a +0.5 row was relabelled. px/py are not rewritten. */
+  clickMapMigratedFrom?: '+0.5';
+}
+
+/**
+ * Rows queued at 7a4e268 published `pixelCentre: '+0.5'` and one `previewScale`.
+ * Taps were already fraction × preview size from the pixel edge; the +0.5
+ * formula was never applied to px/py. Relabel them `p/scale` and copy the
+ * single scale onto both axes so a later reader does not add that bias.
+ */
+export function migratePreviewPixels<T extends LegacyPreviewPixels>(
+  pixels: T | undefined,
+): T | undefined {
+  if (!pixels) return pixels;
+  if (pixels.clickMap === 'p/scale') return pixels;
+  const legacy =
+    pixels.pixelCentre === '+0.5' || typeof pixels.previewScale === 'number';
+  if (!legacy) return pixels;
+  const scale = typeof pixels.previewScale === 'number' ? pixels.previewScale : undefined;
+  return {
+    ...pixels,
+    previewScaleX: pixels.previewScaleX ?? scale,
+    previewScaleY: pixels.previewScaleY ?? scale,
+    clickMap: 'p/scale',
+    clickSpace: pixels.clickSpace ?? 'upright',
+    clickMapMigratedFrom: '+0.5',
+    pixelCentre: undefined,
+    previewScale: undefined,
+  };
 }
 
 export const DNG_REJECTION =

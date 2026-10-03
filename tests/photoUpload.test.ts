@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { quickXorHash } from '../src/quickXorHash';
-import { createMemoryPhotoQueue, type PhotoQueueRecord } from '../src/photoQueue';
+import { createMemoryPhotoQueue, normalizeQueueAfterRestart, type PhotoQueueRecord } from '../src/photoQueue';
 import { SIMPLE_UPLOAD_MAX_BYTES, parseRetryAfter, uploadAndVerifyOriginal } from '../src/photoUpload';
 import {
   PHOTO_UPLOAD_MAX_ATTEMPTS,
@@ -379,6 +379,57 @@ describe('drainPhotoQueue', () => {
     const [left] = await queue.list();
     expect(left?.permanent).toBe(true);
     expect(left?.fileName).toBe('P01_20261002T232600123Z-4.jpg');
+  });
+
+  it('keeps a Retry-After wait when attempts are reset the way visibility does', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put({
+      ...queuedRecord(),
+      status: 'failed',
+      attempts: 2,
+      retryNotBefore: '2026-10-03T00:10:00.000Z',
+    });
+    await resetPhotoUploadAttempts(queue, '2026-10-03T00:00:00.000Z', { keepRetryAfter: true });
+    let tokens = 0;
+    const failed = await drainPhotoQueue({
+      queue,
+      now: () => '2026-10-03T00:00:00.000Z',
+      getToken: async () => {
+        tokens += 1;
+        return 'tok';
+      },
+      onStatus: () => undefined,
+    });
+    expect(failed).toBe(0);
+    expect(tokens).toBe(0);
+    const [held] = await queue.list();
+    expect(held?.attempts).toBe(0);
+    expect(held?.status).toBe('queued');
+    expect(held?.retryNotBefore).toBe('2026-10-03T00:10:00.000Z');
+
+    await resetPhotoUploadAttempts(queue, '2026-10-03T00:00:00.000Z');
+    const [cleared] = await queue.list();
+    expect(cleared?.retryNotBefore).toBeUndefined();
+  });
+
+  it('relabels a queued 7a4e268 pixel map without moving to the old formula', () => {
+    const scale = 640 / 4032;
+    const [migrated] = normalizeQueueAfterRestart([
+      {
+        ...queuedRecord(),
+        pixels: {
+          fullWidth: 4032,
+          fullHeight: 3024,
+          previewWidth: 640,
+          previewHeight: 480,
+          previewScale: scale,
+          pixelCentre: '+0.5',
+        } as PhotoQueueRecord['pixels'],
+      },
+    ]);
+    expect(migrated?.pixels?.clickMap).toBe('p/scale');
+    expect(migrated?.pixels?.clickMapMigratedFrom).toBe('+0.5');
+    expect(migrated?.pixels?.previewScaleX).toBeCloseTo(scale);
   });
 });
 

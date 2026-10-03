@@ -1,5 +1,7 @@
 /** Garden Survey document model — points, baselines, layers/objects, photos, setups. */
 
+import { migratePreviewPixels } from './photoOriginal';
+
 export type SessionMode =
   | 'MENU'
   | 'START'
@@ -173,6 +175,12 @@ export interface PhotoOriginalFile {
   clickMap?: 'p/scale';
   /** Clicks are upright (orientation applied). */
   clickSpace?: 'upright';
+  /** 7a4e268 published this. Cleared when the row is relabelled `p/scale`. */
+  pixelCentre?: '+0.5';
+  /** Single scale published by 7a4e268. Copied to both axes on load. */
+  previewScale?: number;
+  /** Present after a +0.5 row was relabelled. Stored clicks were not moved. */
+  clickMapMigratedFrom?: '+0.5';
   /** Set when the failure will not succeed on Retry (hash mismatch or name still taken). */
   uploadPermanent?: boolean;
   /** Missing lens data, or capture time outside the station setup. */
@@ -361,6 +369,10 @@ export function normalizeDocument(raw: GardenDocument): GardenDocument {
     if (legacyPh.occupyPointId && !legacyPh.addPointId) {
       legacyPh.addPointId = legacyPh.occupyPointId;
       delete legacyPh.occupyPointId;
+    }
+    if (ph.originalFile) {
+      const migrated = migratePreviewPixels(ph.originalFile);
+      if (migrated && migrated !== ph.originalFile) ph.originalFile = migrated;
     }
   }
   return doc;

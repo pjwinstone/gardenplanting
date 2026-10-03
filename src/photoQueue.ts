@@ -6,7 +6,7 @@
 import type { AppleMakerNote, SurveyExif } from './photoExif';
 import type { PhotoUploadStatus } from './model';
 import type { PhotoProvenance } from './photosManifest';
-import type { PreviewPixelMap } from './photoOriginal';
+import { migratePreviewPixels, type PreviewPixelMap } from './photoOriginal';
 
 export const PHOTO_DB_NAME = 'garden-survey-photos';
 export const PHOTO_STORE = 'queue';
@@ -51,13 +51,20 @@ export interface PhotoQueue {
   delete(id: string): Promise<void>;
 }
 
-/** Uploads left in `uploading` did not finish (tab kill). Queue them again. */
+/**
+ * Uploads left in `uploading` did not finish (tab kill). Queue them again.
+ * Rows from 7a4e268 that published `pixelCentre: '+0.5'` are relabelled
+ * `p/scale`. Their stored clicks were already edge coordinates, so px/py stay.
+ */
 export function normalizeQueueAfterRestart(records: PhotoQueueRecord[]): PhotoQueueRecord[] {
-  return records.map((record) =>
-    record.status === 'uploading'
-      ? { ...record, status: 'queued', lastError: undefined }
-      : record,
-  );
+  return records.map((record) => {
+    const pixels = migratePreviewPixels(record.pixels);
+    const next: PhotoQueueRecord =
+      pixels && pixels !== record.pixels ? { ...record, pixels: pixels as PreviewPixelMap } : record;
+    return next.status === 'uploading'
+      ? { ...next, status: 'queued', lastError: undefined }
+      : next;
+  });
 }
 
 export function createMemoryPhotoQueue(): PhotoQueue {

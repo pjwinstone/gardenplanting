@@ -97,8 +97,7 @@ import {
 } from './layers';
 import { GEOMETRY_CHOICES, placeholderThumb, type GeometryType, type PhotoClick } from './model';
 import { imageNaturalSize, suggestTagBlobs, type TagSuggestion } from './tagSuggest';
-import { readSurveyExif } from './photoExif';
-import { dngRejectionMessage, orientationSwapsAxes, type PreviewPixelMap } from './photoOriginal';
+import { dngRejectionMessage, type PreviewPixelMap } from './photoOriginal';
 import {
   kickPhotoUploads,
   listQueuedPhotos,
@@ -3064,61 +3063,45 @@ function errorLogSectionStatus(): {
 /**
  * Display-only preview. Never written as the stored survey photo.
  * The original File/Blob is queued separately and uploaded unchanged.
- * Clicks are upright (orientation applied) edge coordinates in this preview:
- * full = previewPx / previewScale on that axis. Subtract 0.5 only for a pixel-centre index.
- * Where the browser supports it, the preview is decoded with resizeWidth so the
- * full bitmap is not kept in memory.
+ * Full width and height come from the decoded bitmap after EXIF orientation,
+ * not from PixelX/YDimension (a downscaled Library pick can keep stale values).
+ * resizeWidth runs on that upright bitmap, so a portrait frame is not squashed.
+ * Clicks are upright edge coordinates: full = previewPx / previewScale.
+ * Subtract 0.5 only for a pixel-centre index.
  */
 async function fileToPreview(
   file: File,
   maxEdge = 640,
 ): Promise<{ dataUrl: string; pixels: PreviewPixelMap }> {
-  const upright = await uprightSizeFromExif(file);
-  if (upright) {
-    const scale = Math.min(1, maxEdge / Math.max(upright.width, upright.height));
-    const pw = Math.max(1, Math.round(upright.width * scale));
-    const ph = Math.max(1, Math.round(upright.height * scale));
+  const oriented = await createImageBitmap(file, {
+    imageOrientation: 'from-image',
+  } as ImageBitmapOptions);
+  try {
+    const fullWidth = oriented.width;
+    const fullHeight = oriented.height;
+    if (Math.max(fullWidth, fullHeight) <= maxEdge) {
+      return bitmapToPreview(oriented, fullWidth, fullHeight);
+    }
+    const scale = maxEdge / Math.max(fullWidth, fullHeight);
+    const pw = Math.max(1, Math.round(fullWidth * scale));
+    const ph = Math.max(1, Math.round(fullHeight * scale));
     try {
-      const bitmap = await createImageBitmap(file, resizedBitmapOptions(pw, ph));
+      const resized = await createImageBitmap(oriented, {
+        resizeWidth: pw,
+        resizeHeight: ph,
+        resizeQuality: 'medium',
+      } as ImageBitmapOptions);
       try {
-        return bitmapToPreview(bitmap, upright.width, upright.height);
+        return bitmapToPreview(resized, fullWidth, fullHeight);
       } finally {
-        bitmap.close();
+        resized.close();
       }
     } catch {
-      /* resize options unsupported — decode below */
+      return bitmapToPreview(oriented, fullWidth, fullHeight);
     }
-  }
-  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' } as ImageBitmapOptions);
-  try {
-    return bitmapToPreview(bitmap, bitmap.width, bitmap.height);
   } finally {
-    bitmap.close();
+    oriented.close();
   }
-}
-
-async function uprightSizeFromExif(
-  file: File,
-): Promise<{ width: number; height: number } | undefined> {
-  try {
-    const exif = await readSurveyExif(file);
-    const w = exif.PixelXDimension;
-    const h = exif.PixelYDimension;
-    if (!w || !h) return undefined;
-    if (orientationSwapsAxes(exif.Orientation)) return { width: h, height: w };
-    return { width: w, height: h };
-  } catch {
-    return undefined;
-  }
-}
-
-function resizedBitmapOptions(width: number, height: number): ImageBitmapOptions {
-  return {
-    imageOrientation: 'from-image',
-    resizeWidth: width,
-    resizeHeight: height,
-    resizeQuality: 'medium',
-  } as ImageBitmapOptions;
 }
 
 function bitmapToPreview(
