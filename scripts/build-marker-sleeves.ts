@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Write docs/markers/*.pdf — one A4 sleeve per circle-test rod, plus all-sleeves.pdf.
- * Deterministic. No timestamps. Run: node scripts/build-marker-sleeves.mjs
+ * Deterministic. No timestamps. Run: npm run build:marker-sleeves
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';

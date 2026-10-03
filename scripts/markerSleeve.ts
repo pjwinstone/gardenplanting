@@ -21,16 +21,21 @@
 export const PUBLISHED_CODEBOOK =
   '222 22D 244 24B 271 28E 293 2B4 2DD 2E7 315 31A 36E 389 447 459 46A 474 48B 495 4A6 4CC 4D2 513 51C 525 5B9 637 6BA 6E9 72B 74D 756 88D 896 8A3 8CA 8D1 919 926 94C 952 96B 975 9BA 9C7 A3B A57 B9C BA5 C6D C73 DAC DB7 DC9 DD4 E24 E4E E99 EC5 EE2';
 
-/** First eight issued words, in numeric order: BAS01, BAS02, then CRC01–CRC06. */
+/**
+ * Circle-test assignment. Not the first eight words: those share a top nibble
+ * and several pairs differ only in four adjacent bands. These eight are in
+ * the Bank-1 list, at least distance 6 apart, and no pair differs only inside
+ * a 4-band burst.
+ */
 export const CIRCLE_SLEEVES = [
-  { point: 'BAS01', id: '222' },
-  { point: 'BAS02', id: '22D' },
-  { point: 'CRC01', id: '244' },
-  { point: 'CRC02', id: '24B' },
-  { point: 'CRC03', id: '271' },
-  { point: 'CRC04', id: '28E' },
-  { point: 'CRC05', id: '293' },
-  { point: 'CRC06', id: '2B4' },
+  { point: 'BAS01', id: '315' },
+  { point: 'BAS02', id: '36E' },
+  { point: 'CRC01', id: '459' },
+  { point: 'CRC02', id: '6BA' },
+  { point: 'CRC03', id: '8A3' },
+  { point: 'CRC04', id: '952' },
+  { point: 'CRC05', id: 'DAC' },
+  { point: 'CRC06', id: 'EC5' },
 ];
 
 const SYNC = '11110';
@@ -222,7 +227,10 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
 
   parts.push('0.8 w');
   parts.push('% TRIM205');
-  parts.push(seg(TRIM_X, 0, TRIM_X, 297));
+  // Stop before the bands and the quiet zones. A full-height stroke centred
+  // on x=205 leaves a hairline in the quiet strips.
+  parts.push(seg(TRIM_X, 0, TRIM_X, 20));
+  parts.push(seg(TRIM_X, 283, TRIM_X, 297));
   parts.push(seg(0, 5, 210, 5));
   parts.push(seg(0, 292, 210, 292));
   parts.push(seg(198, 287.6, TRIM_X, 287.6));

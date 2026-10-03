@@ -6,18 +6,18 @@ The sheets are [docs/markers/](markers/). [all-sleeves.pdf](markers/all-sleeves.
 
 ## Which sleeve goes on which stick
 
-The design note does not assign these garden names. This test uses the first eight issued words, in numeric order.
+The design note does not assign these garden names. This test uses eight issued words spread through the list. Neighbours are at least distance 6 apart, and no pair differs only inside four adjacent bands. The first eight words (222 through 2B4) are not used: they share a top nibble, and a leaf across the bottom four bands could swap 222 with 22D, or 244 with 24B.
 
 | Point | Code | File | What it is |
 |---|---|---|---|
-| BAS01 | 222 | [BAS01.pdf](markers/BAS01.pdf) | Far baseline end |
-| BAS02 | 22D | [BAS02.pdf](markers/BAS02.pdf) | Near baseline end, about 0.30 m past CRC01 |
-| CRC01 | 244 | [CRC01.pdf](markers/CRC01.pdf) | Circle stick nearest the baseline |
-| CRC02 | 24B | [CRC02.pdf](markers/CRC02.pdf) | Next circle stick |
-| CRC03 | 271 | [CRC03.pdf](markers/CRC03.pdf) | Next circle stick |
-| CRC04 | 28E | [CRC04.pdf](markers/CRC04.pdf) | Opposite CRC01 |
-| CRC05 | 293 | [CRC05.pdf](markers/CRC05.pdf) | Next circle stick |
-| CRC06 | 2B4 | [CRC06.pdf](markers/CRC06.pdf) | Last circle stick, closing back to CRC01 |
+| BAS01 | 315 | [BAS01.pdf](markers/BAS01.pdf) | Far baseline end |
+| BAS02 | 36E | [BAS02.pdf](markers/BAS02.pdf) | Near baseline end, about 0.30 m past CRC01 |
+| CRC01 | 459 | [CRC01.pdf](markers/CRC01.pdf) | Circle stick nearest the baseline |
+| CRC02 | 6BA | [CRC02.pdf](markers/CRC02.pdf) | Next circle stick |
+| CRC03 | 8A3 | [CRC03.pdf](markers/CRC03.pdf) | Next circle stick |
+| CRC04 | 952 | [CRC04.pdf](markers/CRC04.pdf) | Opposite CRC01 |
+| CRC05 | DAC | [CRC05.pdf](markers/CRC05.pdf) | Next circle stick |
+| CRC06 | EC5 | [CRC06.pdf](markers/CRC06.pdf) | Last circle stick, closing back to CRC01 |
 | STN01 | — | — | Where you stand. No sleeve |
 | STN02 | — | — | Where you stand. No sleeve |
 | STN03 | — | — | Where you stand. No sleeve |
@@ -46,9 +46,9 @@ The marker note’s stock is laser or pigment ink on **matte polypropylene or po
 
 If you print on paper: matte, **120–160 gsm**, laser or pigment, not dye.
 
-Laminate only for the weather, and only with a **matte** pouch or a clear **matte** tape, and only if it does not add glare. Gloss laminate causes specular highlights. After any film, measure the 100 mm bar again. If the film stretched the sheet, reprint. Then measure R on the finished sleeve. Film adds thickness, so the design’s 30.2 mm is not the number you write down.
+Preferred weatherproofing is **matte film over laser toner**. A matte pouch or a clear matte tape is the same idea, and only if it does not add glare. Gloss film and glossy toner cause specular highlights. After any film, measure the 100 mm bar again. If the film stretched the sheet, reprint. Then measure R on the finished sleeve. The outside after the film is the R that counts. Film adds thickness, so the design’s 30.2 mm is not the number you write down.
 
-Outdoors: keep the sheets dry until the glue has set. Matte synthetic stock, or matte paper plus a matte film, is the weatherproofing. Do not leave dye ink in the rain.
+Outdoors: keep the sheets dry until the glue has set. Do not leave dye ink in the rain.
 
 ## Cut
 
@@ -68,7 +68,7 @@ Bands stay **horizontal**. They become rings. The **TOP** arrow points to the to
 
 1. Printed face outward.
 2. Lay the glue flap on the dowel first. The words **GLUE UNDER** go against the overlap, then under it.
-3. Roll the sheet tight. The cut edge lands on the seam cross. The overlap is whatever is left of the 205 mm sheet: **205 − π × 60 ≈ 16.5 mm** (the dowel’s circumference is 188.5 mm).
+3. Roll the sheet tight. Put **both** seam alignment crosses on the cut edge — the top one and the bottom one — onto the matching crosses at the inner edge of the flap. A **1°** spiral misaligns the bands by about **3.3 mm**, so keep the TOP arrow square to the dowel. The overlap on a 60 mm dowel is **205 − π × 60 ≈ 16.5 mm** (circumference 188.5 mm). A white gap opens at the seam if the outside circumference goes over about **192.8 mm**, which is a dowel over about **61.2 mm** once film is on it. The bands do not cover that extra paper.
 4. Glue the flap to the wood, and glue or tape the overlap down. A loose sleeve is not a bearing: the silhouette would follow the paper, not the dowel.
 5. Press the seam flat. It is a vertical join, not a ridge. A ridge splits the silhouette.
 
@@ -80,13 +80,13 @@ Expected outside size for a **0.2 mm** sheet, before you measure: **D ≈ 60.4 m
 
 Do this after the glue is dry, and after any matte film.
 
-**Radius.** At three heights — about 40 mm below the top, the middle, and about 40 mm above the bottom — wrap a paper strip or a tape around the sleeve and read the circumference C. That is the outside.
+**Radius.** At three heights — about 40 mm below the top, the middle, and about 40 mm above the bottom — wrap a **paper strip** or a **cloth tape** around the sleeve and pull it snug. Do not use a steel tape: it stands off the curve and reads long. The length is the outside circumference C. After lamination, this outside R is the one that counts. The step at the glue flap moves the centreline by only **0.1–0.2 mm**.
 
 `R = C / (2π)`
 
 Use `2π ≈ 6.2832`, so a circumference of 190.2 mm is R = 30.3 mm. Round each sleeve’s R to **0.1 mm**. If the three heights disagree by more than a few tenths of a millimetre, the wrap is not even: reseat it and measure again. Write the mean on that cane’s **Sleeve R mm** cell on [FIELD_CHECKLIST_CIRCLE.md](FIELD_CHECKLIST_CIRCLE.md). One R per sleeve. Do not copy 30 mm onto every row.
 
-**Height.** Measure from the ground to the **middle of the paper**. Write it on the cane row. The circle sheet’s target is **0.5 m**. The marker note’s worked example ties that middle at **0.45 m**. Those two notes do not agree. Write the height you actually measure. Do not substitute either figure for the tape.
+**Height.** For this circle test the target is **0.5 m** from the ground to the **middle of the paper**. That is the circle sheet’s figure. Aim for it, then write the height you actually measure on the cane row. Do not copy 0.5 m in place of the tape.
 
 **Plumb.** Bubble in two directions. Middle of the bubble, about **1°**. A 2° lean at 0.5 m moves the ground point about 17 mm, and a photo cannot see a lean toward the camera. Tick plumb only when the bubble passed.
 
