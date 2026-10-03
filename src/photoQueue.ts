@@ -32,7 +32,11 @@ export interface PhotoQueueRecord {
   usabilityNote?: string;
   quickXorHash: string;
   exif: SurveyExif;
-  status: PhotoUploadStatus;
+  /**
+   * `retire`: the survey dropped this original. The queue retries a move to
+   * `photos/deleted/` instead of uploading it again.
+   */
+  status: PhotoUploadStatus | 'retire';
   attempts: number;
   lastError?: string;
   /** Hash mismatch, or the name was still taken after -4. Do not retry. */
@@ -42,6 +46,8 @@ export interface PhotoQueueRecord {
   /** True once OneDrive has this exact file (size + quickXorHash). */
   bytesOnDrive: boolean;
   updatedAt: string;
+  /** Set once the survey dropped this original. */
+  deletedAt?: string;
 }
 
 export interface PhotoQueue {
@@ -61,6 +67,10 @@ export function normalizeQueueAfterRestart(records: PhotoQueueRecord[]): PhotoQu
     const pixels = migratePreviewPixels(record.pixels);
     const next: PhotoQueueRecord =
       pixels && pixels !== record.pixels ? { ...record, pixels: pixels as PreviewPixelMap } : record;
+    // A killed tab must not upload an original the survey already dropped.
+    if (next.status === 'retire' || next.deletedAt) {
+      return { ...next, status: 'retire' };
+    }
     return next.status === 'uploading'
       ? { ...next, status: 'queued', lastError: undefined }
       : next;

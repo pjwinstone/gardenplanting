@@ -7,7 +7,7 @@
  */
 
 import { PHOTOS_MANIFEST_RELATIVE } from './cloudConfig';
-import type { PhotoOriginalFile, PhotoUploadStatus } from './model';
+import type { Photo, PhotoOriginalFile, PhotoUploadStatus } from './model';
 import { inspectOriginalFile, suffixedPhotoFileName, type OriginalPhotoDraft } from './photoOriginal';
 import {
   createIndexedDbPhotoQueue,
@@ -17,7 +17,7 @@ import {
   type PhotoQueueRecord,
 } from './photoQueue';
 import type { GraphRequest, PhotoProvenance } from './photosManifest';
-import { publishPhotoManifest, uploadAndVerifyOriginal } from './photoUpload';
+import { publishPhotoManifest, retireDrivePhoto, uploadAndVerifyOriginal } from './photoUpload';
 
 /**
  * Pause automatic retries after this many counted failures.
@@ -254,10 +254,15 @@ export async function resetPhotoUploadAttempts(
   const records = await queue.list();
   for (const record of records) {
     if (record.permanent) continue;
-    if (record.status !== 'failed' && record.attempts === 0 && !record.retryNotBefore) continue;
+    if (record.status !== 'failed' && record.status !== 'retire' && record.attempts === 0 && !record.retryNotBefore) continue;
     await queue.put({
       ...record,
-      status: record.status === 'failed' || record.status === 'uploading' ? 'queued' : record.status,
+      status:
+        record.status === 'retire'
+          ? 'retire'
+          : record.status === 'failed' || record.status === 'uploading'
+            ? 'queued'
+            : record.status,
       attempts: 0,
       retryNotBefore: opts.keepRetryAfter ? record.retryNotBefore : undefined,
       lastError: record.status === 'failed' ? undefined : record.lastError,
@@ -283,10 +288,10 @@ export async function retryPhotoUpload(photoId?: string): Promise<void> {
   for (const record of records) {
     if (photoId && record.photoId !== photoId) continue;
     if (record.permanent) continue;
-    if (record.status !== 'failed' && record.status !== 'queued') continue;
+    if (record.status !== 'failed' && record.status !== 'queued' && record.status !== 'retire') continue;
     await active.queue.put({
       ...record,
-      status: 'queued',
+      status: record.status === 'retire' ? 'retire' : 'queued',
       attempts: 0,
       retryNotBefore: undefined,
       lastError: undefined,
@@ -332,6 +337,7 @@ async function scheduleRetryIfNeeded(deps: PhotoUploadDeps): Promise<void> {
 
 function attemptStillOpen(record: PhotoQueueRecord): boolean {
   if (record.permanent) return false;
+  if (record.status === 'retire') return record.attempts < PHOTO_UPLOAD_MAX_ATTEMPTS;
   if (record.status === 'queued') return true;
   if (record.status === 'failed' && record.attempts < PHOTO_UPLOAD_MAX_ATTEMPTS) return true;
   return false;
@@ -406,13 +412,41 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
     if (!isRetryable(record, now)) continue;
     if (!isOnline(deps)) return failed;
 
+    const live = await deps.queue.get(record.id);
+    if (!live) continue;
+
     const stamp = deps.now?.() ?? new Date().toISOString();
-    const uploading: PhotoQueueRecord = { ...record, status: 'uploading', updatedAt: stamp };
+    if (live.status === 'retire' || live.deletedAt) {
+      if (!live.bytesOnDrive) {
+        await deps.queue.delete(live.id);
+        continue;
+      }
+      try {
+        const retired = await retireUploaded(client, { ...live, status: 'retire', bytesOnDrive: true }, deps);
+        if (retired.ok) continue;
+        failed += 1;
+        await rememberRetireFailure(deps, live, retired.error);
+      } catch (err) {
+        failed += 1;
+        const message = err instanceof Error ? err.message : 'Could not move the photo to photos/deleted.';
+        await rememberRetireFailure(deps, live, message);
+      }
+      continue;
+    }
+
+    const uploading: PhotoQueueRecord = { ...live, status: 'uploading', updatedAt: stamp };
     await deps.queue.put(uploading);
     deps.onStatus(statusOf(uploading, 'uploading'));
 
     try {
       const outcome = await uploadOne(client, uploading, deps);
+      if (outcome.ok && outcome.cancelled) continue;
+      if (!outcome.ok && outcome.retire) {
+        failed += 1;
+        await rememberRetireFailure(deps, outcome.record ?? uploading, outcome.error);
+        continue;
+      }
+      if (!(await deps.queue.get(record.id))) continue;
       if (outcome.ok) {
         const done = outcome.record ?? uploading;
         await deps.queue.delete(record.id);
@@ -439,8 +473,20 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
         deps.onStatus(statusOf(failedRec, 'failed', outcome.error));
       }
     } catch (err) {
-      failed += 1;
       const message = err instanceof Error ? err.message : 'Upload failed.';
+      const liveAfter = await deps.queue.get(record.id);
+      const retireThis =
+        record.bytesOnDrive ||
+        Boolean(record.deletedAt) ||
+        liveAfter?.status === 'retire' ||
+        Boolean(liveAfter?.deletedAt);
+      if (retireThis) {
+        failed += 1;
+        await rememberRetireFailure(deps, liveAfter ?? { ...uploading, bytesOnDrive: true }, message);
+        continue;
+      }
+      if (!liveAfter) continue;
+      failed += 1;
       const attempts = record.attempts + 1;
       const failedRec: PhotoQueueRecord = {
         ...uploading,
@@ -457,6 +503,26 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
   return failed;
 }
 
+async function rememberRetireFailure(
+  deps: PhotoUploadDeps,
+  record: PhotoQueueRecord,
+  error: string,
+): Promise<void> {
+  const deletedAt = record.deletedAt ?? deps.now?.() ?? new Date().toISOString();
+  const retireRec: PhotoQueueRecord = {
+    ...record,
+    status: 'retire',
+    deletedAt,
+    bytesOnDrive: true,
+    attempts: record.attempts + 1,
+    permanent: false,
+    lastError: error,
+    updatedAt: deps.now?.() ?? new Date().toISOString(),
+  };
+  await deps.queue.put(retireRec);
+  deps.onStatus(statusOf(retireRec, 'failed', error));
+}
+
 function readToken(result: PhotoTokenResult): { token: string | null; interactionRequired: boolean } {
   if (result && typeof result === 'object') {
     return { token: result.token, interactionRequired: Boolean(result.interactionRequired) };
@@ -468,36 +534,37 @@ async function uploadOne(
   client: GraphRequest,
   record: PhotoQueueRecord,
   deps: PhotoUploadDeps,
-): Promise<
-  | { ok: true; record?: PhotoQueueRecord }
+): Promise<UploadOutcome> {
+  return uploadNamed(client, record, deps, 0);
+}
+
+type UploadOutcome =
+  | { ok: true; cancelled?: boolean; record?: PhotoQueueRecord }
   | {
       ok: false;
       error: string;
       bytesOnDrive: boolean;
       permanent?: boolean;
       retryAfterMs?: number;
+      retire?: boolean;
       record?: PhotoQueueRecord;
-    }
-> {
-  return uploadNamed(client, record, deps, 0);
-}
+    };
 
 async function uploadNamed(
   client: GraphRequest,
   record: PhotoQueueRecord,
   deps: PhotoUploadDeps,
   suffixTry: number,
-): Promise<
-  | { ok: true; record?: PhotoQueueRecord }
-  | {
-      ok: false;
-      error: string;
-      bytesOnDrive: boolean;
-      permanent?: boolean;
-      retryAfterMs?: number;
-      record?: PhotoQueueRecord;
-    }
-> {
+): Promise<UploadOutcome> {
+  const early = await pendingDeletion(deps, record.id);
+  if (early.gone) return { ok: true, cancelled: true };
+  if (early.deletedAt && !record.bytesOnDrive) {
+    await deps.queue.delete(record.id);
+    return { ok: true, cancelled: true };
+  }
+  if (early.deletedAt && record.bytesOnDrive) {
+    return retireUploaded(client, { ...record, deletedAt: early.deletedAt, bytesOnDrive: true }, deps);
+  }
   let bytesOnDrive = record.bytesOnDrive;
   if (!bytesOnDrive) {
     const bytes = new Uint8Array(await record.blob.arrayBuffer());
@@ -545,15 +612,81 @@ async function uploadNamed(
     }
     bytesOnDrive = true;
     record = { ...record, bytesOnDrive: true, status: 'uploading' };
+    const afterBytes = await pendingDeletion(deps, record.id);
+    if (afterBytes.gone || afterBytes.deletedAt) {
+      return retireUploaded(
+        client,
+        { ...record, bytesOnDrive: true, deletedAt: afterBytes.deletedAt ?? stampOf(deps) },
+        deps,
+      );
+    }
     await deps.queue.put(record);
+  }
+  const beforeManifest = await pendingDeletion(deps, record.id);
+  if (beforeManifest.gone || beforeManifest.deletedAt) {
+    if (bytesOnDrive) {
+      return retireUploaded(
+        client,
+        { ...record, bytesOnDrive: true, deletedAt: beforeManifest.deletedAt ?? stampOf(deps) },
+        deps,
+      );
+    }
+    return { ok: true, cancelled: true };
   }
   const manifest = await publishPhotoManifest({
     client,
     record: { ...record, bytesOnDrive: true },
-    now: deps.now?.() ?? new Date().toISOString(),
+    now: stampOf(deps),
   });
   if (!manifest.ok) return { ok: false, error: manifest.error, bytesOnDrive: true, record };
+  const afterManifest = await pendingDeletion(deps, record.id);
+  if (afterManifest.gone || afterManifest.deletedAt) {
+    return retireUploaded(
+      client,
+      { ...record, bytesOnDrive: true, deletedAt: afterManifest.deletedAt ?? stampOf(deps) },
+      deps,
+    );
+  }
   return { ok: true, record };
+}
+
+function stampOf(deps: PhotoUploadDeps): string {
+  return deps.now?.() ?? new Date().toISOString();
+}
+
+async function pendingDeletion(
+  deps: PhotoUploadDeps,
+  id: string,
+): Promise<{ gone: boolean; deletedAt?: string }> {
+  const live = await deps.queue.get(id);
+  if (!live) return { gone: true };
+  if (live.status === 'retire' || live.deletedAt) return { gone: false, deletedAt: live.deletedAt ?? stampOf(deps) };
+  return { gone: false };
+}
+
+/** Move the uploaded original and keep the manifest row with deletedAt. Failure stays a retire row. */
+async function retireUploaded(
+  client: GraphRequest,
+  record: PhotoQueueRecord,
+  deps: PhotoUploadDeps,
+): Promise<UploadOutcome> {
+  const deletedAt = record.deletedAt ?? stampOf(deps);
+  const retired = await retireDrivePhoto({
+    client,
+    record: { ...record, deletedAt, bytesOnDrive: true },
+    deletedAt,
+  });
+  if (!retired.ok) {
+    return {
+      ok: false,
+      error: retired.error,
+      bytesOnDrive: true,
+      retire: true,
+      record: { ...record, status: 'retire', deletedAt, bytesOnDrive: true },
+    };
+  }
+  await deps.queue.delete(record.id);
+  return { ok: true, cancelled: true };
 }
 
 function statusOf(
@@ -597,4 +730,174 @@ export async function listQueuedPhotos(
   queue: PhotoQueue = getAppPhotoQueue(),
 ): Promise<PhotoQueueRecord[]> {
   return normalizeQueueAfterRestart(await queue.list());
+}
+
+export interface PhotoReleaseResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface DiscardPhotoOptions {
+  /** Set when the original is already on OneDrive and the queue row is gone. */
+  driveFileName?: string;
+  original?: PhotoOriginalFile;
+  stationId?: string;
+  client?: GraphRequest;
+  now?: string;
+}
+
+/**
+ * The survey dropped this photo.
+ * A file that is not on OneDrive loses its queue row.
+ * A file already on OneDrive is moved to photos/deleted/ and kept in the manifest with deletedAt.
+ * An upload still in flight is marked and finished by that upload.
+ */
+export async function discardQueuedPhoto(
+  photoId: string,
+  queue: PhotoQueue = getAppPhotoQueue(),
+  opts: DiscardPhotoOptions = {},
+): Promise<PhotoReleaseResult> {
+  const now = opts.now ?? new Date().toISOString();
+  try {
+    const records = (await queue.list()).filter((record) => record.photoId === photoId);
+    if (!records.length) {
+      if (!opts.driveFileName) return { ok: true };
+      return retireVerifiedPhoto(photoId, opts.driveFileName, queue, opts, now);
+    }
+    const errors: string[] = [];
+    let kick = false;
+    for (const record of records) {
+      if (!record.bytesOnDrive && record.status !== 'uploading') {
+        await queue.delete(record.id);
+        continue;
+      }
+      if (record.status === 'uploading') {
+        await queue.put({ ...record, deletedAt: record.deletedAt ?? now });
+        continue;
+      }
+      const marked: PhotoQueueRecord = {
+        ...record,
+        status: 'retire',
+        deletedAt: now,
+        bytesOnDrive: true,
+      };
+      if (opts.client) {
+        const moved = await retireDrivePhoto({ client: opts.client, record: marked, deletedAt: now });
+        if (moved.ok) await queue.delete(record.id);
+        else {
+          await queue.put({ ...marked, attempts: record.attempts + 1, lastError: moved.error, updatedAt: now });
+          errors.push(moved.error);
+        }
+      } else {
+        await queue.put({ ...marked, updatedAt: now });
+        kick = true;
+      }
+    }
+    if (kick) kickPhotoUploads();
+    if (errors.length) return { ok: false, error: errors.join(' ') };
+    return { ok: true };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : 'Could not release the photo.';
+    return { ok: false, error };
+  }
+}
+
+async function retireVerifiedPhoto(
+  photoId: string,
+  fileName: string,
+  queue: PhotoQueue,
+  opts: DiscardPhotoOptions,
+  now: string,
+): Promise<PhotoReleaseResult> {
+  const row = retireRowFromOriginal(photoId, fileName, opts.original, opts.stationId, now);
+  if (!opts.client) {
+    await queue.put(row);
+    kickPhotoUploads();
+    return { ok: true };
+  }
+  const moved = await retireDrivePhoto({ client: opts.client, record: row, deletedAt: now });
+  if (moved.ok) return { ok: true };
+  await queue.put({ ...row, attempts: 1, lastError: moved.error });
+  return { ok: false, error: moved.error };
+}
+
+function retireRowFromOriginal(
+  photoId: string,
+  fileName: string,
+  original: PhotoOriginalFile | undefined,
+  stationId: string | undefined,
+  deletedAt: string,
+): PhotoQueueRecord {
+  return {
+    id: photoId,
+    photoId,
+    stationId: stationId ?? '',
+    fileName,
+    blob: new Blob(),
+    size: original?.size ?? 0,
+    contentType: original?.contentType ?? 'application/octet-stream',
+    receivedAt: original?.receivedAt ?? deletedAt,
+    capturedAt: original?.capturedAt,
+    provenance: original?.provenance,
+    sha256: original?.sha256,
+    calibrationKey: original?.calibrationKey,
+    usabilityNote: original?.usabilityNote,
+    pixels: original?.fullWidth
+      ? {
+          fullWidth: original.fullWidth ?? 0,
+          fullHeight: original.fullHeight ?? 0,
+          previewWidth: original.previewWidth ?? 0,
+          previewHeight: original.previewHeight ?? 0,
+          previewScaleX: original.previewScaleX ?? 1,
+          previewScaleY: original.previewScaleY ?? 1,
+          clickMap: 'p/scale',
+          clickSpace: 'upright',
+        }
+      : undefined,
+    quickXorHash: original?.quickXorHash ?? '',
+    exif: {},
+    status: 'retire',
+    attempts: 0,
+    bytesOnDrive: true,
+    deletedAt,
+    updatedAt: deletedAt,
+  };
+}
+
+/** Photo ids removed with a point: the point's list plus any photo whose addPointId matches. */
+export function surveyPhotoIdsForPoint(
+  doc: { points: { id: string; photoIds?: string[] }[]; photos: { id: string; addPointId?: string }[] },
+  pointId: string,
+): string[] {
+  const point = doc.points.find((p) => p.id === pointId);
+  return [
+    ...new Set([
+      ...(point?.photoIds ?? []),
+      ...doc.photos.filter((photo) => photo.addPointId === pointId).map((photo) => photo.id),
+    ]),
+  ];
+}
+
+/** Point-delete cascade: release every original that left with the point. */
+export async function releaseSurveyPhotos(
+  photos: Photo[],
+  photoIds: string[],
+  queue?: PhotoQueue,
+  opts: { client?: GraphRequest; now?: string } = {},
+): Promise<PhotoReleaseResult> {
+  const errors: string[] = [];
+  for (const id of photoIds) {
+    const photo = photos.find((item) => item.id === id);
+    const onDrive = photo?.originalFile?.uploadStatus === 'verified';
+    const result = await discardQueuedPhoto(id, queue, {
+      driveFileName: onDrive ? photo?.originalFile?.fileName : undefined,
+      original: photo?.originalFile,
+      stationId: photo?.addPointId,
+      client: opts.client,
+      now: opts.now,
+    });
+    if (!result.ok && result.error) errors.push(result.error);
+  }
+  if (errors.length) return { ok: false, error: errors.join(' ') };
+  return { ok: true };
 }

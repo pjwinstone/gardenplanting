@@ -51,6 +51,8 @@ export interface ManifestPhoto {
   clickMap: typeof CLICK_MAP;
   /** Clicks are in upright pixels, after orientation is applied. */
   clickSpace: 'upright';
+  /** Set when the survey dropped this original. The row stays; the file moves to photos/deleted/. */
+  deletedAt?: string;
 }
 
 export interface PhotosManifest {
@@ -76,8 +78,11 @@ export function mergeManifestEntry(
   );
   const photos = [...prior];
   const idx = photos.findIndex((p) => p.fileName === entry.fileName || p.photoId === entry.photoId);
-  if (idx >= 0) photos[idx] = entry;
-  else photos.push(entry);
+  if (idx >= 0) {
+    const previous = photos[idx]!;
+    // A later upload must not clear a delete that already landed.
+    photos[idx] = { ...entry, deletedAt: entry.deletedAt ?? previous.deletedAt };
+  } else photos.push(entry);
   return { version: 1, updatedAt: now, photos };
 }
 
@@ -103,6 +108,46 @@ export async function upsertManifestPhoto(opts: {
     const current = await readManifest(opts.client, opts.manifestPath);
     if (!current.ok && !current.missing) return { ok: false, error: current.error };
     const next = mergeManifestEntry(current.ok ? current.manifest : null, opts.entry, opts.now);
+    const put = await writeManifest(opts.client, opts.manifestPath, next, current.ok ? current.etag : null);
+    if (put.ok) return { ok: true, etag: put.etag, manifest: next };
+    if (put.conflict) {
+      lastError = put.error;
+      continue;
+    }
+    return { ok: false, error: put.error };
+  }
+  return { ok: false, error: lastError };
+}
+
+/**
+ * Keep the manifest row and set deletedAt. Survey originals are not removed from the manifest.
+ * When the row is missing, `fallback` is inserted with deletedAt (the upload finished after the delete).
+ */
+export async function setManifestPhotoDeleted(opts: {
+  client: GraphRequest;
+  manifestPath: string;
+  photoId: string;
+  fileName: string;
+  deletedAt: string;
+  now: string;
+  fallback?: ManifestPhoto;
+  maxAttempts?: number;
+}): Promise<{ ok: true; etag: string; manifest: PhotosManifest } | { ok: false; error: string }> {
+  const attempts = opts.maxAttempts ?? 4;
+  let lastError = 'Could not mark the photo deleted in the manifest.';
+  for (let i = 0; i < attempts; i++) {
+    const current = await readManifest(opts.client, opts.manifestPath);
+    if (!current.ok && !current.missing) return { ok: false, error: current.error };
+    const photos = [...(current.ok ? current.manifest.photos : [])];
+    const idx = photos.findIndex((p) => p.photoId === opts.photoId || p.fileName === opts.fileName);
+    if (idx >= 0) {
+      photos[idx] = { ...photos[idx]!, fileName: opts.fileName, deletedAt: opts.deletedAt };
+    } else if (opts.fallback) {
+      photos.push({ ...opts.fallback, fileName: opts.fileName, deletedAt: opts.deletedAt });
+    } else {
+      return { ok: false, error: `photos/manifest.json has no ${opts.fileName}.` };
+    }
+    const next: PhotosManifest = { version: 1, updatedAt: opts.now, photos };
     const put = await writeManifest(opts.client, opts.manifestPath, next, current.ok ? current.etag : null);
     if (put.ok) return { ok: true, etag: put.etag, manifest: next };
     if (put.conflict) {

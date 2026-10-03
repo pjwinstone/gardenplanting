@@ -7,12 +7,13 @@
  * name is kept, then accepted only when size and quickXorHash match.
  */
 
-import { photosFolderPath, photosManifestPath, ONEDRIVE_FOLDER } from './cloudConfig';
+import { photosFolderPath, photosManifestPath, deletedPhotosFolderPath, ONEDRIVE_FOLDER } from './cloudConfig';
 import type { PhotoQueueRecord } from './photoQueue';
 import {
   CLICK_MAP,
   graphError,
   graphItemUrl,
+  setManifestPhotoDeleted,
   upsertManifestPhoto,
   type GraphRequest,
   type ManifestPhoto,
@@ -133,6 +134,67 @@ export async function uploadAndVerifyOriginal(opts: {
     };
   }
   return { ok: true, remote: uploaded.remote, existed: uploaded.existed };
+}
+
+/**
+ * Move an original that the survey dropped into `/Garden Survey/photos/deleted/`.
+ * Survey originals are raw data: this never sends a hard DELETE.
+ * A 404 means this name was never stored. Callers must not invent a manifest row.
+ */
+export async function movePhotoToDeletedFolder(
+  client: GraphRequest,
+  fileName: string,
+): Promise<{ ok: true; missing?: boolean } | { ok: false; error: string }> {
+  const photos = await ensurePhotosFolder(client);
+  if (!photos.ok) return photos;
+  const deleted = await ensureFolder(client, photosFolderPath(), 'deleted');
+  if (!deleted.ok) return deleted;
+
+  const url = graphItemUrl(`${photosFolderPath()}/${fileName}`);
+  let res: Response;
+  try {
+    res = await client.fetch(url, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${client.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        parentReference: { path: `/drive/root:/${deletedPhotosFolderPath()}` },
+        '@microsoft.graph.conflictBehavior': 'rename',
+      }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Move failed.';
+    return { ok: false, error: message };
+  }
+  if (res.status === 404) return { ok: true, missing: true };
+  if (res.ok) return { ok: true };
+  return { ok: false, error: await graphError(res) };
+}
+
+/** Move the file, then keep its manifest row with deletedAt set. */
+export async function retireDrivePhoto(opts: {
+  client: GraphRequest;
+  record: PhotoQueueRecord;
+  deletedAt: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const moved = await movePhotoToDeletedFolder(opts.client, opts.record.fileName);
+  if (!moved.ok) {
+    return { ok: false, error: `Could not move ${opts.record.fileName} to photos/deleted: ${moved.error}` };
+  }
+  if (moved.missing) return { ok: true };
+  const marked = await setManifestPhotoDeleted({
+    client: opts.client,
+    manifestPath: photosManifestPath(),
+    photoId: opts.record.photoId,
+    fileName: opts.record.fileName,
+    deletedAt: opts.deletedAt,
+    now: opts.deletedAt,
+    fallback: { ...manifestEntryFromRecord(opts.record), deletedAt: opts.deletedAt },
+  });
+  if (!marked.ok) return { ok: false, error: marked.error };
+  return { ok: true };
 }
 
 export async function publishPhotoManifest(opts: {

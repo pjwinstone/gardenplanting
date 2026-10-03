@@ -13,8 +13,8 @@ import { normalizeDocument } from './model';
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 
 export type CloudSaveResult =
-  | { ok: true; savedAt: string; fileName: string }
-  | { ok: false; error: string; missing?: boolean };
+  | { ok: true; savedAt: string; fileName: string; eTag?: string }
+  | { ok: false; error: string; missing?: boolean; conflict?: boolean };
 
 export type CloudLoadResult =
   | {
@@ -22,6 +22,10 @@ export type CloudLoadResult =
       doc: GardenDocument;
       loadedAt: string;
       fileName: string;
+      /** Item eTag. Send it back as If-Match on the next save. */
+      eTag?: string;
+      /** Document `updatedAt`, or the drive item's lastModifiedDateTime. */
+      remoteUpdatedAt?: string;
       /** Opened legacy `garden.json` because the preferred file was missing. */
       usedLegacy?: boolean;
       /** Preferred name that was missing when a fallback file was opened. */
@@ -31,10 +35,14 @@ export type CloudLoadResult =
 
 export type GardenCloudFile = { name: string; lastModified?: string };
 
-function itemContentUrl(fileName: string): string {
+function itemBaseUrl(fileName: string): string {
   const path = onedrivePathFor(fileName);
   const encoded = encodeURIComponent(path).replace(/%2F/g, '/');
-  return `${GRAPH}/me/drive/root:/${encoded}:/content`;
+  return `${GRAPH}/me/drive/root:/${encoded}`;
+}
+
+function itemContentUrl(fileName: string): string {
+  return `${itemBaseUrl(fileName)}:/content`;
 }
 
 function folderChildrenUrl(): string {
@@ -55,8 +63,11 @@ export async function silentGraphToken(): Promise<
   return acquireGraphTokenSilent();
 }
 
-async function ensureFolder(token: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const res = await fetch(`${GRAPH}/me/drive/root/children`, {
+async function ensureFolder(
+  token: string,
+  fetchImpl: typeof fetch,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const res = await fetchImpl(`${GRAPH}/me/drive/root/children`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -78,49 +89,45 @@ async function ensureFolder(token: string): Promise<{ ok: true } | { ok: false; 
   return { ok: true };
 }
 
+export interface SaveGardenOptions {
+  /** When set, Graph rejects the write with 412 if the file has moved on. */
+  ifMatch?: string;
+  /** First save of a missing file uses `*`, so a 412 means someone else created it. */
+  ifNoneMatch?: string;
+  fetchImpl?: typeof fetch;
+}
+
 export async function saveGardenToOneDrive(
   doc: GardenDocument,
   fileName = getGardenCloudFileName(),
   token?: string,
+  opts?: SaveGardenOptions,
 ): Promise<CloudSaveResult> {
+  const fetchImpl = opts?.fetchImpl ?? fetch;
   const auth = token ? { ok: true as const, token } : await withToken();
   if (!auth.ok) return { ok: false, error: auth.error };
 
-  const folder = await ensureFolder(auth.token);
+  const folder = await ensureFolder(auth.token, fetchImpl);
   if (!folder.ok) return { ok: false, error: folder.error };
 
   const body = JSON.stringify(doc, null, 2);
-  const res = await fetch(itemContentUrl(fileName), {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${auth.token}`,
+    'Content-Type': 'application/json',
+  };
+  if (opts?.ifMatch) headers['If-Match'] = opts.ifMatch;
+  if (opts?.ifNoneMatch) headers['If-None-Match'] = opts.ifNoneMatch;
+  const res = await fetchImpl(itemContentUrl(fileName), {
     method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${auth.token}`,
-      'Content-Type': 'application/json',
-    },
+    headers,
     body,
   });
 
-  if (!res.ok) {
-    const detail = await readGraphError(res);
-    return { ok: false, error: plainGraphStatus(res.status, detail, fileName) };
-  }
-
-  return { ok: true, savedAt: new Date().toISOString(), fileName };
-}
-
-async function loadNamedFile(
-  token: string,
-  fileName: string,
-): Promise<CloudLoadResult> {
-  const res = await fetch(itemContentUrl(fileName), {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (res.status === 404) {
+  if (res.status === 412) {
     return {
       ok: false,
-      missing: true,
-      error: `No ${fileName} on OneDrive yet (looked for /${onedrivePathFor(fileName)}).`,
+      conflict: true,
+      error: `${fileName} changed on OneDrive. Choose which copy to keep.`,
     };
   }
 
@@ -129,16 +136,86 @@ async function loadNamedFile(
     return { ok: false, error: plainGraphStatus(res.status, detail, fileName) };
   }
 
+  return { ok: true, savedAt: new Date().toISOString(), fileName, eTag: await etagFromResponse(res) };
+}
+
+async function loadNamedFile(
+  token: string,
+  fileName: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CloudLoadResult> {
+  // Item metadata keeps the eTag. A GET of `:/content` follows a 302 and drops it.
+  const select = encodeURIComponent('eTag,lastModifiedDateTime,@microsoft.graph.downloadUrl');
+  const metaRes = await fetchImpl(`${itemBaseUrl(fileName)}?$select=${select}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (metaRes.status === 404) {
+    return {
+      ok: false,
+      missing: true,
+      error: `No ${fileName} on OneDrive yet (looked for /${onedrivePathFor(fileName)}).`,
+    };
+  }
+
+  if (!metaRes.ok) {
+    const detail = await readGraphError(metaRes);
+    return { ok: false, error: plainGraphStatus(metaRes.status, detail, fileName) };
+  }
+
+  let eTag: string | undefined;
+  let lastModified: string | undefined;
+  let downloadUrl = '';
   try {
-    const parsed = (await res.json()) as GardenDocument;
+    const meta = (await metaRes.json()) as {
+      eTag?: unknown;
+      lastModifiedDateTime?: unknown;
+      '@microsoft.graph.downloadUrl'?: unknown;
+    };
+    eTag = typeof meta.eTag === 'string' ? meta.eTag : undefined;
+    lastModified = typeof meta.lastModifiedDateTime === 'string' ? meta.lastModifiedDateTime : undefined;
+    downloadUrl =
+      typeof meta['@microsoft.graph.downloadUrl'] === 'string' ? meta['@microsoft.graph.downloadUrl'] : '';
+  } catch {
+    return { ok: false, error: `Could not read ${fileName} from OneDrive.` };
+  }
+
+  const bodyRes = downloadUrl
+    ? await fetchImpl(downloadUrl, { method: 'GET' })
+    : await fetchImpl(itemContentUrl(fileName), {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+  if (bodyRes.status === 404) {
+    return {
+      ok: false,
+      missing: true,
+      error: `No ${fileName} on OneDrive yet (looked for /${onedrivePathFor(fileName)}).`,
+    };
+  }
+  if (!bodyRes.ok) {
+    const detail = await readGraphError(bodyRes);
+    return { ok: false, error: plainGraphStatus(bodyRes.status, detail, fileName) };
+  }
+
+  const bodyEtag = bodyRes.headers.get('etag') || bodyRes.headers.get('ETag') || undefined;
+  try {
+    const parsed = (await bodyRes.json()) as GardenDocument;
     if (parsed?.version !== 1 || !Array.isArray(parsed.points)) {
       return { ok: false, error: `${fileName} is not a garden.json v1 document.` };
     }
+    const doc = normalizeDocument(parsed);
+    if (!doc.updatedAt && lastModified) doc.updatedAt = lastModified;
+    const remoteUpdatedAt = doc.updatedAt || lastModified;
     return {
       ok: true,
-      doc: normalizeDocument(parsed),
+      doc,
       loadedAt: new Date().toISOString(),
       fileName,
+      eTag: eTag || bodyEtag,
+      remoteUpdatedAt,
     };
   } catch {
     return { ok: false, error: `Could not read ${fileName} from OneDrive (invalid JSON).` };
@@ -152,12 +229,14 @@ async function loadNamedFile(
  */
 export async function loadGardenFromOneDrive(
   fileName = getGardenCloudFileName(),
+  opts?: { token?: string; fetchImpl?: typeof fetch; exact?: boolean },
 ): Promise<CloudLoadResult> {
-  const auth = await withToken();
+  const fetchImpl = opts?.fetchImpl ?? fetch;
+  const auth = opts?.token ? { ok: true as const, token: opts.token } : await withToken();
   if (!auth.ok) return { ok: false, error: auth.error };
 
-  const primary = await loadNamedFile(auth.token, fileName);
-  if (primary.ok || !primary.missing) return primary;
+  const primary = await loadNamedFile(auth.token, fileName, fetchImpl);
+  if (primary.ok || !primary.missing || opts?.exact) return primary;
 
   const tried = new Set<string>([fileName]);
   const listed = await listGardenFilesWithToken(auth.token);
@@ -181,7 +260,7 @@ export async function loadGardenFromOneDrive(
   for (const alt of candidates) {
     if (tried.has(alt)) continue;
     tried.add(alt);
-    const next = await loadNamedFile(auth.token, alt);
+    const next = await loadNamedFile(auth.token, alt, fetchImpl);
     if (next.ok) {
       return {
         ...next,
@@ -276,6 +355,17 @@ function plainGraphStatus(status: number, detail: string, fileName: string): str
     return `OneDrive is temporarily unavailable (${status}). Try again in a moment.`;
   }
   return detail || `OneDrive request failed (${status}).`;
+}
+
+async function etagFromResponse(res: Response): Promise<string | undefined> {
+  const header = res.headers.get('etag') || res.headers.get('ETag') || '';
+  if (header) return header;
+  try {
+    const body = (await res.clone().json()) as { eTag?: unknown };
+    return typeof body.eTag === 'string' ? body.eTag : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isSpoLicenseError(detail: string): boolean {
