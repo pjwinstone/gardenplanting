@@ -68,7 +68,7 @@ Bands stay **horizontal**. They become rings. The **TOP** arrow points to the to
 
 1. Printed face outward.
 2. Lay the glue flap on the dowel first. The words **GLUE UNDER** go against the overlap, then under it.
-3. Roll the sheet tight. Put **both** seam alignment crosses on the cut edge — the top one and the bottom one — onto the matching crosses at the inner edge of the flap. A **1°** spiral misaligns the bands by about **3.3 mm**, so keep the TOP arrow square to the dowel. The overlap on a 60 mm dowel is **205 − π × 60 ≈ 16.5 mm** (circumference 188.5 mm). A white gap opens at the seam if the outside circumference goes over about **192.8 mm**, which is a dowel over about **61.2 mm** once film is on it. The bands do not cover that extra paper.
+3. Roll the sheet tight. Put **both** seam alignment crosses on the cut edge — the top one and the bottom one — onto the matching crosses at the inner edge of the flap. A **1°** spiral misaligns the bands by about **3.3 mm**, so keep the TOP arrow square to the dowel. The overlap on a 60 mm dowel is **205 − π × 60 ≈ 16.5 mm** (circumference 188.5 mm). A white gap opens at the seam if the outside circumference goes over about **192.8 mm**. That is an outside diameter of about **61.4 mm** (192.8 / π), so the threshold is a dowel of about **61.0 mm** with 0.2 mm stock. The bands do not cover that extra paper.
 4. Glue the flap to the wood, and glue or tape the overlap down. A loose sleeve is not a bearing: the silhouette would follow the paper, not the dowel.
 5. Press the seam flat. It is a vertical join, not a ridge. A ridge splits the silhouette.
 
