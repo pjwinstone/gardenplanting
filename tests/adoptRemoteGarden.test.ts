@@ -420,6 +420,96 @@ describe('adopt remote garden', () => {
     }
   });
 
+  it('reattaches a photo with no addPointId when the local point already lists it', () => {
+    let prompt = '';
+    vi.stubGlobal('window', {
+      confirm: (text: string) => {
+        prompt = text;
+        return true;
+      },
+      alert: () => {},
+    });
+    const local = namedGarden('Local');
+    local.points[0] = { ...local.points[0]!, photoIds: ['ph-roll'] };
+    gardenCloudUiForTests.edit(local);
+    const photo = { ...uploadingPhoto('ph-roll'), thumbnailDataUrl: 'data:image/jpeg;base64,roll' };
+    gardenCloudUiForTests.adopt(namedGarden('Remote'), 'garden-v1.json', '"v9"', [photo]);
+    expect(prompt).toContain('Re-attach it?');
+    expect(getState().doc.points.find((point) => point.id === 'HSE01')?.photoIds).toEqual(['ph-roll']);
+    expect(photosOnPoint(getState().doc, 'HSE01')[0]?.thumbnailDataUrl).toBe('data:image/jpeg;base64,roll');
+    expect(getState().doc.points.map((point) => point.id)).toEqual(['HSE01']);
+  });
+
+  it('does not dirty a clean garden when Load times out waiting for the lock', async () => {
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async () => {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        },
+      },
+    });
+    expect(gardenIsDirty()).toBe(false);
+    await gardenCloudUiForTests.loadNow();
+    expect(getCloudStatus().message).toBe('Another tab is busy — tap Load to retry');
+    expect(gardenIsDirty()).toBe(false);
+    expect(gardenSaveIsOwed()).toBe(false);
+    expect(getCloudStatus().busy).toBe(false);
+  });
+
+  it('reports a save failure from the queue and keeps the garden dirty and owed', async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onRejection);
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async () => {
+          throw new Error('disk full');
+        },
+      },
+    });
+    try {
+      gardenCloudUiForTests.edit(namedGarden('Needs a save'));
+      await gardenCloudUiForTests.saveNow();
+      await Promise.resolve();
+      expect(getCloudStatus().message).toBe('Save failed: disk full');
+      expect(gardenIsDirty()).toBe(true);
+      expect(gardenSaveIsOwed()).toBe(true);
+      expect(getCloudStatus().busy).toBe(false);
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  });
+
+  it('reports a load failure from the queue and leaves dirty unchanged', async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onRejection);
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async () => {
+          throw new Error('network down');
+        },
+      },
+    });
+    try {
+      expect(gardenIsDirty()).toBe(false);
+      await gardenCloudUiForTests.loadNow();
+      await Promise.resolve();
+      expect(getCloudStatus().message).toBe('Load failed: network down');
+      expect(gardenIsDirty()).toBe(false);
+      expect(gardenSaveIsOwed()).toBe(false);
+      expect(getCloudStatus().busy).toBe(false);
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  });
+
   it('passes an AbortSignal when AbortSignal.timeout is missing', async () => {
     const descriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
     Object.defineProperty(AbortSignal, 'timeout', { configurable: true, value: undefined });

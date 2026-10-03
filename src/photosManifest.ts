@@ -246,17 +246,32 @@ export async function loadDeletedPhotoKeys(opts: {
   return { photoIds: [...photoIds], fileNames: [...fileNames] };
 }
 
+const MAX_DELETED_PAGES = 50;
+
+/** Names in a drive folder, following `@odata.nextLink` past the first page. */
 async function listChildNames(client: GraphRequest, folderPath: string): Promise<string[]> {
-  const url = `${graphItemUrl(folderPath)}:/children?$select=name&$top=200`;
-  const res = await client.fetch(url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${client.token}` },
-  });
-  if (!res.ok) return [];
-  const body = (await res.json()) as { value?: Array<{ name?: unknown }> };
   const names: string[] = [];
-  for (const item of body.value ?? []) {
-    if (typeof item?.name === 'string' && item.name) names.push(item.name);
+  let url: string | undefined = `${graphItemUrl(folderPath)}:/children?$select=name&$top=200`;
+  const seen = new Set<string>();
+  for (let page = 0; url && page < MAX_DELETED_PAGES; page++) {
+    if (seen.has(url)) break;
+    seen.add(url);
+    const res = await client.fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${client.token}` },
+    });
+    if (!res.ok) break;
+    let body: { value?: Array<{ name?: unknown }>; '@odata.nextLink'?: unknown };
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      break;
+    }
+    for (const item of body.value ?? []) {
+      if (typeof item?.name === 'string' && item.name && !names.includes(item.name)) names.push(item.name);
+    }
+    const next = body['@odata.nextLink'];
+    url = typeof next === 'string' && next ? next : undefined;
   }
   return names;
 }

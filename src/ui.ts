@@ -1,6 +1,6 @@
 /** Main UI: plan-first layout, hamburger drawer, print tags. Calls toolbox + workflows. */
 
-import type { GardenDocument, Photo } from './model';
+import type { GardenDocument, Photo, Point } from './model';
 import {
   confirmAbTogether,
   baselineReady,
@@ -1366,13 +1366,14 @@ function adoptRemoteGarden(
   // In-flight saves that finish after this must not store their eTag or clear dirty.
   // Photo rows whose originals are still uploading stay in the conflict copy
   // (filed before adopt). This replace does not delete photos/manifest.json entries.
+  const localPoints = state.doc.points;
   noteRemoteGardenApplied();
   const account = accountKey() ?? '';
   if (eTag) rememberDriveETag(account, fileName, eTag);
   setGardenCloudFileName(fileName);
   notifyCloudPrefsChanged();
   setState({ doc, refuseMessage: null }, { fromRemote: true });
-  offerReattachLocalPhotos(localOnlyPhotos, preservedAs);
+  offerReattachLocalPhotos(localOnlyPhotos, preservedAs, localPoints);
 }
 
 /**
@@ -1392,7 +1393,7 @@ export function photosOnPoint(doc: GardenDocument, pointId: string | undefined):
  * A point that the OneDrive garden does not have is not recreated; that photo
  * stays only in the conflict copy.
  */
-function offerReattachLocalPhotos(photos: Photo[], preservedAs?: string): void {
+function offerReattachLocalPhotos(photos: Photo[], preservedAs?: string, localPoints: Point[] = []): void {
   if (photos.length === 0) return;
   const pointIds = new Set(state.doc.points.map((point) => point.id));
   const attachable: Photo[] = [];
@@ -1401,7 +1402,7 @@ function offerReattachLocalPhotos(photos: Photo[], preservedAs?: string): void {
   for (const photo of photos) {
     if (seen.has(photo.id)) continue;
     seen.add(photo.id);
-    const pointId = photo.addPointId;
+    const pointId = reattachPointId(state.doc, localPoints, photo);
     if (pointId && pointIds.has(pointId)) attachable.push(photo);
     else skipped.push(photo);
   }
@@ -1414,8 +1415,19 @@ function offerReattachLocalPhotos(photos: Photo[], preservedAs?: string): void {
     return;
   }
   if (!window.confirm(text)) return;
-  const doc = applyReattachedPhotos(state.doc, attachable);
+  const doc = applyReattachedPhotos(state.doc, attachable, localPoints);
   if (doc !== state.doc) setDoc(doc);
+}
+
+/**
+ * `addPointId` when the photo has one. Otherwise the local point that already
+ * lists this photo, if that point is still on the adopted garden.
+ */
+function reattachPointId(adopted: GardenDocument, localPoints: Point[], photo: Photo): string | undefined {
+  if (photo.addPointId) return photo.addPointId;
+  const fromLocal = localPoints.find((point) => (point.photoIds ?? []).includes(photo.id));
+  if (fromLocal && adopted.points.some((point) => point.id === fromLocal.id)) return fromLocal.id;
+  return adopted.points.find((point) => (point.photoIds ?? []).includes(photo.id))?.id;
 }
 
 function conflictCopyName(preservedAs?: string): string {
@@ -1424,7 +1436,7 @@ function conflictCopyName(preservedAs?: string): string {
   return trimmed.split('/').pop() || trimmed;
 }
 
-function applyReattachedPhotos(doc: GardenDocument, photos: Photo[]): GardenDocument {
+function applyReattachedPhotos(doc: GardenDocument, photos: Photo[], localPoints: Point[]): GardenDocument {
   const have = new Set(doc.photos.map((photo) => photo.id));
   const added: Photo[] = [];
   for (const photo of photos) {
@@ -1434,7 +1446,7 @@ function applyReattachedPhotos(doc: GardenDocument, photos: Photo[]): GardenDocu
   }
   const idsByPoint = new Map<string, string[]>();
   for (const photo of photos) {
-    const pointId = photo.addPointId;
+    const pointId = reattachPointId(doc, localPoints, photo);
     if (!pointId) continue;
     const list = idsByPoint.get(pointId) ?? [];
     if (!list.includes(photo.id)) list.push(photo.id);
@@ -1496,12 +1508,13 @@ export const gardenCloudUiForTests = {
 
 const GARDEN_SAVE_LOCK = 'garden-survey-save';
 const GARDEN_SAVE_LOCK_MS = 30_000;
-const ANOTHER_TAB_BUSY = 'Another tab is busy — tap Save to retry';
+const SAVE_LOCK_BUSY = 'Another tab is busy — tap Save to retry';
+const LOAD_LOCK_BUSY = 'Another tab is busy — tap Load to retry';
 
-/** The other tab still holds the save lock. Dirty and the owed save stay set. */
+/** The other tab still holds the save lock. The message says which button to retry. */
 class GardenSaveLockTimeout extends Error {
-  constructor() {
-    super(ANOTHER_TAB_BUSY);
+  constructor(message: string) {
+    super(message);
     this.name = 'GardenSaveLockTimeout';
   }
 }
@@ -1543,15 +1556,34 @@ function drainGardenQueue(): void {
     try {
       await slot.run();
     } catch (err) {
-      // The lock wait already told the user and left the save owed.
-      // Anything else must not stall the queue; the caller still finishes.
-      if (!(err instanceof GardenSaveLockTimeout)) throw err;
+      // A lock timeout already set its own message. Any other failure must
+      // not escape this runner: nothing awaits it, so a throw is unhandled.
+      if (!(err instanceof GardenSaveLockTimeout)) reportQueueFailure(slot.kind, err);
     } finally {
       gardenQueueRunning = false;
       for (const done of slot.waiters) done();
       drainGardenQueue();
     }
   })();
+}
+
+function shortFailureReason(err: unknown): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  const reason = raw.replace(/\s+/g, ' ').trim() || 'unknown error';
+  return reason.length > 160 ? `${reason.slice(0, 157)}…` : reason;
+}
+
+/** A thrown save stays dirty and owed. A thrown load leaves dirty and owed as they were. */
+function reportQueueFailure(kind: 'save' | 'task', err: unknown): void {
+  const reason = shortFailureReason(err);
+  if (kind === 'save') {
+    markGardenDirty();
+    noteOwedGardenSave(state.doc);
+    setCloudMessage(`Save failed: ${reason}`);
+  } else {
+    setCloudMessage(`Load failed: ${reason}`);
+  }
+  setCloudBusy(false);
 }
 
 function enqueueGardenSave(job: PendingSave): Promise<void> {
@@ -1606,7 +1638,7 @@ function isLockWaitAbort(err: unknown): boolean {
   return name === 'AbortError' || name === 'TimeoutError';
 }
 
-async function withGardenSaveLock<T>(fn: () => Promise<T>): Promise<T> {
+async function withGardenSaveLock<T>(fn: () => Promise<T>, purpose: 'save' | 'load' = 'save'): Promise<T> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   if (!locks?.request) return fn();
   let waiting = false;
@@ -1632,11 +1664,14 @@ async function withGardenSaveLock<T>(fn: () => Promise<T>): Promise<T> {
   } catch (err) {
     abort?.cancel();
     if (!isLockWaitAbort(err)) throw err;
-    setCloudMessage(ANOTHER_TAB_BUSY);
-    markGardenDirty();
-    noteOwedGardenSave(state.doc);
+    const load = purpose === 'load';
+    setCloudMessage(load ? LOAD_LOCK_BUSY : SAVE_LOCK_BUSY);
+    if (!load) {
+      markGardenDirty();
+      noteOwedGardenSave(state.doc);
+    }
     setCloudBusy(false);
-    throw new GardenSaveLockTimeout();
+    throw new GardenSaveLockTimeout(load ? LOAD_LOCK_BUSY : SAVE_LOCK_BUSY);
   }
 }
 
@@ -1911,7 +1946,7 @@ function reconcileOpenGarden(fileName: string, token: string, account: string): 
     downloadLocal: downloadConflictCopy,
     prompt: 'user',
     readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
-    usingLock: withGardenSaveLock,
+    usingLock: (fn) => withGardenSaveLock(fn, 'load'),
   });
 }
 

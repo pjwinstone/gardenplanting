@@ -15,6 +15,7 @@ import {
 } from '../src/gardenCloudSave';
 import { markGardenSaveOwed, readOwedGardenSave, type OwedGardenSave, type OwedSaveStorage } from '../src/cloudSignIn';
 import { emptyDocument, type GardenDocument, type Photo } from '../src/model';
+import { loadDeletedPhotoKeys } from '../src/photosManifest';
 
 const FILE = 'garden-v1.json';
 const ACCOUNT = 'home-account';
@@ -1190,6 +1191,95 @@ describe('conflict prompt and local-only photos', () => {
     const filed = remote.puts.find((put) => put.fileName.startsWith('garden-conflict'));
     expect(filed?.body.photos.map((photo) => photo.id)).toEqual(['ph-dead', 'ph-moved', 'ph-roll']);
     expect(remote.puts.some((put) => put.fileName.includes('manifest'))).toBe(false);
+  });
+
+  it('keeps an edit made while deleted photos are being listed', async () => {
+    const storage = memoryStorage();
+    noteLocalGardenEdit(storage);
+    let live = garden(LOCAL_AT, 'Before lookup');
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    const order: string[] = [];
+    const outcome = await commitGardenSave({
+      doc: live,
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      readLocal: () => ({ doc: live, dirty: true, revision: gardenRevision(storage) }),
+      choose: async () => 'remote',
+      fetchImpl: async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const method = init?.method ?? 'GET';
+        if (url.includes('photos/manifest.json') || url.includes('download.example/manifest')) {
+          order.push('manifest');
+          if (order.filter((step) => step === 'manifest').length === 1) {
+            const next = garden(LOCAL_AT, 'Added during deleted lookup');
+            next.points = [
+              { id: 'HSE01', kind: 'HSE', label: 'Before lookup' },
+              { id: 'HSE02', kind: 'HSE', label: 'Added during deleted lookup' },
+            ];
+            live = next;
+            noteLocalGardenEdit(storage);
+          }
+          if (url.includes('$select=')) {
+            return json(200, {
+              eTag: '"manifest"',
+              '@microsoft.graph.downloadUrl': 'https://download.example/manifest',
+            });
+          }
+          return json(200, { version: 1, updatedAt: '', photos: [] });
+        }
+        if (url.includes('/photos/deleted') && url.includes('children')) {
+          order.push('deleted');
+          return json(200, { value: [] });
+        }
+        if (method === 'PUT' && url.includes('garden-conflict')) order.push('conflict');
+        return remote.fetchImpl(input, init);
+      },
+    });
+    expect(order.indexOf('manifest')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('conflict')).toBeGreaterThan(order.indexOf('manifest'));
+    expect(order.indexOf('deleted')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('conflict')).toBeGreaterThan(order.indexOf('deleted'));
+    const conflicts = remote.puts.filter((put) => put.fileName.startsWith('garden-conflict'));
+    const filed = conflicts.some((put) => put.body.points.some((point) => point.id === 'HSE02'));
+    const aborted = !outcome.ok && outcome.cancelled === true && live.points.some((point) => point.id === 'HSE02');
+    expect(filed || aborted).toBe(true);
+    if (outcome.ok && !outcome.wrote) {
+      expect(filed).toBe(true);
+      expect(conflicts.at(-1)?.body.points.map((point) => point.id)).toContain('HSE02');
+    } else {
+      expect(gardenIsDirty(storage)).toBe(true);
+      expect(rememberedDriveETag(ACCOUNT, FILE, storage)).not.toBe('"v9"');
+    }
+  });
+
+  it('reads every page of photos/deleted', async () => {
+    const keys = await loadDeletedPhotoKeys({
+      client: {
+        token: 'tok',
+        fetch: async (input) => {
+          const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+          if (url.includes('manifest')) return json(404, {});
+          if (url.includes('children')) {
+            return json(200, {
+              value: [{ name: 'page-one.jpg' }],
+              '@odata.nextLink': 'https://graph.example/deleted?page=2',
+            });
+          }
+          if (url.includes('page=2')) return json(200, { value: [{ name: 'page-two.jpg' }] });
+          return json(404, {});
+        },
+      },
+      manifestPath: 'Garden Survey/photos/manifest.json',
+      deletedFolderPath: 'Garden Survey/photos/deleted',
+    });
+    expect(keys.fileNames).toEqual(['page-one.jpg', 'page-two.jpg']);
   });
 });
 

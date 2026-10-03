@@ -671,18 +671,26 @@ async function settleRemoteChoice(
     return { kind: 'moved', remote: again };
   }
 
-  const preserved = await preserveMatchingCopy(opts, fileName);
-  if (!preserved.ok) {
-    if (preserved.aborted) {
-      return {
-        kind: 'result',
-        result: { ok: false, cancelled: true, conflict: true, error: preserved.error },
-      };
-    }
-    return { kind: 'result', result: { ok: false, error: preserved.error, conflict: true } };
+  // Network I/O finishes before the conflict copy. An edit during this read is
+  // still in the garden when the copy is built, so it is not dropped.
+  const deleted = await loadDeletedPhotoKeys({
+    client: { fetch: opts.fetchImpl ?? fetch, token: opts.token },
+    manifestPath: photosManifestPath(),
+    deletedFolderPath: deletedPhotosFolderPath(),
+  });
+
+  let preserved = await preserveMatchingCopy(opts, fileName);
+  if (!preserved.ok) return { kind: 'result', result: preserveFailure(preserved) };
+
+  let adopted = finishRemoteAdopt(opts, preserved, again, fileName, localUpdatedAt, deleted);
+  if (!adopted) {
+    // The garden moved after the copy was matched. File the newer garden.
+    // A fresh name avoids If-None-Match colliding with the copy just written.
+    preserved = await preserveMatchingCopy(opts, fileName, 2);
+    if (!preserved.ok) return { kind: 'result', result: preserveFailure(preserved) };
+    adopted = finishRemoteAdopt(opts, preserved, again, fileName, localUpdatedAt, deleted);
   }
-  const still = currentLocal(opts);
-  if (still.revision !== preserved.revision) {
+  if (!adopted) {
     return {
       kind: 'result',
       result: {
@@ -693,32 +701,55 @@ async function settleRemoteChoice(
       },
     };
   }
+  return { kind: 'result', result: adopted };
+}
+
+function preserveFailure(preserved: { error: string; aborted?: boolean }): GardenCommitResult {
+  if (preserved.aborted) {
+    return { ok: false, cancelled: true, conflict: true, error: preserved.error };
+  }
+  return { ok: false, error: preserved.error, conflict: true };
+}
+
+/**
+ * Revision check, adopt, dirty clear, and eTag store. No await in this function:
+ * an edit cannot land between the check and the adopt.
+ * Returns null when the garden moved, so the caller files another copy or asks again.
+ */
+function finishRemoteAdopt(
+  opts: {
+    account?: string;
+    storage?: OwedSaveStorage;
+    doc: GardenDocument;
+    readLocal?: () => LocalGardenView;
+  },
+  preserved: { revision: number; where: string; message: string; updatedAt: string; doc: GardenDocument },
+  again: Extract<CloudLoadResult, { ok: true }>,
+  fileName: string,
+  localUpdatedAt: string,
+  deleted: { photoIds: string[]; fileNames: string[] },
+): GardenCommitResult | null {
+  const still = currentLocal(opts);
+  if (still.revision !== preserved.revision) return null;
   noteRemoteGardenApplied();
   clearPrompted(opts.storage);
   clearGardenDirty(opts.storage);
+  const remoteFile = again.fileName || fileName;
+  if (again.eTag && opts.account) rememberDriveETag(opts.account, remoteFile, again.eTag, opts.storage);
   const remoteUpdatedAt = again.remoteUpdatedAt || again.doc.updatedAt || '';
-  // Read-only. A failure here still offers every local-only photo; nothing is deleted.
-  const deleted = await loadDeletedPhotoKeys({
-    client: { fetch: opts.fetchImpl ?? fetch, token: opts.token },
-    manifestPath: photosManifestPath(),
-    deletedFolderPath: deletedPhotosFolderPath(),
-  });
   return {
-    kind: 'result',
-    result: {
-      ok: true,
-      wrote: false,
-      kept: 'remote',
-      doc: again.doc,
-      fileName: again.fileName || fileName,
-      eTag: again.eTag,
-      localUpdatedAt: preserved.updatedAt || localUpdatedAt,
-      remoteUpdatedAt,
-      reason: 'chose-remote',
-      preservedAs: preserved.where,
-      message: preserved.message,
-      localOnlyPhotos: photosOnlyInLocal(preserved.doc, again.doc, deleted),
-    },
+    ok: true,
+    wrote: false,
+    kept: 'remote',
+    doc: again.doc,
+    fileName: remoteFile,
+    eTag: again.eTag,
+    localUpdatedAt: preserved.updatedAt || localUpdatedAt,
+    remoteUpdatedAt,
+    reason: 'chose-remote',
+    preservedAs: preserved.where,
+    message: preserved.message,
+    localOnlyPhotos: photosOnlyInLocal(preserved.doc, again.doc, deleted),
   };
 }
 
@@ -743,12 +774,14 @@ async function preserveMatchingCopy(
     readLocal?: () => LocalGardenView;
   },
   gardenFileName: string,
+  startAttempt = 0,
 ): Promise<
   | { ok: true; where: string; message: string; revision: number; updatedAt: string; doc: GardenDocument }
   | { ok: false; error: string; aborted?: boolean }
 > {
   const maxAttempts = 2;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let n = 0; n < maxAttempts; n++) {
+    const attempt = startAttempt + n;
     const live = currentLocal(opts);
     if (isEmptySurveyGarden(live.doc)) {
       return {
