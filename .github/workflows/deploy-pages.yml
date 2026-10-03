@@ -34,6 +34,9 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Install poppler
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
       - name: Test
         run: npm test
 

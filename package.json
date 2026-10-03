@@ -12,7 +12,8 @@
     "test:field-circle": "tsx scripts/check-field-circle-baseline.ts",
     "test:occ-off-baseline": "node scripts/check-occ-off-baseline.mjs",
     "test:station-baseline": "node scripts/check-station-baseline.mjs",
-    "build:checklist-pdf": "node scripts/build-checklist-pdf.mjs"
+    "build:checklist-pdf": "node scripts/build-checklist-pdf.mjs",
+    "build:marker-sleeves": "tsx scripts/build-marker-sleeves.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
