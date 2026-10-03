@@ -126,6 +126,7 @@ import {
   gardenIsDirty,
   gardenRevision,
   noteLocalGardenEdit,
+  noteRemoteGardenApplied,
   reconcileGardenOnLoad,
   rememberedDriveETag,
   rememberDriveETag,
@@ -1265,14 +1266,14 @@ function setState(partial: Partial<UiState>, opts?: { fromRemote?: boolean }): v
     }
     clearGardenDirty();
   } else if (doc) {
-    const revision = noteLocalGardenEdit();
+    noteLocalGardenEdit();
     const saved = persistGardenLocal(doc);
     if (!saved.ok) {
       handleLocalPersistFailure(doc, saved);
     } else if (state.refuseMessage && /browser|quota|storage/i.test(state.refuseMessage)) {
       state = { ...state, refuseMessage: null };
     }
-    scheduleCloudBackup(doc, revision);
+    scheduleCloudBackup(doc);
   }
   for (const fn of [...listeners]) fn();
 }
@@ -1316,12 +1317,12 @@ function setDoc(doc: GardenDocument, refuse: string | null = null): void {
   setState({ doc, refuseMessage: refuse });
 }
 
-function scheduleCloudBackup(doc: GardenDocument, revision = gardenRevision()): void {
+function scheduleCloudBackup(doc: GardenDocument): void {
   if (!isSignedIn()) return;
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(() => {
     cloudSaveTimer = null;
-    void quietCloudSave(doc, { revision });
+    void quietCloudSave(doc);
   }, 2500);
 }
 
@@ -1353,6 +1354,10 @@ function downloadConflictCopy(doc: GardenDocument, fileName: string): void {
 }
 
 function adoptRemoteGarden(doc: GardenDocument, fileName: string, eTag?: string): void {
+  // In-flight saves that finish after this must not store their eTag or clear dirty.
+  // Photo rows whose originals are still uploading stay in the conflict copy
+  // (filed before adopt). This replace does not delete photos/manifest.json entries.
+  noteRemoteGardenApplied();
   const account = accountKey() ?? '';
   if (eTag) rememberDriveETag(account, fileName, eTag);
   setGardenCloudFileName(fileName);
@@ -1371,51 +1376,145 @@ export const gardenCloudUiForTests = {
   saveScheduled(): boolean {
     return cloudSaveTimer !== null;
   },
+  autoSave(): Promise<void> {
+    return quietCloudSave(state.doc);
+  },
+  saveNow(): Promise<void> {
+    return onOneDriveSave();
+  },
 };
 
-async function quietCloudSave(
-  doc: GardenDocument,
+const GARDEN_SAVE_LOCK = 'garden-survey-save';
+
+type PendingSave = {
+  prompt: 'auto' | 'user';
+  afterLocalQuota?: boolean;
+  token?: string;
+  manual?: boolean;
+};
+
+/** One garden save at a time. A second request waits and then saves the latest document. */
+let saveInFlight: Promise<void> | null = null;
+let savePending: PendingSave | null = null;
+let savePendingDone: Array<() => void> = [];
+
+function coalesceSave(prev: PendingSave | null, next: PendingSave): PendingSave {
+  if (!prev) return next;
+  const prompt = prev.prompt === 'user' || next.prompt === 'user' ? 'user' : 'auto';
+  return {
+    prompt,
+    afterLocalQuota: Boolean(prev.afterLocalQuota || next.afterLocalQuota),
+    token: next.token ?? prev.token,
+    manual: Boolean(prev.manual || next.manual),
+  };
+}
+
+function enqueueGardenSave(job: PendingSave): Promise<void> {
+  if (saveInFlight) {
+    savePending = coalesceSave(savePending, job);
+    return new Promise((resolve) => {
+      savePendingDone.push(resolve);
+    });
+  }
+  let resolveRun!: () => void;
+  const run = new Promise<void>((resolve) => {
+    resolveRun = resolve;
+  });
+  saveInFlight = run;
+  void (async () => {
+    try {
+      await withGardenSaveLock(() => executeGardenSave(job));
+    } finally {
+      saveInFlight = null;
+      resolveRun();
+      const next = savePending;
+      const waiters = savePendingDone;
+      savePending = null;
+      savePendingDone = [];
+      if (next) {
+        const chained = enqueueGardenSave(next);
+        for (const done of waiters) void chained.then(done);
+      }
+    }
+  })();
+  return run;
+}
+
+async function withGardenSaveLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  if (!locks?.request) return fn();
+  // Not taken inside commitGardenSave — navigator.locks is not reentrant.
+  return locks.request(GARDEN_SAVE_LOCK, () => fn()) as Promise<T>;
+}
+
+function quietCloudSave(
+  _doc: GardenDocument,
   opts: { afterLocalQuota?: boolean; token?: string; revision?: number } = {},
 ): Promise<void> {
-  const revision = opts.revision ?? gardenRevision();
-  if (!isSignedIn()) return;
-  let token = opts.token;
+  if (!isSignedIn()) return Promise.resolve();
+  return enqueueGardenSave({
+    prompt: 'auto',
+    afterLocalQuota: opts.afterLocalQuota,
+    token: opts.token,
+  });
+}
+
+async function executeGardenSave(job: PendingSave): Promise<void> {
+  if (!isSignedIn()) {
+    if (job.manual) setCloudMessage('Sign in to save.');
+    return;
+  }
+  const account = accountKey() ?? '';
+  const fileName = getGardenCloudFileName();
+  // Read the document and base eTag now, not when this save was queued.
+  const doc = state.doc;
+  const revision = gardenRevision();
+  const ifMatch = rememberedDriveETag(account, fileName) || undefined;
+  if (job.prompt === 'auto' && !job.afterLocalQuota && !gardenIsDirty()) return;
+
+  let token = job.token;
   if (!token) {
     const auth = await silentGraphToken();
     if (!auth.ok) {
       if (auth.interactionRequired) {
-        noteOwedGardenSave(doc);
+        noteOwedGardenSave(state.doc);
         notePhotoSignIn(true);
-        setCloudMessage('Sign in to save.');
+        const msg = 'Sign in to save.';
+        if (job.manual) logError(msg, { source: 'onedrive' });
+        setCloudMessage(msg);
         return;
       }
-      setCloudMessage(
-        opts.afterLocalQuota
+      const msg = job.manual
+        ? auth.error
+        : job.afterLocalQuota
           ? `Browser storage full, and OneDrive save failed: ${auth.error}. Export garden.json now.`
-          : `Could not auto-save to OneDrive: ${auth.error}`,
-      );
+          : `Could not auto-save to OneDrive: ${auth.error}`;
+      if (job.manual) logError(msg, { source: 'onedrive' });
+      setCloudMessage(msg);
       return;
     }
     token = auth.token;
   }
-  const account = accountKey() ?? '';
-  const fileName = getGardenCloudFileName();
+
+  if (job.manual) setCloudMessage(`Saving ${fileName} to OneDrive…`);
   const result = await commitGardenSave({
     doc,
     fileName,
     token,
-    ifMatch: rememberedDriveETag(account, fileName) || undefined,
+    ifMatch,
     choose: askWhichGardenCopy,
     account,
     revision,
-    prompt: 'auto',
+    prompt: job.prompt,
     downloadLocal: downloadConflictCopy,
+    readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
   });
   if (result.ok && result.wrote) {
+    if (result.superseded) return;
     clearGardenSaveOwed();
     if (result.eTag) rememberDriveETag(account, result.fileName, result.eTag);
     setLastSaveIso(result.savedAt);
-    if (opts.afterLocalQuota) {
+    if (job.afterLocalQuota) {
       setCloudMessage(
         `Browser storage full (photos) — saved ${result.fileName} to OneDrive. Load from OneDrive on other devices; Clear local cache if this browser stays full.`,
       );
@@ -1423,6 +1522,9 @@ async function quietCloudSave(
         state = { ...state, refuseMessage: null };
         for (const fn of [...listeners]) fn();
       }
+    } else if (job.manual) {
+      setCloudMessage(`Saved ${result.fileName} to OneDrive (${getCloudStatus().pathHint}).`);
+      void refreshGardenFileList();
     } else {
       setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
     }
@@ -1432,23 +1534,25 @@ async function quietCloudSave(
     clearGardenSaveOwed();
     adoptRemoteGarden(result.doc, result.fileName, result.eTag);
     setCloudMessage(result.message);
+    if (job.manual) void refreshGardenFileList();
     return;
   }
   if (result.cancelled) {
-    noteOwedGardenSave(doc);
+    noteOwedGardenSave(state.doc);
     setCloudMessage(
       result.deferred
         ? GARDEN_UNSAVED_STATUS
-        : opts.afterLocalQuota
+        : job.afterLocalQuota
           ? `Browser storage full. ${result.error}`
           : result.error,
     );
     return;
   }
   if (result.refused === 'empty') clearGardenSaveOwed();
-  else noteOwedGardenSave(doc);
+  else noteOwedGardenSave(state.doc);
+  if (job.manual && result.refused !== 'empty') logError(result.error, { source: 'onedrive' });
   setCloudMessage(
-    opts.afterLocalQuota
+    job.afterLocalQuota
       ? `Browser storage full, and OneDrive save failed: ${result.error}. Export garden.json now.`
       : result.error,
   );
@@ -1550,13 +1654,16 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
       token: auth.token,
       choose: askWhichGardenCopy,
       downloadLocal: downloadConflictCopy,
+      readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
     });
     setCloudBusy(false);
     void refreshGardenFileList();
     if (outcome.kind === 'saved') {
-      if (outcome.eTag) rememberDriveETag(account, outcome.fileName, outcome.eTag);
-      setLastSaveIso(outcome.savedAt);
-      setCloudMessage(`Signed in. Saved ${outcome.fileName} to OneDrive.`);
+      if (!outcome.superseded) {
+        if (outcome.eTag) rememberDriveETag(account, outcome.fileName, outcome.eTag);
+        setLastSaveIso(outcome.savedAt);
+        setCloudMessage(`Signed in. Saved ${outcome.fileName} to OneDrive.`);
+      }
       return;
     }
     if (outcome.kind === 'kept-remote') {
@@ -1591,7 +1698,7 @@ function reconcileOpenGarden(fileName: string, token: string, account: string): 
     choose: askWhichGardenCopy,
     downloadLocal: downloadConflictCopy,
     prompt: 'user',
-    readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty() }),
+    readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
   });
 }
 
@@ -2364,58 +2471,17 @@ async function onDeleteSelectedPoint(): Promise<void> {
 
 async function onOneDriveSave(): Promise<void> {
   const fileName = getGardenCloudFileName();
+  if (!isSignedIn()) {
+    setCloudMessage('Sign in to save.');
+    return;
+  }
   setCloudBusy(true);
   setCloudMessage(`Saving ${fileName} to OneDrive…`);
-  const auth = await silentGraphToken();
-  if (!auth.ok) {
+  try {
+    await enqueueGardenSave({ prompt: 'user', manual: true });
+  } finally {
     setCloudBusy(false);
-    if (auth.interactionRequired) {
-      noteOwedGardenSave(state.doc);
-      notePhotoSignIn(true);
-    }
-    const msg = auth.interactionRequired ? 'Sign in to save.' : auth.error;
-    logError(msg, { source: 'onedrive' });
-    setCloudMessage(msg);
-    return;
   }
-  const account = accountKey() ?? '';
-  const doc = state.doc;
-  const revision = gardenRevision();
-  const result = await commitGardenSave({
-    doc,
-    fileName,
-    token: auth.token,
-    ifMatch: rememberedDriveETag(account, fileName) || undefined,
-    choose: askWhichGardenCopy,
-    account,
-    revision,
-    prompt: 'user',
-    downloadLocal: downloadConflictCopy,
-  });
-  setCloudBusy(false);
-  if (result.ok && result.wrote) {
-    clearGardenSaveOwed();
-    if (result.eTag) rememberDriveETag(account, result.fileName, result.eTag);
-    setLastSaveIso(result.savedAt);
-    setCloudMessage(`Saved ${result.fileName} to OneDrive (${getCloudStatus().pathHint}).`);
-    void refreshGardenFileList();
-    return;
-  }
-  if (result.ok && !result.wrote) {
-    clearGardenSaveOwed();
-    adoptRemoteGarden(result.doc, result.fileName, result.eTag);
-    setCloudMessage(result.message);
-    void refreshGardenFileList();
-    return;
-  }
-  if (result.cancelled) {
-    noteOwedGardenSave(state.doc);
-    setCloudMessage(result.error);
-    return;
-  }
-  if (result.refused === 'empty') clearGardenSaveOwed();
-  logError(result.error, { source: 'onedrive' });
-  setCloudMessage(result.error);
 }
 
 async function onOneDriveLoad(fileName?: string): Promise<void> {

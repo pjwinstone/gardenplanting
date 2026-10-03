@@ -1,7 +1,7 @@
 import type { AuthenticationResult } from '@azure/msal-browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getGardenCloudFileName } from '../src/cloudConfig';
-import { gardenIsDirty, gardenRevision, rememberedDriveETag } from '../src/gardenCloudSave';
+import { gardenIsDirty, gardenRevision, rememberDriveETag, rememberedDriveETag } from '../src/gardenCloudSave';
 import { setGraphTokenClientForTests } from '../src/msalAuth';
 import { emptyDocument, type GardenDocument } from '../src/model';
 import { gardenCloudUiForTests, getState } from '../src/ui';
@@ -139,5 +139,110 @@ describe('adopt remote garden', () => {
     expect(getState().doc.name).toBe('During token');
     expect(gardenIsDirty()).toBe(true);
     expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
+  });
+
+  it('does not treat an autosave and a manual save as a OneDrive conflict', async () => {
+    let asked = false;
+    vi.stubGlobal('window', {
+      confirm: () => {
+        asked = true;
+        return true;
+      },
+    });
+    let inLock = 0;
+    let maxInLock = 0;
+    let lockEntries = 0;
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (_name: string, callback: () => Promise<void>) => {
+          lockEntries += 1;
+          inLock += 1;
+          maxInLock = Math.max(maxInLock, inLock);
+          try {
+            return await callback();
+          } finally {
+            inLock -= 1;
+          }
+        },
+      },
+    });
+
+    let remoteEtag = '"E0"';
+    let releaseFirstPut = (): void => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseFirstPut = resolve;
+    });
+    let markPutStarted = (): void => {};
+    const putStarted = new Promise<void>((resolve) => {
+      markPutStarted = resolve;
+    });
+    const ifMatches: Array<string | null> = [];
+    const putNames: string[] = [];
+    const remoteBody = namedGarden('Remote');
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? 'GET';
+      if (method === 'POST') return new Response('', { status: 409 });
+      if (method === 'GET' && url.includes('$select=')) {
+        return new Response(
+          JSON.stringify({
+            eTag: remoteEtag,
+            lastModifiedDateTime: remoteBody.updatedAt,
+            '@microsoft.graph.downloadUrl': 'https://download.example/garden',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.startsWith('https://download.example/garden')) {
+        return new Response(JSON.stringify(remoteBody), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (method === 'PUT') {
+        const headers = new Headers(init?.headers);
+        ifMatches.push(headers.get('If-Match'));
+        putNames.push((JSON.parse(String(init?.body)) as GardenDocument).name);
+        if (ifMatches.length === 1) {
+          markPutStarted();
+          await gate;
+          remoteEtag = '"E1"';
+          return new Response(JSON.stringify({ eTag: '"E1"' }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', etag: '"E1"' },
+          });
+        }
+        remoteEtag = '"E2"';
+        return new Response(JSON.stringify({ eTag: '"E2"' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', etag: '"E2"' },
+        });
+      }
+      return new Response(JSON.stringify({ error: { message: 'missing' } }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    authFlag.signedIn = false;
+    gardenCloudUiForTests.edit(namedGarden('Queued'));
+    authFlag.signedIn = true;
+    rememberDriveETag('home-account', getGardenCloudFileName(), '"E0"');
+
+    const auto = gardenCloudUiForTests.autoSave();
+    await putStarted;
+    gardenCloudUiForTests.edit(namedGarden('Typed while the first save was uploading'));
+    const manual = gardenCloudUiForTests.saveNow();
+    releaseFirstPut();
+    await auto;
+    await manual;
+
+    expect(asked).toBe(false);
+    expect(ifMatches).toEqual(['"E0"', '"E1"']);
+    expect(putNames).toEqual(['Queued', 'Typed while the first save was uploading']);
+    expect(lockEntries).toBe(2);
+    expect(maxInLock).toBe(1);
+    expect(rememberedDriveETag('home-account', getGardenCloudFileName())).toBe('"E2"');
+    expect(getState().doc.name).toBe('Typed while the first save was uploading');
   });
 });
