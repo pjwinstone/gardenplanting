@@ -4,8 +4,10 @@ import {
   commitGardenSave,
   gardenConflictPrompt,
   gardenIsDirty,
+  gardenRevision,
   noteLocalGardenEdit,
   reconcileGardenOnLoad,
+  rememberedDriveETag,
   rememberDriveETag,
   type GardenCopyChoice,
 } from '../src/gardenCloudSave';
@@ -680,6 +682,161 @@ describe('reconcileGardenOnLoad', () => {
     expect(remote.puts).toEqual([]);
     expect(gardenIsDirty(storage)).toBe(false);
     expect(readOwedGardenSave(storage)).toBeNull();
+  });
+
+  it('decides from the garden and dirty flag when the load finishes', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    const captured = emptyDocument('Untitled garden');
+    const edited = garden(LOCAL_AT, 'Typed during load');
+    edited.points = [{ id: 'HSE01', kind: 'HSE', label: 'During load' }];
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Cloud garden')],
+      etags: ['"v1"'],
+    });
+    let fetchStarted = false;
+    let choice: GardenCopyChoice | null = null;
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: captured,
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: async (input, init) => {
+        fetchStarted = true;
+        return remote.fetchImpl(input, init);
+      },
+      readLocal: () => {
+        expect(fetchStarted).toBe(true);
+        return { doc: edited, dirty: true };
+      },
+      choose: async (next) => {
+        choice = next;
+        return 'local';
+      },
+    });
+    expect(choice).not.toBeNull();
+    expect(choice!.localDoc.name).toBe('Typed during load');
+    expect(choice!.localDoc.points[0]?.label).toBe('During load');
+    expect(choice!.localUpdatedAt).toBe(LOCAL_AT);
+    expect(outcome.kind).toBe('cancelled');
+    expect(remote.puts).toEqual([]);
+    expect(gardenIsDirty(storage)).toBe(true);
+  });
+
+  it('prompts with the edit made during load even when the captured garden matched', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    const captured = garden(REMOTE_OLDER, 'Local cache');
+    const edited = garden(LOCAL_AT, 'Edit during load');
+    edited.points = [{ id: 'HSE09', kind: 'HSE', label: 'New corner' }];
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Cloud copy')],
+      etags: ['"v1"'],
+    });
+    let choice: GardenCopyChoice | null = null;
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: captured,
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      readLocal: () => ({ doc: edited, dirty: true }),
+      choose: async (next) => {
+        choice = next;
+        return 'local';
+      },
+    });
+    expect(choice!.localDoc.name).toBe('Edit during load');
+    expect(choice!.localDoc.points[0]?.id).toBe('HSE09');
+    expect(outcome.kind).toBe('cancelled');
+    expect(remote.puts).toEqual([]);
+  });
+
+  it('still adopts when the garden is clean at decision time', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    const live = garden(LOCAL_AT, 'Still the cache');
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Cloud copy')],
+      etags: ['"v1"'],
+    });
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: garden(REMOTE_OLDER, 'Snapshot from when load began'),
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      readLocal: () => ({ doc: live, dirty: false }),
+      choose: async () => {
+        throw new Error('clean garden at decision time must not ask');
+      },
+    });
+    expect(outcome.kind).toBe('adopted');
+    if (outcome.kind === 'adopted') expect(outcome.doc.name).toBe('Cloud copy');
+    expect(gardenIsDirty(storage)).toBe(false);
+    expect(remote.puts).toEqual([]);
+  });
+});
+
+describe('commitGardenSave dirty flag', () => {
+  it('clears dirty after a save only when nothing changed during the upload', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    noteLocalGardenEdit(storage);
+    const revision = gardenRevision(storage);
+    expect(revision).toBe(1);
+    const remote = graph({
+      remotes: [garden(REMOTE_OLDER, 'Cloud')],
+      etags: ['"v1"'],
+    });
+    const saved = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'This browser'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      revision,
+      fetchImpl: remote.fetchImpl,
+    });
+    expect(saved.ok && saved.wrote).toBe(true);
+    expect(gardenIsDirty(storage)).toBe(false);
+    expect(gardenRevision(storage)).toBe(revision);
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('"written"');
+
+    noteLocalGardenEdit(storage);
+    const again = gardenRevision(storage);
+    let editedDuringUpload = false;
+    const racing = graph({
+      remotes: [garden(LOCAL_AT, 'This browser')],
+      etags: ['"written"'],
+    });
+    const raced = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'This browser'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"written"',
+      account: ACCOUNT,
+      storage,
+      revision: again,
+      fetchImpl: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        if (method === 'PUT' && !editedDuringUpload) {
+          editedDuringUpload = true;
+          noteLocalGardenEdit(storage);
+        }
+        return racing.fetchImpl(input, init);
+      },
+    });
+    expect(editedDuringUpload).toBe(true);
+    expect(raced.ok && raced.wrote).toBe(true);
+    if (raced.ok && raced.wrote) expect(raced.eTag).toBe('"written"');
+    expect(gardenIsDirty(storage)).toBe(true);
+    expect(gardenRevision(storage)).toBe(again + 1);
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('"written"');
   });
 });
 

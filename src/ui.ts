@@ -124,6 +124,7 @@ import {
   GARDEN_UNSAVED_STATUS,
   clearGardenDirty,
   gardenIsDirty,
+  gardenRevision,
   noteLocalGardenEdit,
   reconcileGardenOnLoad,
   rememberedDriveETag,
@@ -1240,20 +1241,38 @@ function withDocTimestamp(previous: GardenDocument, next: GardenDocument): Garde
   return { ...next, updatedAt: new Date().toISOString() };
 }
 
-function setState(partial: Partial<UiState>): void {
-  const doc = partial.doc ? withDocTimestamp(state.doc, partial.doc) : undefined;
+function setState(partial: Partial<UiState>, opts?: { fromRemote?: boolean }): void {
+  const fromRemote = Boolean(opts?.fromRemote && partial.doc);
+  const doc = partial.doc
+    ? fromRemote
+      ? partial.doc
+      : withDocTimestamp(state.doc, partial.doc)
+    : undefined;
   state = { ...state, ...partial, ...(doc ? { doc } : {}) };
   // Always notify listeners even if persistence fails — otherwise the UI freezes
   // on legal transitions while illegal refusals (no save) still appear to work.
-  if (doc) {
-    noteLocalGardenEdit();
+  if (doc && fromRemote) {
+    // The OneDrive copy is already the saved garden. Do not mark it dirty or upload it again.
+    if (cloudSaveTimer) {
+      clearTimeout(cloudSaveTimer);
+      cloudSaveTimer = null;
+    }
+    const saved = persistGardenLocal(doc);
+    if (!saved.ok) {
+      logError(`Could not cache the OneDrive garden in this browser (${saved.error}).`, {
+        source: 'persist-quota',
+      });
+    }
+    clearGardenDirty();
+  } else if (doc) {
+    const revision = noteLocalGardenEdit();
     const saved = persistGardenLocal(doc);
     if (!saved.ok) {
       handleLocalPersistFailure(doc, saved);
     } else if (state.refuseMessage && /browser|quota|storage/i.test(state.refuseMessage)) {
       state = { ...state, refuseMessage: null };
     }
-    scheduleCloudBackup(doc);
+    scheduleCloudBackup(doc, revision);
   }
   for (const fn of [...listeners]) fn();
 }
@@ -1297,11 +1316,12 @@ function setDoc(doc: GardenDocument, refuse: string | null = null): void {
   setState({ doc, refuseMessage: refuse });
 }
 
-function scheduleCloudBackup(doc: GardenDocument): void {
+function scheduleCloudBackup(doc: GardenDocument, revision = gardenRevision()): void {
   if (!isSignedIn()) return;
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(() => {
-    void quietCloudSave(doc);
+    cloudSaveTimer = null;
+    void quietCloudSave(doc, { revision });
   }, 2500);
 }
 
@@ -1337,14 +1357,27 @@ function adoptRemoteGarden(doc: GardenDocument, fileName: string, eTag?: string)
   if (eTag) rememberDriveETag(account, fileName, eTag);
   setGardenCloudFileName(fileName);
   notifyCloudPrefsChanged();
-  setDoc(doc, null);
-  clearGardenDirty();
+  setState({ doc, refuseMessage: null }, { fromRemote: true });
 }
+
+/** Vitest seam. Adopting OneDrive must set the eTag, clear dirty, and not schedule a save. */
+export const gardenCloudUiForTests = {
+  edit(doc: GardenDocument): void {
+    setDoc(doc, null);
+  },
+  adopt(doc: GardenDocument, fileName: string, eTag?: string): void {
+    adoptRemoteGarden(doc, fileName, eTag);
+  },
+  saveScheduled(): boolean {
+    return cloudSaveTimer !== null;
+  },
+};
 
 async function quietCloudSave(
   doc: GardenDocument,
-  opts: { afterLocalQuota?: boolean; token?: string } = {},
+  opts: { afterLocalQuota?: boolean; token?: string; revision?: number } = {},
 ): Promise<void> {
+  const revision = opts.revision ?? gardenRevision();
   if (!isSignedIn()) return;
   let token = opts.token;
   if (!token) {
@@ -1374,6 +1407,7 @@ async function quietCloudSave(
     ifMatch: rememberedDriveETag(account, fileName) || undefined,
     choose: askWhichGardenCopy,
     account,
+    revision,
     prompt: 'auto',
     downloadLocal: downloadConflictCopy,
   });
@@ -1506,10 +1540,13 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   }
   if (readOwedGardenSave()) {
     setCloudBusy(true);
+    const localDoc = state.doc;
+    const revision = gardenRevision();
     const outcome = await applyRedirectOwedSave({
       account,
       fileName: preferred,
-      localDoc: state.doc,
+      localDoc,
+      revision,
       token: auth.token,
       choose: askWhichGardenCopy,
       downloadLocal: downloadConflictCopy,
@@ -1539,18 +1576,23 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
     // Mismatch or an empty owed flag: still compare before adopting OneDrive.
   }
   setCloudBusy(true);
-  const decision = await reconcileGardenOnLoad({
+  const decision = await reconcileOpenGarden(preferred, auth.token, account);
+  setCloudBusy(false);
+  void refreshGardenFileList();
+  applyLoadedGarden(decision, 'sign-in');
+}
+
+function reconcileOpenGarden(fileName: string, token: string, account: string): Promise<GardenReconcileResult> {
+  return reconcileGardenOnLoad({
     localDoc: state.doc,
-    fileName: preferred,
-    token: auth.token,
+    fileName,
+    token,
     account,
     choose: askWhichGardenCopy,
     downloadLocal: downloadConflictCopy,
     prompt: 'user',
+    readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty() }),
   });
-  setCloudBusy(false);
-  void refreshGardenFileList();
-  applyLoadedGarden(decision, 'sign-in');
 }
 
 async function onShellClick(e: Event): Promise<void> {
@@ -2337,13 +2379,16 @@ async function onOneDriveSave(): Promise<void> {
     return;
   }
   const account = accountKey() ?? '';
+  const doc = state.doc;
+  const revision = gardenRevision();
   const result = await commitGardenSave({
-    doc: state.doc,
+    doc,
     fileName,
     token: auth.token,
     ifMatch: rememberedDriveETag(account, fileName) || undefined,
     choose: askWhichGardenCopy,
     account,
+    revision,
     prompt: 'user',
     downloadLocal: downloadConflictCopy,
   });
@@ -2389,15 +2434,7 @@ async function onOneDriveLoad(fileName?: string): Promise<void> {
     setCloudMessage(msg);
     return;
   }
-  const decision = await reconcileGardenOnLoad({
-    localDoc: state.doc,
-    fileName: target,
-    token: auth.token,
-    account: accountKey() ?? '',
-    choose: askWhichGardenCopy,
-    downloadLocal: downloadConflictCopy,
-    prompt: 'user',
-  });
+  const decision = await reconcileOpenGarden(target, auth.token, accountKey() ?? '');
   setCloudBusy(false);
   void refreshGardenFileList();
   applyLoadedGarden(decision, 'load');
