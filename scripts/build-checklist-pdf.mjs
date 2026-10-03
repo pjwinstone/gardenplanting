@@ -26,8 +26,8 @@ const html = `<!DOCTYPE html>
   html, body { margin: 0; padding: 0; }
   body {
     font-family: "Liberation Sans", Arial, sans-serif;
-    font-size: 11pt;
-    line-height: 1.22;
+    font-size: 10.5pt;
+    line-height: 1.18;
     color: #000;
     columns: 2;
     column-gap: 5mm;
@@ -35,19 +35,22 @@ const html = `<!DOCTYPE html>
   }
   h1, svg.plan, .full { column-span: all; }
   h1 {
-    font-size: 18pt;
+    font-size: 16pt;
     line-height: 1.05;
-    margin: 0 0 1.2mm;
+    margin: 0 0 0.8mm;
   }
   h2 {
-    font-size: 13pt;
+    font-size: 12pt;
     line-height: 1.1;
-    margin: 2.2mm 0 0.8mm;
+    margin: 1.5mm 0 0.4mm;
     break-after: avoid;
   }
-  p { margin: 0 0 1.1mm; }
-  ul, ol { margin: 0 0 1.2mm; padding-left: 4.8mm; }
-  li { margin: 0 0 0.45mm; }
+  p { margin: 0 0 0.7mm; }
+  a { color: #000; text-decoration: underline; }
+  .markers h2 { font-size: 12pt; margin: 0.2mm 0 0.4mm; }
+  .markers p { font-size: 9.5pt; margin: 0 0 0.45mm; }
+  ul, ol { margin: 0 0 0.8mm; padding-left: 4.8mm; }
+  li { margin: 0 0 0.2mm; }
   li.tick { list-style: none; margin-left: -4.8mm; padding-left: 5.6mm; position: relative; }
   li.tick::before {
     content: "";
@@ -61,9 +64,9 @@ const html = `<!DOCTYPE html>
   }
   svg.plan {
     display: block;
-    width: 91mm;
-    height: 73mm;
-    margin: 0 auto 1mm;
+    width: 80mm;
+    height: 64mm;
+    margin: 0 auto 0.6mm;
     break-inside: avoid;
   }
   table.write {
@@ -78,7 +81,7 @@ const html = `<!DOCTYPE html>
     padding: 0.6mm 1mm;
     text-align: left;
     vertical-align: middle;
-    height: 7.2mm;
+    height: 6.6mm;
   }
   table.canes th, table.canes td {
     text-align: center;
@@ -230,6 +233,7 @@ function markdownToHtml(source) {
 
 function inline(text) {
   return escapeHtml(text)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<strong>$1</strong>');
 }
