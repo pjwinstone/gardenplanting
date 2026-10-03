@@ -4,6 +4,7 @@ import { createMemoryPhotoQueue, normalizeQueueAfterRestart, type PhotoQueueReco
 import { SIMPLE_UPLOAD_MAX_BYTES, parseRetryAfter, uploadAndVerifyOriginal } from '../src/photoUpload';
 import {
   PHOTO_UPLOAD_MAX_ATTEMPTS,
+  discardQueuedPhoto,
   drainPhotoQueue,
   photoUploadBackoffMs,
   resetPhotoUploadAttempts,
@@ -412,6 +413,54 @@ describe('drainPhotoQueue', () => {
     expect(cleared?.retryNotBefore).toBeUndefined();
   });
 
+  it('does not upload a photo removed from the survey', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put(queuedRecord());
+    await discardQueuedPhoto('ph-1', queue);
+    let tokens = 0;
+    const failed = await drainPhotoQueue({
+      queue,
+      getToken: async () => {
+        tokens += 1;
+        return 'tok';
+      },
+      onStatus: () => undefined,
+    });
+    expect(failed).toBe(0);
+    expect(tokens).toBe(0);
+    expect(await queue.list()).toEqual([]);
+  });
+
+  it('does not write the manifest when the photo is deleted during upload', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put(queuedRecord());
+    const urls: string[] = [];
+    const statuses: string[] = [];
+    const failed = await drainPhotoQueue({
+      queue,
+      getToken: async () => 'tok',
+      onStatus: (update) => statuses.push(update.status),
+      fetchImpl: scripted([
+        () => json(409, {}),
+        () => json(409, {}),
+        async (url) => {
+          urls.push(url);
+          await discardQueuedPhoto('ph-1', queue);
+          return json(200, item(bytes.byteLength, hash));
+        },
+        (url, init) => {
+          urls.push(`${init?.method ?? 'GET'} ${url}`);
+          return json(204, {});
+        },
+      ]).fetch,
+    });
+    expect(failed).toBe(0);
+    expect(statuses).toEqual(['uploading']);
+    expect(urls.some((url) => url.includes('manifest.json'))).toBe(false);
+    expect(urls.some((url) => url.startsWith('DELETE '))).toBe(true);
+    expect(await queue.list()).toEqual([]);
+  });
+
   it('relabels a queued 7a4e268 pixel map without moving to the old formula', () => {
     const scale = 640 / 4032;
     const [migrated] = normalizeQueueAfterRestart([
@@ -480,7 +529,7 @@ function json(status: number, body: unknown, headers: Record<string, string> = {
 }
 
 function scripted(
-  steps: Array<(url: string, init?: RequestInit) => Response>,
+  steps: Array<(url: string, init?: RequestInit) => Response | Promise<Response>>,
 ): GraphRequest & { fetch: typeof fetch } {
   let n = 0;
   const fetchImpl: typeof fetch = async (input, init) => {

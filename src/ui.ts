@@ -99,6 +99,7 @@ import { GEOMETRY_CHOICES, placeholderThumb, type GeometryType, type PhotoClick 
 import { imageNaturalSize, suggestTagBlobs, type TagSuggestion } from './tagSuggest';
 import { dngRejectionMessage, type PreviewPixelMap } from './photoOriginal';
 import {
+  discardQueuedPhoto,
   kickPhotoUploads,
   listQueuedPhotos,
   photosManifestLink,
@@ -108,6 +109,7 @@ import {
   startPhotoUploadLoop,
   type PhotoStatusUpdate,
 } from './photoSync';
+import { completeCloudSignIn, gardenSaveIsOwed, markGardenSaveOwed, clearGardenSaveOwed } from './cloudSignIn';
 import { silentGraphToken } from './onedrive';
 
 export type View = 'survey' | 'tags';
@@ -1271,25 +1273,31 @@ function scheduleCloudBackup(doc: GardenDocument): void {
 
 async function quietCloudSave(
   doc: GardenDocument,
-  opts: { afterLocalQuota?: boolean } = {},
+  opts: { afterLocalQuota?: boolean; token?: string } = {},
 ): Promise<void> {
   if (!isSignedIn()) return;
-  const auth = await silentGraphToken();
-  if (!auth.ok) {
-    if (auth.interactionRequired) {
-      notePhotoSignIn(true);
-      setCloudMessage('Sign in to save.');
+  let token = opts.token;
+  if (!token) {
+    const auth = await silentGraphToken();
+    if (!auth.ok) {
+      if (auth.interactionRequired) {
+        markGardenSaveOwed();
+        notePhotoSignIn(true);
+        setCloudMessage('Sign in to save.');
+        return;
+      }
+      setCloudMessage(
+        opts.afterLocalQuota
+          ? `Browser storage full, and OneDrive save failed: ${auth.error}. Export garden.json now.`
+          : `Could not auto-save to OneDrive: ${auth.error}`,
+      );
       return;
     }
-    setCloudMessage(
-      opts.afterLocalQuota
-        ? `Browser storage full, and OneDrive save failed: ${auth.error}. Export garden.json now.`
-        : `Could not auto-save to OneDrive: ${auth.error}`,
-    );
-    return;
+    token = auth.token;
   }
-  const result = await saveGardenCloud(doc, undefined, auth.token);
+  const result = await saveGardenCloud(doc, undefined, token);
   if (result.ok) {
+    clearGardenSaveOwed();
     setLastSaveIso(result.savedAt);
     if (opts.afterLocalQuota) {
       setCloudMessage(
@@ -1380,6 +1388,17 @@ export function applyAuthReady(init: AuthInitResult): void {
 
 async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   if (!isSignedIn()) return;
+  if (gardenSaveIsOwed()) {
+    setCloudBusy(true);
+    await completeCloudSignIn({
+      resumeUploads: () => resumePhotoUploads(),
+      saveGarden: () => quietCloudSave(state.doc),
+      setMessage: setCloudMessage,
+    });
+    setCloudBusy(false);
+    void refreshGardenFileList();
+    return;
+  }
   const preferred = getGardenCloudFileName();
   setCloudBusy(true);
   const result = await loadGardenCloud(preferred);
@@ -1709,6 +1728,7 @@ function onShellClick(e: Event): void {
       return;
     }
     setDoc(result.doc, null);
+    void discardQueuedPhoto(photoId);
     setState({
       pointDialog: state.pointDialog === 'inspect' ? 'inspect' : 'add',
       pendingPointThumb: null,
@@ -1724,6 +1744,11 @@ function onShellClick(e: Event): void {
     const pointId = state.doc.session.inspectingPointId;
     if (!pointId || state.pointDialog !== 'inspect') return;
     if (!window.confirm(`Delete point ${pointId}? This cannot be undone.`)) return;
+    const point = state.doc.points.find((p) => p.id === pointId);
+    const droppedPhotoIds = [
+      ...(point?.photoIds ?? []),
+      ...state.doc.photos.filter((ph) => ph.addPointId === pointId).map((ph) => ph.id),
+    ];
     const result = deletePointMeasurement(state.doc, pointId);
     if (result.reason) {
       surfaceFail(result.reason, 'delete-point');
@@ -1731,6 +1756,7 @@ function onShellClick(e: Event): void {
       return;
     }
     setDoc(result.doc, null);
+    for (const id of droppedPhotoIds) void discardQueuedPhoto(id);
     setState({ pointDialog: null, pendingPointThumb: null, menuOpen: false });
     speakCoachLine(result.doc.session.lastAction ?? `Deleted ${pointId}.`, result.doc.session.speakSteps);
     return;
@@ -2121,8 +2147,11 @@ async function onPhotoSignInToUpload(): Promise<void> {
   const auth = await acquireGraphToken();
   if (auth.ok) {
     photoUploadNeedsSignIn = false;
-    setCloudMessage('Signed in. Uploading photos…');
-    void resumePhotoUploads();
+    await completeCloudSignIn({
+      resumeUploads: () => resumePhotoUploads(),
+      saveGarden: () => quietCloudSave(state.doc, { token: auth.token }),
+      setMessage: setCloudMessage,
+    });
     return;
   }
   photoUploadNeedsSignIn = true;

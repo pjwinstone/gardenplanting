@@ -17,7 +17,7 @@ import {
   type PhotoQueueRecord,
 } from './photoQueue';
 import type { GraphRequest, PhotoProvenance } from './photosManifest';
-import { publishPhotoManifest, uploadAndVerifyOriginal } from './photoUpload';
+import { deleteDrivePhoto, publishPhotoManifest, uploadAndVerifyOriginal } from './photoUpload';
 
 /**
  * Pause automatic retries after this many counted failures.
@@ -406,13 +406,18 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
     if (!isRetryable(record, now)) continue;
     if (!isOnline(deps)) return failed;
 
+    const live = await deps.queue.get(record.id);
+    if (!live) continue;
+
     const stamp = deps.now?.() ?? new Date().toISOString();
-    const uploading: PhotoQueueRecord = { ...record, status: 'uploading', updatedAt: stamp };
+    const uploading: PhotoQueueRecord = { ...live, status: 'uploading', updatedAt: stamp };
     await deps.queue.put(uploading);
     deps.onStatus(statusOf(uploading, 'uploading'));
 
     try {
       const outcome = await uploadOne(client, uploading, deps);
+      if (outcome.ok && outcome.cancelled) continue;
+      if (!(await deps.queue.get(record.id))) continue;
       if (outcome.ok) {
         const done = outcome.record ?? uploading;
         await deps.queue.delete(record.id);
@@ -439,6 +444,7 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
         deps.onStatus(statusOf(failedRec, 'failed', outcome.error));
       }
     } catch (err) {
+      if (!(await deps.queue.get(record.id))) continue;
       failed += 1;
       const message = err instanceof Error ? err.message : 'Upload failed.';
       const attempts = record.attempts + 1;
@@ -469,7 +475,7 @@ async function uploadOne(
   record: PhotoQueueRecord,
   deps: PhotoUploadDeps,
 ): Promise<
-  | { ok: true; record?: PhotoQueueRecord }
+  | { ok: true; cancelled?: boolean; record?: PhotoQueueRecord }
   | {
       ok: false;
       error: string;
@@ -488,7 +494,7 @@ async function uploadNamed(
   deps: PhotoUploadDeps,
   suffixTry: number,
 ): Promise<
-  | { ok: true; record?: PhotoQueueRecord }
+  | { ok: true; cancelled?: boolean; record?: PhotoQueueRecord }
   | {
       ok: false;
       error: string;
@@ -498,6 +504,8 @@ async function uploadNamed(
       record?: PhotoQueueRecord;
     }
 > {
+  const dropped = await droppedFromQueue(deps, record.id);
+  if (dropped) return { ok: true, cancelled: true };
   let bytesOnDrive = record.bytesOnDrive;
   if (!bytesOnDrive) {
     const bytes = new Uint8Array(await record.blob.arrayBuffer());
@@ -545,7 +553,15 @@ async function uploadNamed(
     }
     bytesOnDrive = true;
     record = { ...record, bytesOnDrive: true, status: 'uploading' };
+    if (await droppedFromQueue(deps, record.id)) {
+      await deleteDrivePhoto(client, record.fileName);
+      return { ok: true, cancelled: true };
+    }
     await deps.queue.put(record);
+  }
+  if (await droppedFromQueue(deps, record.id)) {
+    if (bytesOnDrive) await deleteDrivePhoto(client, record.fileName);
+    return { ok: true, cancelled: true };
   }
   const manifest = await publishPhotoManifest({
     client,
@@ -597,4 +613,19 @@ export async function listQueuedPhotos(
   queue: PhotoQueue = getAppPhotoQueue(),
 ): Promise<PhotoQueueRecord[]> {
   return normalizeQueueAfterRestart(await queue.list());
+}
+
+/** The survey dropped this photo. Do not upload it or add it to the manifest. */
+export async function discardQueuedPhoto(
+  photoId: string,
+  queue: PhotoQueue = getAppPhotoQueue(),
+): Promise<void> {
+  const records = await queue.list();
+  for (const record of records) {
+    if (record.photoId === photoId) await queue.delete(record.id);
+  }
+}
+
+async function droppedFromQueue(deps: PhotoUploadDeps, id: string): Promise<boolean> {
+  return (await deps.queue.get(id)) == null;
 }

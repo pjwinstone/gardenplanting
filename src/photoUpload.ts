@@ -135,6 +135,19 @@ export async function uploadAndVerifyOriginal(opts: {
   return { ok: true, remote: uploaded.remote, existed: uploaded.existed };
 }
 
+/** Remove a photo this phone just uploaded because the survey no longer wants it. */
+export async function deleteDrivePhoto(client: GraphRequest, fileName: string): Promise<void> {
+  const url = graphItemUrl(`${photosFolderPath()}/${fileName}`);
+  try {
+    await client.fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${client.token}` },
+    });
+  } catch {
+    /* The manifest must still be skipped if the delete itself fails. */
+  }
+}
+
 export async function publishPhotoManifest(opts: {
   client: GraphRequest;
   record: PhotoQueueRecord;
