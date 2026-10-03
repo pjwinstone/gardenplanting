@@ -15,6 +15,23 @@ const GRAPH_SCOPES = ['User.Read', 'Files.ReadWrite'];
 let pca: PublicClientApplication | null = null;
 let initDone = false;
 
+/** Vitest only. Production leaves this null so tokens go through MSAL. */
+let graphTokenTestClient: {
+  account: AccountInfo | null;
+  acquireTokenSilent: () => Promise<AuthenticationResult>;
+  acquireTokenRedirect: () => Promise<void>;
+} | null = null;
+
+export function setGraphTokenClientForTests(
+  client: {
+    account: AccountInfo | null;
+    acquireTokenSilent: () => Promise<AuthenticationResult>;
+    acquireTokenRedirect: () => Promise<void>;
+  } | null,
+): void {
+  graphTokenTestClient = client;
+}
+
 /** Outcome of the latest initAuth() — coach uses this for errors / welcome. */
 export interface AuthInitResult {
   configured: boolean;
@@ -212,38 +229,80 @@ export async function signOut(): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
-/** Acquire a Graph access token; may redirect if interaction is required. */
+/**
+ * Acquire a Graph access token. A user tap (Save, Sign in) may redirect.
+ * Background photo upload must use acquireGraphTokenSilent instead.
+ */
 export async function acquireGraphToken(): Promise<
   { ok: true; token: string } | { ok: false; error: string }
 > {
-  if (!pca) {
+  const result = await acquireGraphTokenInner(true);
+  if (result.ok) return { ok: true, token: result.token };
+  return { ok: false, error: result.error };
+}
+
+/**
+ * Silent Graph token for background photo upload. Never calls acquireTokenRedirect.
+ * interactionRequired means the UI should show “Sign in to upload” and wait for a tap.
+ */
+export async function acquireGraphTokenSilent(): Promise<
+  { ok: true; token: string } | { ok: false; interactionRequired: boolean; error: string }
+> {
+  return acquireGraphTokenInner(false);
+}
+
+async function acquireGraphTokenInner(
+  allowRedirect: boolean,
+): Promise<{ ok: true; token: string } | { ok: false; interactionRequired: boolean; error: string }> {
+  if (!pca && !graphTokenTestClient) {
     return {
       ok: false,
+      interactionRequired: false,
       error: 'Microsoft sign-in is not configured yet.',
     };
   }
-  const account = getAccount();
+  const account = graphTokenTestClient ? graphTokenTestClient.account : getAccount();
   if (!account) {
-    return { ok: false, error: 'Not signed in. Tap Sign in with Microsoft first.' };
+    return {
+      ok: false,
+      interactionRequired: true,
+      error: allowRedirect
+        ? 'Not signed in. Tap Sign in with Microsoft first.'
+        : 'Sign in to upload.',
+    };
   }
 
   try {
-    const result: AuthenticationResult = await pca.acquireTokenSilent({
-      account,
-      scopes: GRAPH_SCOPES,
-    });
+    const result: AuthenticationResult = graphTokenTestClient
+      ? await graphTokenTestClient.acquireTokenSilent()
+      : await pca!.acquireTokenSilent({
+          account,
+          scopes: GRAPH_SCOPES,
+        });
     return { ok: true, token: result.accessToken };
   } catch (e) {
-    if (e instanceof InteractionRequiredAuthError) {
-      try {
-        await pca.acquireTokenRedirect({ account, scopes: GRAPH_SCOPES });
-        return { ok: false, error: 'Redirecting to Microsoft to refresh your sign-in…' };
-      } catch (redirectErr) {
-        return { ok: false, error: plainAuthError(redirectErr) };
+    if (e instanceof InteractionRequiredAuthError || isInteractionRequired(e)) {
+      if (allowRedirect) {
+        try {
+          if (graphTokenTestClient) await graphTokenTestClient.acquireTokenRedirect();
+          else await pca!.acquireTokenRedirect({ account, scopes: GRAPH_SCOPES });
+          return {
+            ok: false,
+            interactionRequired: true,
+            error: 'Redirecting to Microsoft to refresh your sign-in…',
+          };
+        } catch (redirectErr) {
+          return { ok: false, interactionRequired: true, error: plainAuthError(redirectErr) };
+        }
       }
+      return { ok: false, interactionRequired: true, error: 'Sign in to upload.' };
     }
-    return { ok: false, error: plainAuthError(e) };
+    return { ok: false, interactionRequired: false, error: plainAuthError(e) };
   }
+}
+
+function isInteractionRequired(error: unknown): boolean {
+  return error instanceof InteractionRequiredAuthError || (error instanceof Error && error.name === 'InteractionRequiredAuthError');
 }
 
 function readOAuthErrorFromUrl(): string | null {

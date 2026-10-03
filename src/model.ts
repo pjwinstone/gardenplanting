@@ -1,5 +1,7 @@
 /** Garden Survey document model — points, baselines, layers/objects, photos, setups. */
 
+import { migratePreviewPixels } from './photoOriginal';
+
 export type SessionMode =
   | 'MENU'
   | 'START'
@@ -144,6 +146,49 @@ export interface PhotoClick {
   py: number;
 }
 
+/** OneDrive upload state for the original camera file. The bytes live in IndexedDB, not here. */
+export type PhotoUploadStatus = 'queued' | 'uploading' | 'verified' | 'failed';
+
+/**
+ * Pointer to the original camera file in `/Garden Survey/photos/`.
+ * Absent on older documents. The thumbnail stays a separate display preview.
+ */
+export interface PhotoOriginalFile {
+  fileName: string;
+  size: number;
+  quickXorHash: string;
+  sha256?: string;
+  contentType?: string;
+  /** Wall clock when the app received the file. */
+  receivedAt?: string;
+  /** EXIF DateTimeOriginal + SubSec + offset, when present. */
+  capturedAt?: string;
+  provenance?: 'camera-path' | 'library' | 'unknown';
+  calibrationKey?: string;
+  fullWidth?: number;
+  fullHeight?: number;
+  previewWidth?: number;
+  previewHeight?: number;
+  previewScaleX?: number;
+  previewScaleY?: number;
+  /** full = previewPx / scale, from the pixel edge. Centre index is full − 0.5. */
+  clickMap?: 'p/scale';
+  /** Clicks are upright (orientation applied). */
+  clickSpace?: 'upright';
+  /** 7a4e268 published this. Cleared when the row is relabelled `p/scale`. */
+  pixelCentre?: '+0.5';
+  /** Single scale published by 7a4e268. Copied to both axes on load. */
+  previewScale?: number;
+  /** Present after a +0.5 row was relabelled. Stored clicks were not moved. */
+  clickMapMigratedFrom?: '+0.5';
+  /** Set when the failure will not succeed on Retry (hash mismatch or name still taken). */
+  uploadPermanent?: boolean;
+  /** Missing lens data, or capture time outside the station setup. */
+  usabilityNote?: string;
+  uploadStatus?: PhotoUploadStatus;
+  uploadError?: string;
+}
+
 export interface Photo {
   id: string;
   setupId: string;
@@ -156,6 +201,8 @@ export interface Photo {
   /** Baseline whose ends were marked in this frame (sighting). */
   sightedBaselineId?: string;
   exifDateTimeOriginal?: string;
+  /** Original camera file (full resolution). Optional so older garden.json still loads. */
+  originalFile?: PhotoOriginalFile;
   note?: string;
   /** Estimated camera pose after adjust (metres, radians). */
   pose?: { x: number; y: number; yawRad: number };
@@ -199,6 +246,12 @@ export interface SessionState {
   selectedPhotoId?: string;
 }
 
+/** Where the OneDrive photos manifest lives, relative to the garden folder. */
+export interface PhotosManifestLink {
+  /** e.g. `photos/manifest.json` — next to garden-v1.json, not inside it. */
+  path: string;
+}
+
 export interface GardenDocument {
   version: 1;
   name: string;
@@ -213,6 +266,11 @@ export interface GardenDocument {
   layers: LayerDef[];
   objects: GardenObject[];
   session: SessionState;
+  /**
+   * Optional pointer to the photos manifest. Older documents omit it;
+   * readers that don't know the field ignore it.
+   */
+  photosManifest?: PhotosManifestLink;
 }
 
 export const SIGMA = {
@@ -311,6 +369,10 @@ export function normalizeDocument(raw: GardenDocument): GardenDocument {
     if (legacyPh.occupyPointId && !legacyPh.addPointId) {
       legacyPh.addPointId = legacyPh.occupyPointId;
       delete legacyPh.occupyPointId;
+    }
+    if (ph.originalFile) {
+      const migrated = migratePreviewPixels(ph.originalFile);
+      if (migrated && migrated !== ph.originalFile) ph.originalFile = migrated;
     }
   }
   return doc;
