@@ -4,6 +4,7 @@ import { createMemoryPhotoQueue, normalizeQueueAfterRestart, type PhotoQueueReco
 import { SIMPLE_UPLOAD_MAX_BYTES, parseRetryAfter, uploadAndVerifyOriginal } from '../src/photoUpload';
 import {
   PHOTO_UPLOAD_MAX_ATTEMPTS,
+  discardQueuedPhoto,
   drainPhotoQueue,
   photoUploadBackoffMs,
   resetPhotoUploadAttempts,
@@ -412,6 +413,60 @@ describe('drainPhotoQueue', () => {
     expect(cleared?.retryNotBefore).toBeUndefined();
   });
 
+  it('does not upload a photo removed from the survey', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put(queuedRecord());
+    await discardQueuedPhoto('ph-1', queue);
+    let tokens = 0;
+    const failed = await drainPhotoQueue({
+      queue,
+      getToken: async () => {
+        tokens += 1;
+        return 'tok';
+      },
+      onStatus: () => undefined,
+    });
+    expect(failed).toBe(0);
+    expect(tokens).toBe(0);
+    expect(await queue.list()).toEqual([]);
+  });
+
+  it('moves a photo deleted during upload and keeps the manifest row', async () => {
+    const queue = createMemoryPhotoQueue();
+    await queue.put(queuedRecord());
+    const methods: string[] = [];
+    let manifestBody = '';
+    const failed = await drainPhotoQueue({
+      queue,
+      getToken: async () => 'tok',
+      onStatus: () => undefined,
+      now: () => '2026-10-02T23:30:00.000Z',
+      fetchImpl: async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const method = init?.method ?? 'GET';
+        methods.push(method);
+        if (method === 'POST') return json(409, {});
+        if (method === 'PUT' && url.includes('.jpg')) {
+          await discardQueuedPhoto('ph-1', queue);
+          return json(200, item(bytes.byteLength, hash));
+        }
+        if (method === 'PATCH') return json(200, {});
+        if (method === 'GET') return json(404, {});
+        if (method === 'PUT' && url.includes('manifest.json')) {
+          manifestBody = String(init?.body ?? '');
+          return json(200, { eTag: '"m1"' }, { etag: '"m1"' });
+        }
+        return json(500, { error: { message: `unexpected ${method} ${url}` } });
+      },
+    });
+    expect(failed).toBe(0);
+    expect(methods).not.toContain('DELETE');
+    expect(methods).toContain('PATCH');
+    expect(manifestBody).toContain('"deletedAt"');
+    expect(manifestBody).toContain(queuedRecord().fileName);
+    expect(await queue.list()).toEqual([]);
+  });
+
   it('relabels a queued 7a4e268 pixel map without moving to the old formula', () => {
     const scale = 640 / 4032;
     const [migrated] = normalizeQueueAfterRestart([
@@ -480,7 +535,7 @@ function json(status: number, body: unknown, headers: Record<string, string> = {
 }
 
 function scripted(
-  steps: Array<(url: string, init?: RequestInit) => Response>,
+  steps: Array<(url: string, init?: RequestInit) => Response | Promise<Response>>,
 ): GraphRequest & { fetch: typeof fetch } {
   let n = 0;
   const fetchImpl: typeof fetch = async (input, init) => {

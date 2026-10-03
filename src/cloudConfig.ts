@@ -84,6 +84,13 @@ export function photosManifestPath(): string {
   return `${ONEDRIVE_FOLDER}/${PHOTOS_MANIFEST_RELATIVE}`;
 }
 
+/** Originals removed from the survey. Never hard-deleted. */
+export const ONEDRIVE_PHOTOS_DELETED_DIR = 'deleted';
+
+export function deletedPhotosFolderPath(): string {
+  return `${photosFolderPath()}/${ONEDRIVE_PHOTOS_DELETED_DIR}`;
+}
+
 /** True when the user (or a successful Load) has stored a garden filename. */
 export function hasStoredGardenCloudFile(): boolean {
   try {
