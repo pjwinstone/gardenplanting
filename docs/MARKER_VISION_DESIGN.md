@@ -58,9 +58,9 @@ Glue the paper down. A loose tube, or a sleeve you can shift on the stick, is no
 
 The coordinate in the garden is the **axis at ground level**, not the paper surface and not the axis at sleeve height.
 
-**Marked height.** Bearings and tapes meet the axis at the sleeve. Mark the sleeve middle on the stick at a fixed height, **0.45 m**, and store that height with the point. That mark is where the sleeve is tied. It is not half of `H`, so cutting the sheet from 297 mm down to 287 mm does not move it. A lean `λ` moves the ground point by `h_s sin λ`: **7.9 mm at 1°** and **24 mm at 3°** with the middle at 0.45 m. That is the centring budget, not the 1–3.5 mm pixel row.
+**Marked height.** Bearings and tapes meet the axis at the sleeve. Mark the sleeve middle on the stick at a fixed height, **0.5 m**, and store that height with the point. That mark is where the sleeve is tied. It is not half of `H`, so cutting the sheet from 297 mm down to 287 mm does not move it. A lean `λ` moves the ground point by `h_s sin λ`: **8.7 mm at 1°** and **26 mm at 3°** with the middle at 0.5 m. That is the centring budget, not the 1–3.5 mm pixel row.
 
-The sideways part of the lean shows up in the photo. Fit the tilted axis, level it with the gravity sample, and extrapolate to the ground. The part along the line of sight does not show in one photo. Plumb the rod to about **1°**. If the sideways lean is fitted, `sigmaCentringM` is only that unseen part, about **8 mm** at 1°. If it is not fitted and the rod may be 3° off, use **0.024 m**. An unplumbed rod is stored as the axis at sleeve height and labelled with that bound; it is not the planting point.
+The sideways part of the lean shows up in the photo. Fit the tilted axis, level it with the gravity sample, and extrapolate to the ground. The part along the line of sight does not show in one photo. Plumb the rod to about **1°**. If the sideways lean is fitted, `sigmaCentringM` is only that unseen part, about **8.7 mm** at 1°. If it is not fitted and the rod may be 3° off, use **0.026 m**. An unplumbed rod is stored as the axis at sleeve height and labelled with that bound; it is not the planting point.
 
 **Centring term.** Every sleeve bearing carries `sigmaCentringM`, in metres. It is the centring piece of the bearing sigma in the geometry note (PR #3 `bearingSigma`):
 
@@ -175,7 +175,7 @@ With `fx = 3028` and `σ_e = 1 px`, `σ_β = 0.013°`. That **pixel** term is a 
 Two larger terms sit on the same ray:
 
 - **`fx`.** A 1% focal-length error moves a bearing by `sin β cos β × 1%`: **0.05° at 5° off-centre, 0.18° at 20°, and 0.26° at the edge**. Centreline noise at 1 px is **0.013°**, so the focal term is **4–20×** larger, and it is the same for every photo from that phone. At 20° off-centre the lateral miss is **6 mm at 2 m, 16 mm at 5 m, 26 mm at 8 m and 48 mm at 15 m**. The merged solver still keeps a separate focal prior on each photo. One value per phone and lens is the follow-up in section 6.3. Do not quote the pixel row as the ray.
-- **Lean and a sleeve off the stick**, via `sigmaCentringM` (section 3). At the marked 0.45 m height that is 8 mm at 1° and 24 mm at 3°. The sleeve is glued to the dowel, so a sleeve that can still shift is not a published bearing. Fit the sideways lean. The along-sight part stays in the centring term.
+- **Lean and a sleeve off the stick**, via `sigmaCentringM` (section 3). At the marked 0.5 m height that is 8.7 mm at 1° and 26 mm at 3°. The sleeve is glued to the dowel, so a sleeve that can still shift is not a published bearing. Fit the sideways lean. The along-sight part stays in the centring term.
 
 The centreline is a valid Phase 1 ray across 2–15 m whenever both edges pass the width check in section 3. Without an ID there is still no point to attach it to, unless this sleeve is the only one in the frame and the user confirms the name.
 

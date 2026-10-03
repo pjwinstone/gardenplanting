@@ -9,9 +9,12 @@ on:
 permissions:
   contents: read
 
+# Pull requests, including Dependabot, each get their own group and cancel only
+# a superseded run of that same PR. Pushes to main and workflow_dispatch share
+# pages-deploy and wait, so an in-progress Pages deployment is never cancelled.
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: ${{ case(github.event_name == 'pull_request', format('pages-{0}', github.ref), 'pages-deploy') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -30,6 +33,9 @@ jobs:
 
       - name: Install
         run: npm ci
+
+      - name: Install poppler
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
 
       - name: Test
         run: npm test

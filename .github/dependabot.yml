@@ -5,10 +5,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
     groups:
-      # One PR for routine dev-dependency bumps, instead of a PR per package.
-      dev-minor-patch:
-        dependency-type: development
+      # One PR for routine minor and patch bumps. Major versions are not in
+      # this group, so each major stays its own pull request.
+      npm-minor-patch:
+        patterns:
+          - "*"
         update-types:
           - minor
           - patch
@@ -17,3 +20,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for action minor and patch bumps. Major versions stay individual PRs.
+      github-actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

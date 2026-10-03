@@ -1,5 +1,17 @@
 # Circle field test
 
+<div class="full markers">
+
+## Print the markers
+
+Print the sleeves the day before. **Actual size / 100%**. No fit-to-page, no scaling, no borderless. Black only, highest quality. The **100 mm** bar must measure 100 mm (±0.5 mm), or reprint. Cut the **205 mm** line, and 5 mm off the top and the bottom. Wrap snug on a **60 mm** dowel, bands horizontal, **TOP** up. Glue the **16.5 mm** flap and press the seam flat. R = C / 2π at three heights, to **0.1 mm**, on the cane row. Steps: [How to print the markers](PRINT_MARKERS.md).
+
+[All sleeves](markers/all-sleeves.pdf). BAS01 [315](markers/BAS01.pdf), BAS02 [36E](markers/BAS02.pdf), CRC01 [459](markers/CRC01.pdf), CRC02 [6BA](markers/CRC02.pdf), CRC03 [8A3](markers/CRC03.pdf), CRC04 [952](markers/CRC04.pdf), CRC05 [DAC](markers/CRC05.pdf), CRC06 [EC5](markers/CRC06.pdf).
+
+STN01, STN02, and STN03 are where you stand. They are not sleeved. Calibration reuses a cane. This test does not use a checkerboard.
+
+</div>
+
 One person. One iPhone. About an hour. Numbers are the approved field sheet. Do not change them.
 
 Look at the plan from **BAS01 toward BAS02** (up the page). **Left** is left. The peg is on your **right**.
@@ -70,7 +82,7 @@ Look at the plan from **BAS01 toward BAS02** (up the page). **Left** is left. Th
 - [ ] A laser, or a tape that reaches **10.5 m**.
 - [ ] A non-stretch line marked at **4.000 m** against the tape.
 - [ ] A centre peg. Six canes for the circle. Two canes for the baseline. One cane for the calibration if you do not reuse a circle cane.
-- [ ] Sleeves glued snug on a **60 mm** dowel. Matte paper. Measure each sleeve’s R (about 30 mm).
+- [ ] Sleeves from **Print the markers**, glued snug on a **60 mm** dowel. Matte. Each sleeve’s own R.
 - [ ] A small spirit level. The phone pole (about **1 m**). This sheet and a pen.
 
 Camera location off. Leave the app’s **Offset A (mm)** and **Offset B (mm)** at **0**.
