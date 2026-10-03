@@ -4,8 +4,11 @@
  * conflict that asks the user. Timestamps are shown in the prompt and are
  * never used to choose. Cancel writes nothing and adopts nothing.
  * Adopting the remote first stores this browser’s copy as
- * `/Garden Survey/garden-conflict-<time>.json` (or a local download).
- * An empty garden is never PUT. A first save with no eTag uses If-None-Match: *.
+ * `/Garden Survey/garden-conflict-<time>.json`. A failed upload does not adopt;
+ * a browser download is only a spare copy. An empty garden is never PUT.
+ * A first save with no eTag uses If-None-Match: *.
+ * Sign-in loads OneDrive only when this browser is empty, or the stored eTag
+ * matches and the local garden is not dirty.
  */
 
 import type { OwedSaveStorage } from './cloudSignIn';
@@ -25,6 +28,10 @@ import {
 
 const ETAG_KEY = 'garden-survey:drive-etags';
 const PROMPTED_KEY = 'garden-survey:conflict-prompted';
+const DIRTY_KEY = 'garden-survey:garden-dirty';
+
+/** Shown while this browser has edits that are not the OneDrive copy. */
+export const GARDEN_UNSAVED_STATUS = 'Not saved — tap Save';
 
 export interface GardenCopyChoice {
   fileName: string;
@@ -117,6 +124,35 @@ export function rememberDriveETag(
 
 function etagMapKey(account: string, fileName: string): string {
   return `${account}\n${fileName}`;
+}
+
+/** Every local edit, including while signed out and before a redirect. */
+export function noteLocalGardenEdit(storage?: OwedSaveStorage): void {
+  markGardenDirty(storage);
+}
+
+export function markGardenDirty(storage?: OwedSaveStorage): void {
+  try {
+    storageOf(storage)?.setItem(DIRTY_KEY, '1');
+  } catch {
+    /* quota */
+  }
+}
+
+export function clearGardenDirty(storage?: OwedSaveStorage): void {
+  try {
+    storageOf(storage)?.removeItem(DIRTY_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function gardenIsDirty(storage?: OwedSaveStorage): boolean {
+  try {
+    return storageOf(storage)?.getItem(DIRTY_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 function readPrompted(storage?: OwedSaveStorage): PromptedConflict | null {
@@ -287,6 +323,7 @@ function wroteResult(
   storage?: OwedSaveStorage,
 ): GardenCommitResult {
   clearPrompted(storage);
+  clearGardenDirty(storage);
   if (put.eTag && account) rememberDriveETag(account, fileName, put.eTag, storage);
   return { ok: true, wrote: true, savedAt: put.savedAt, fileName: put.fileName, eTag: put.eTag };
 }
@@ -346,6 +383,7 @@ async function resolveConflict(
     return { ok: false, error: preserved.error, conflict: true };
   }
   clearPrompted(opts.storage);
+  clearGardenDirty(opts.storage);
   return {
     ok: true,
     wrote: false,
@@ -385,21 +423,10 @@ async function preserveLocalCopy(
       message: `Kept the OneDrive copy of ${gardenFileName}. This browser’s copy is saved as ${path}.`,
     };
   }
-  if (opts.downloadLocal) {
-    try {
-      opts.downloadLocal(opts.doc, conflictName);
-      return {
-        ok: true,
-        where: conflictName,
-        message: `Kept the OneDrive copy of ${gardenFileName}. OneDrive did not take the spare copy (${put.error}). Downloaded ${conflictName} in this browser instead.`,
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Download failed.';
-      return {
-        ok: false,
-        error: `Could not keep this browser’s copy before using OneDrive: ${put.error} ${message}`,
-      };
-    }
+  try {
+    opts.downloadLocal?.(opts.doc, conflictName);
+  } catch {
+    /* A download is a spare copy. It does not prove the local garden was kept. */
   }
   return {
     ok: false,
@@ -507,5 +534,125 @@ export async function applyRedirectOwedSave(opts: {
     remoteUpdatedAt: result.remoteUpdatedAt,
     preservedAs: result.preservedAs,
     message: result.message,
+  };
+}
+
+export type GardenReconcileResult =
+  | { kind: 'missing'; message: string }
+  | { kind: 'failed'; error: string }
+  | {
+      kind: 'adopted';
+      silent: true;
+      doc: GardenDocument;
+      fileName: string;
+      eTag?: string;
+      usedLegacy?: boolean;
+      fallbackFrom?: string;
+      message: string;
+    }
+  | {
+      kind: 'kept-remote';
+      silent: false;
+      doc: GardenDocument;
+      fileName: string;
+      eTag?: string;
+      preservedAs: string;
+      message: string;
+    }
+  | { kind: 'cancelled'; message: string };
+
+/**
+ * Sign-in and Load. Adopt OneDrive with no prompt only when this browser's
+ * garden is empty, or the stored base eTag equals the remote eTag and the
+ * local garden is not dirty. Anything else uses the save conflict prompt.
+ * Cancel leaves the local garden in place.
+ */
+export async function reconcileGardenOnLoad(opts: {
+  localDoc: GardenDocument;
+  fileName?: string;
+  token: string;
+  account: string;
+  storage?: OwedSaveStorage;
+  fetchImpl?: typeof fetch;
+  choose?: GardenCopyChooser;
+  now?: () => string;
+  downloadLocal?: (doc: GardenDocument, fileName: string) => void;
+  prompt?: 'auto' | 'user';
+}): Promise<GardenReconcileResult> {
+  const fileName = opts.fileName || getGardenCloudFileName();
+  const loaded = await loadGardenFromOneDrive(fileName, {
+    token: opts.token,
+    fetchImpl: opts.fetchImpl,
+  });
+  if (!loaded.ok) {
+    if (loaded.missing) return { kind: 'missing', message: loaded.error };
+    return { kind: 'failed', error: loaded.error };
+  }
+
+  const remoteFile = loaded.fileName || fileName;
+  const remoteETag = loaded.eTag || '';
+  if (isEmptySurveyGarden(opts.localDoc)) {
+    return adopted(opts, loaded, remoteFile, remoteETag);
+  }
+
+  const baseETag = rememberedDriveETag(opts.account, remoteFile, opts.storage);
+  if (!gardenIsDirty(opts.storage) && baseETag && remoteETag && baseETag === remoteETag) {
+    return adopted(opts, loaded, remoteFile, remoteETag);
+  }
+
+  const resolved = await resolveConflict(
+    { ...opts, doc: opts.localDoc },
+    loaded,
+    remoteFile,
+    opts.localDoc.updatedAt ?? '',
+    opts.prompt ?? 'user',
+  );
+  if (!resolved.ok) {
+    if (resolved.cancelled) {
+      markGardenDirty(opts.storage);
+      return { kind: 'cancelled', message: resolved.error };
+    }
+    markGardenDirty(opts.storage);
+    return { kind: 'failed', error: resolved.error };
+  }
+  if (resolved.wrote) {
+    return {
+      kind: 'failed',
+      error: `Could not choose a copy of ${remoteFile}.`,
+    };
+  }
+  if (resolved.eTag && opts.account) {
+    rememberDriveETag(opts.account, resolved.fileName, resolved.eTag, opts.storage);
+  }
+  clearGardenSaveOwed(opts.storage);
+  return {
+    kind: 'kept-remote',
+    silent: false,
+    doc: resolved.doc,
+    fileName: resolved.fileName,
+    eTag: resolved.eTag,
+    preservedAs: resolved.preservedAs,
+    message: resolved.message,
+  };
+}
+
+function adopted(
+  opts: { account: string; storage?: OwedSaveStorage },
+  loaded: Extract<CloudLoadResult, { ok: true }>,
+  remoteFile: string,
+  remoteETag: string,
+): GardenReconcileResult {
+  clearGardenDirty(opts.storage);
+  clearGardenSaveOwed(opts.storage);
+  if (remoteETag && opts.account) rememberDriveETag(opts.account, remoteFile, remoteETag, opts.storage);
+  return {
+    kind: 'adopted',
+    silent: true,
+    doc: loaded.doc,
+    fileName: remoteFile,
+    eTag: loaded.eTag,
+    usedLegacy: loaded.usedLegacy,
+    fallbackFrom: loaded.fallbackFrom,
+    message: `Loaded ${remoteFile} from OneDrive.`,
   };
 }

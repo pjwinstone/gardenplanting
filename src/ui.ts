@@ -63,7 +63,6 @@ import {
   loadCachedGarden,
   createEmptyGarden,
   runAdjust as toolboxRunAdjust,
-  loadGardenCloud,
   type ModeAction,
 } from './toolbox';
 import {
@@ -111,16 +110,27 @@ import {
   surveyPhotoIdsForPoint,
   type PhotoStatusUpdate,
 } from './photoSync';
-import { completeCloudSignIn, readOwedGardenSave, markGardenSaveOwed, clearGardenSaveOwed } from './cloudSignIn';
+import {
+  completeCloudSignIn,
+  readOwedGardenSave,
+  markGardenSaveOwed,
+  clearGardenSaveOwed,
+  gardenSaveIsOwed,
+} from './cloudSignIn';
 import { silentGraphToken } from './onedrive';
 import {
   applyRedirectOwedSave,
   commitGardenSave,
+  GARDEN_UNSAVED_STATUS,
+  clearGardenDirty,
+  gardenIsDirty,
+  noteLocalGardenEdit,
+  reconcileGardenOnLoad,
   rememberedDriveETag,
   rememberDriveETag,
   type GardenCopyChoice,
+  type GardenReconcileResult,
 } from './gardenCloudSave';
-
 export type View = 'survey' | 'tags';
 
 /** One hamburger accordion open at a time (point dialogue is separate, on-plan). */
@@ -1236,6 +1246,7 @@ function setState(partial: Partial<UiState>): void {
   // Always notify listeners even if persistence fails — otherwise the UI freezes
   // on legal transitions while illegal refusals (no save) still appear to work.
   if (doc) {
+    noteLocalGardenEdit();
     const saved = persistGardenLocal(doc);
     if (!saved.ok) {
       handleLocalPersistFailure(doc, saved);
@@ -1310,7 +1321,7 @@ function askWhichGardenCopy(choice: GardenCopyChoice): Promise<'local' | 'remote
   return Promise.resolve(keepRemote ? 'remote' : 'local');
 }
 
-/** Spare copy when OneDrive will not take garden-conflict-<time>.json. */
+/** Spare download when the conflict-file upload fails. Not proof the copy was kept. */
 function downloadConflictCopy(doc: GardenDocument, fileName: string): void {
   const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1318,7 +1329,7 @@ function downloadConflictCopy(doc: GardenDocument, fileName: string): void {
   a.href = url;
   a.download = fileName;
   a.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function adoptRemoteGarden(doc: GardenDocument, fileName: string, eTag?: string): void {
@@ -1327,6 +1338,7 @@ function adoptRemoteGarden(doc: GardenDocument, fileName: string, eTag?: string)
   setGardenCloudFileName(fileName);
   notifyCloudPrefsChanged();
   setDoc(doc, null);
+  clearGardenDirty();
 }
 
 async function quietCloudSave(
@@ -1390,11 +1402,13 @@ async function quietCloudSave(
   }
   if (result.cancelled) {
     noteOwedGardenSave(doc);
-    if (!result.deferred) {
-      setCloudMessage(
-        opts.afterLocalQuota ? `Browser storage full. ${result.error}` : result.error,
-      );
-    }
+    setCloudMessage(
+      result.deferred
+        ? GARDEN_UNSAVED_STATUS
+        : opts.afterLocalQuota
+          ? `Browser storage full. ${result.error}`
+          : result.error,
+    );
     return;
   }
   if (result.refused === 'empty') clearGardenSaveOwed();
@@ -1478,13 +1492,19 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   await resumePhotoUploads();
   const account = accountKey() ?? '';
   const preferred = getGardenCloudFileName();
+  const auth = await silentGraphToken();
+  if (!auth.ok) {
+    if (auth.interactionRequired) notePhotoSignIn(true);
+    setCloudMessage(
+      gardenIsDirty() || readOwedGardenSave()
+        ? GARDEN_UNSAVED_STATUS
+        : auth.interactionRequired
+          ? 'Sign in to save.'
+          : auth.error,
+    );
+    return;
+  }
   if (readOwedGardenSave()) {
-    const auth = await silentGraphToken();
-    if (!auth.ok) {
-      if (auth.interactionRequired) notePhotoSignIn(true);
-      setCloudMessage(auth.interactionRequired ? 'Sign in to save.' : auth.error);
-      return;
-    }
     setCloudBusy(true);
     const outcome = await applyRedirectOwedSave({
       account,
@@ -1516,37 +1536,21 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
       setCloudMessage(outcome.error);
       return;
     }
-    // Mismatch, empty, or an unreadable flag: load OneDrive instead of writing.
+    // Mismatch or an empty owed flag: still compare before adopting OneDrive.
   }
   setCloudBusy(true);
-  const result = await loadGardenCloud(preferred);
+  const decision = await reconcileGardenOnLoad({
+    localDoc: state.doc,
+    fileName: preferred,
+    token: auth.token,
+    account,
+    choose: askWhichGardenCopy,
+    downloadLocal: downloadConflictCopy,
+    prompt: 'user',
+  });
   setCloudBusy(false);
   void refreshGardenFileList();
-  if (!result.ok) {
-    // Missing file is normal on first save — keep local cache / empty.
-    if (result.missing) {
-      setCloudMessage(
-        `Signed in. No garden file on OneDrive yet (wanted ${preferred}) — set Version and Save when ready.`,
-      );
-      return;
-    }
-    const msg = `Signed in, but could not load from OneDrive: ${result.error}`;
-    logError(msg, { source: 'onedrive' });
-    setCloudMessage(msg);
-    return;
-  }
-  // Remember what was actually opened so the next startup auto-loads it.
-  setGardenCloudFileName(result.fileName);
-  notifyCloudPrefsChanged();
-  if (result.eTag) rememberDriveETag(account, result.fileName, result.eTag);
-  setDoc(result.doc, null);
-  const via =
-    result.fallbackFrom && result.fallbackFrom !== result.fileName
-      ? result.usedLegacy
-        ? ` (fallback legacy; ${result.fallbackFrom} missing)`
-        : ` (fallback; ${result.fallbackFrom} missing)`
-      : '';
-  setCloudMessage(`Signed in. Loaded ${result.fileName}${via}.`);
+  applyLoadedGarden(decision, 'sign-in');
 }
 
 async function onShellClick(e: Event): Promise<void> {
@@ -2373,25 +2377,75 @@ async function onOneDriveLoad(fileName?: string): Promise<void> {
   const target = fileName || getGardenCloudFileName();
   setCloudBusy(true);
   setCloudMessage(`Loading ${target} from OneDrive…`);
-  const result = await loadGardenCloud(target);
-  setCloudBusy(false);
-  void refreshGardenFileList();
-  if (!result.ok) {
-    logError(result.error, { source: 'onedrive' });
-    setCloudMessage(result.error);
+  const auth = await silentGraphToken();
+  if (!auth.ok) {
+    setCloudBusy(false);
+    if (auth.interactionRequired) {
+      noteOwedGardenSave(state.doc);
+      notePhotoSignIn(true);
+    }
+    const msg = auth.interactionRequired ? 'Sign in to save.' : auth.error;
+    logError(msg, { source: 'onedrive' });
+    setCloudMessage(msg);
     return;
   }
-  setGardenCloudFileName(result.fileName);
-  notifyCloudPrefsChanged();
-  if (result.eTag) rememberDriveETag(accountKey() ?? '', result.fileName, result.eTag);
-  setDoc(result.doc, null);
-  const via =
-    result.fallbackFrom && result.fallbackFrom !== result.fileName
-      ? result.usedLegacy
-        ? ` (fallback legacy; ${result.fallbackFrom} missing)`
-        : ` (fallback; ${result.fallbackFrom} missing)`
-      : '';
-  setCloudMessage(`Loaded ${result.fileName}${via} from OneDrive. Browser cache updated.`);
+  const decision = await reconcileGardenOnLoad({
+    localDoc: state.doc,
+    fileName: target,
+    token: auth.token,
+    account: accountKey() ?? '',
+    choose: askWhichGardenCopy,
+    downloadLocal: downloadConflictCopy,
+    prompt: 'user',
+  });
+  setCloudBusy(false);
+  void refreshGardenFileList();
+  applyLoadedGarden(decision, 'load');
+}
+
+function applyLoadedGarden(decision: GardenReconcileResult, source: 'sign-in' | 'load'): void {
+  if (decision.kind === 'adopted' || decision.kind === 'kept-remote') {
+    adoptRemoteGarden(decision.doc, decision.fileName, decision.eTag);
+    if (decision.kind === 'adopted') {
+      const via = loadFallbackNote(decision);
+      setCloudMessage(
+        source === 'sign-in'
+          ? `Signed in. Loaded ${decision.fileName}${via}.`
+          : `Loaded ${decision.fileName}${via} from OneDrive. Browser cache updated.`,
+      );
+      return;
+    }
+    setCloudMessage(decision.message);
+    return;
+  }
+  if (decision.kind === 'cancelled') {
+    noteOwedGardenSave(state.doc);
+    setCloudMessage(decision.message);
+    return;
+  }
+  if (decision.kind === 'missing') {
+    setCloudMessage(
+      source === 'sign-in'
+        ? gardenIsDirty()
+          ? GARDEN_UNSAVED_STATUS
+          : `Signed in. No garden file on OneDrive yet (wanted ${getGardenCloudFileName()}) — set Version and Save when ready.`
+        : decision.message,
+    );
+    return;
+  }
+  const msg =
+    source === 'sign-in'
+      ? `Signed in, but could not load from OneDrive: ${decision.error}`
+      : decision.error;
+  logError(msg, { source: 'onedrive' });
+  setCloudMessage(msg);
+}
+
+function loadFallbackNote(result: { fileName: string; fallbackFrom?: string; usedLegacy?: boolean }): string {
+  if (!result.fallbackFrom || result.fallbackFrom === result.fileName) return '';
+  return result.usedLegacy
+    ? ` (fallback legacy; ${result.fallbackFrom} missing)`
+    : ` (fallback; ${result.fallbackFrom} missing)`;
 }
 
 function onShellChange(e: Event): void {
@@ -3211,12 +3265,34 @@ function menuAccordion(
 }
 
 /** Concertina status for Sign in (see docs/design-philosophy-status-colours.md). */
+function appendUnsavedStatus(panel: HTMLElement, message?: string | null): void {
+  if (!(gardenIsDirty() || gardenSaveIsOwed()) || message === GARDEN_UNSAVED_STATUS) return;
+  panel.appendChild(
+    el('p', {
+      className: 'cloud-status__line cloud-status__msg',
+      text: GARDEN_UNSAVED_STATUS,
+      attrs: { 'data-testid': 'garden-not-saved' },
+    }),
+  );
+}
+
 function cloudSectionStatus(
   doc: GardenDocument,
 ): { tone: 'ok' | 'warn' | 'error' | 'idle'; inline?: string; text?: string } {
   const cloud = getCloudStatus();
+  const unsaved = gardenIsDirty() || gardenSaveIsOwed();
   if (!cloud.configured) {
-    return { tone: 'error', inline: 'not configured' };
+    return unsaved
+      ? { tone: 'warn', inline: 'not saved', text: GARDEN_UNSAVED_STATUS }
+      : { tone: 'error', inline: 'not configured' };
+  }
+  if (unsaved) {
+    const error = Boolean(cloud.message && /could not|error|problem|fail|denied|missing/i.test(cloud.message));
+    return {
+      tone: error ? 'error' : 'warn',
+      inline: error ? 'error' : 'not saved',
+      text: GARDEN_UNSAVED_STATUS,
+    };
   }
   if (cloud.message && /could not|error|problem|fail|denied|missing/i.test(cloud.message)) {
     return { tone: 'error', inline: 'error' };
@@ -4302,6 +4378,7 @@ function buildCloudPanel(): HTMLElement {
         text: 'Sign-in is not configured on this build yet. Local cache and Export/Import still work. See docs/entra-onedrive-setup.md.',
       }),
     );
+    appendUnsavedStatus(panel);
     return panel;
   }
 
@@ -4424,6 +4501,7 @@ function buildCloudPanel(): HTMLElement {
       }),
     );
   }
+  appendUnsavedStatus(panel, cloud.message);
   if (cloud.busy) {
     panel.appendChild(
       el('p', {

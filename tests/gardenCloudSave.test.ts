@@ -3,6 +3,10 @@ import {
   applyRedirectOwedSave,
   commitGardenSave,
   gardenConflictPrompt,
+  gardenIsDirty,
+  noteLocalGardenEdit,
+  reconcileGardenOnLoad,
+  rememberDriveETag,
   type GardenCopyChoice,
 } from '../src/gardenCloudSave';
 import { markGardenSaveOwed, readOwedGardenSave, type OwedGardenSave, type OwedSaveStorage } from '../src/cloudSignIn';
@@ -356,9 +360,10 @@ describe('applyRedirectOwedSave', () => {
     expect(readOwedGardenSave(raced)).not.toBeNull();
   });
 
-  it('downloads the local copy when the conflict file cannot be uploaded', async () => {
+  it('does not adopt when the conflict file cannot be uploaded', async () => {
     const storage = memoryStorage();
     owe(storage);
+    noteLocalGardenEdit(storage);
     const phone = garden(LOCAL_AT, 'Phone edit');
     const offline = graph({
       remotes: [garden(IPAD_AT, 'iPad save')],
@@ -380,32 +385,11 @@ describe('applyRedirectOwedSave', () => {
       },
     });
     expect(downloaded).toEqual([{ name: CONFLICT_NAME, label: 'Phone edit' }]);
-    expect(outcome.kind).toBe('kept-remote');
-    if (outcome.kind === 'kept-remote') {
-      expect(outcome.message).toContain(CONFLICT_NAME);
-      expect(outcome.doc.name).toBe('iPad save');
-    }
+    expect(outcome.kind).toBe('failed');
+    if (outcome.kind === 'failed') expect(outcome.error).toMatch(/Nothing was replaced/);
     expect(offline.puts.some((put) => put.fileName === FILE)).toBe(false);
-
-    const stuck = memoryStorage();
-    owe(stuck);
-    const noDownload = graph({
-      remotes: [garden(IPAD_AT, 'iPad save')],
-      etags: ['"v2"'],
-      putStatuses: [500],
-    });
-    const failed = await applyRedirectOwedSave({
-      account: ACCOUNT,
-      fileName: FILE,
-      localDoc: phone,
-      token: 'tok',
-      storage: stuck,
-      fetchImpl: noDownload.fetchImpl,
-      now: () => CONFLICT_AT,
-      choose: async () => 'remote',
-    });
-    expect(failed.kind).toBe('failed');
-    expect(readOwedGardenSave(stuck)).not.toBeNull();
+    expect(readOwedGardenSave(storage)).not.toBeNull();
+    expect(gardenIsDirty(storage)).toBe(true);
   });
 
   it('asks instead of writing when OneDrive has a garden and this browser has no eTag', async () => {
@@ -571,6 +555,131 @@ describe('applyRedirectOwedSave', () => {
     expect(legacyOutcome.kind).toBe('absent');
     expect(calls).toBe(0);
     expect(legacy.getItem('garden-survey:garden-save-owed')).toBeNull();
+  });
+});
+
+describe('reconcileGardenOnLoad', () => {
+  it('prompts on sign-in after a signed-out edit and does not overwrite', async () => {
+    const storage = memoryStorage();
+    noteLocalGardenEdit(storage);
+    expect(readOwedGardenSave(storage)).toBeNull();
+    expect(gardenIsDirty(storage)).toBe(true);
+    const local = garden(LOCAL_AT, 'Signed-out edit');
+    local.points = [{ id: 'HSE01', kind: 'HSE', label: 'Signed-out corner' }];
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'iPad save')],
+      etags: ['"v2"'],
+    });
+    let asked = false;
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: local,
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      choose: async (choice) => {
+        asked = true;
+        expect(choice.localDoc.name).toBe('Signed-out edit');
+        expect(choice.localDoc.points[0]?.label).toBe('Signed-out corner');
+        expect(choice.remoteDoc.name).toBe('iPad save');
+        expect(choice.remoteETag).toBe('"v2"');
+        return 'local';
+      },
+    });
+    expect(asked).toBe(true);
+    expect(outcome.kind).toBe('cancelled');
+    expect(remote.puts).toEqual([]);
+    expect(gardenIsDirty(storage)).toBe(true);
+  });
+
+  it('keeps an edit made just before the redirect', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    noteLocalGardenEdit(storage);
+    expect(readOwedGardenSave(storage)).toBeNull();
+    const local = garden(LOCAL_AT, 'Edit before redirect');
+    const remote = graph({
+      remotes: [garden(REMOTE_OLDER, 'Last cloud save')],
+      etags: ['"v1"'],
+    });
+    let asked = false;
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: local,
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      choose: async (choice) => {
+        asked = true;
+        expect(choice.localUpdatedAt).toBe(LOCAL_AT);
+        expect(choice.localDoc.name).toBe('Edit before redirect');
+        expect(choice.remoteETag).toBe('"v1"');
+        return 'local';
+      },
+    });
+    expect(asked).toBe(true);
+    expect(outcome.kind).toBe('cancelled');
+    expect(remote.puts).toEqual([]);
+    expect(gardenIsDirty(storage)).toBe(true);
+  });
+
+  it('adopts an empty local garden without asking', async () => {
+    const storage = memoryStorage();
+    noteLocalGardenEdit(storage);
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Cloud garden')],
+      etags: ['"v2"'],
+    });
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: emptyDocument('Untitled garden'),
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      choose: async () => {
+        throw new Error('empty local must not ask');
+      },
+    });
+    expect(outcome.kind).toBe('adopted');
+    if (outcome.kind === 'adopted') {
+      expect(outcome.silent).toBe(true);
+      expect(outcome.doc.name).toBe('Cloud garden');
+      expect(outcome.eTag).toBe('"v2"');
+    }
+    expect(remote.puts).toEqual([]);
+    expect(gardenIsDirty(storage)).toBe(false);
+  });
+
+  it('adopts silently when the eTag matches and the local garden is clean', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    expect(gardenIsDirty(storage)).toBe(false);
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Cloud copy')],
+      etags: ['"v1"'],
+    });
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: garden(LOCAL_AT, 'Local cache'),
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      choose: async () => {
+        throw new Error('clean matching eTag must not ask');
+      },
+    });
+    expect(outcome.kind).toBe('adopted');
+    if (outcome.kind === 'adopted') {
+      expect(outcome.silent).toBe(true);
+      expect(outcome.doc.name).toBe('Cloud copy');
+    }
+    expect(remote.puts).toEqual([]);
+    expect(gardenIsDirty(storage)).toBe(false);
+    expect(readOwedGardenSave(storage)).toBeNull();
   });
 });
 
