@@ -1,4 +1,4 @@
-# Architecture review — Garden Survey (repo `gardenplanting`)
+# Architecture review — Garden Planting (repo `gardenplanting`)
 
 **Reviewed:** 2026-10-02, `main` at `509f5ba` (app **0.7.25**).
 **Scope:** what is in the tree today. Method specs already live in [plan-baseline-then-house.md](plan-baseline-then-house.md), [plan-layers-objects-add-point.md](plan-layers-objects-add-point.md), and [architecture-toolbox-workflows.md](architecture-toolbox-workflows.md). This note is the status of the code, not a second method spec.
@@ -7,7 +7,7 @@
 
 A **static PWA** (Vite + TypeScript) for surveying one ~20×20 m UK garden. Live site: https://pjwinstone.github.io/gardenplanting/
 
-The product name in the UI and `package.json` is **Garden Survey** (`garden-survey` **0.7.25**). The GitHub repo is `gardenplanting`.
+The product name in the UI and `package.json` is **Garden Planting** (`garden-planting` **0.7.25**). The GitHub repo is `gardenplanting`.
 
 | Question | Answer |
 |---|---|

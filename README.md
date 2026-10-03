@@ -1,4 +1,4 @@
-# Garden Survey
+# Garden Planting
 
 Static PWA (Vite + TypeScript) for surveying a ~20×20 m UK garden. No backend. Session modes, a chatty coach, Layer A/B adjust, SVG plan, and A4 printable rod belts.
 
@@ -10,7 +10,7 @@ Static PWA (Vite + TypeScript) for surveying a ~20×20 m UK garden. No backend. 
 
 **Stage 2 — accurate measurements (field):** phone checklist → **[docs/stage-2-field-checklist.md](docs/stage-2-field-checklist.md)**. In the app: hamburger → **Establish baseline** / **Show Stage 2 checklist**.
 
-**Microsoft sign-in + OneDrive:** saves `garden.json` to personal OneDrive at `/Garden Survey/garden.json`. Setup: **[docs/entra-onedrive-setup.md](docs/entra-onedrive-setup.md)**.
+**Microsoft sign-in + OneDrive:** saves `garden.json` to personal OneDrive at `/Garden Survey/garden.json`. The OneDrive folder keeps its legacy name **Garden Survey** so existing surveys stay readable. A migration to a new folder is a possible later step. Setup: **[docs/entra-onedrive-setup.md](docs/entra-onedrive-setup.md)**.
 
 ## Run
 

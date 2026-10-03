@@ -116,7 +116,7 @@ This build has no probe page. Shoot in **Camera.app**, then load with **Library*
 
 Before you leave the house, in Camera.app: **12 MP**, **HEIF Max** off, **48 MP** off, **ProRAW** off, location off.
 
-1. Open Garden Survey. Tap the bottom-right menu button (**Open menu**). **Tools** → **New garden**, if this phone should not keep an older garden.
+1. Open Garden Planting. Tap the bottom-right menu button (**Open menu**). **Tools** → **New garden**, if this phone should not keep an older garden.
 2. Menu → **Sign in** → **Sign in with Microsoft**. **Version** is the file name (`1` is `/Garden Survey/garden-v1.json`, shown on the path line).
 3. Menu → **Baseline**. **End A** `BAS01`, **End B** `BAS02`. **Length (m)** is the tape mean after level and +R, not the laser. **Offset A (mm)** `0`, **Offset B (mm)** `0`. **Measure with** **Tape**. **Save baseline**. Do not swap the ends.
 4. **+ Point**. The **Aiming preview** opens. Tap **Cancel**. In the **+ Point** dialogue: **Name** `Circle`, **Geometry** `Circle`, then **+ Item**. **Save**. There is no box for sleeve R, sleeve height, or plumb. They stay on this sheet.

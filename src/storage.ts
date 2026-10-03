@@ -69,7 +69,7 @@ export function saveDocument(doc: GardenDocument): SaveDocumentResult {
       return { ok: true };
     } catch (e2) {
       const error = e2 instanceof Error ? e2.message : 'localStorage save failed';
-      console.warn('Garden Survey: could not persist document', error);
+      console.warn('Garden Planting: could not persist document', error);
       return { ok: false, error, quotaExceeded: isQuotaExceededError(e2) || isQuotaExceededError(e) };
     }
   }

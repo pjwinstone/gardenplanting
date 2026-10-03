@@ -233,7 +233,7 @@ export function startPhotoUploadLoop(
       void persist().then((granted) => {
         if (granted) return;
         loopDeps?.onStorageWarning?.(
-          'This browser has not made storage persistent. Original photos waiting to upload may be evicted. Add Garden Survey to the Home Screen.',
+          'This browser has not made storage persistent. Original photos waiting to upload may be evicted. Add Garden Planting to the Home Screen.',
         );
       });
     }

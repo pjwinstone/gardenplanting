@@ -11,7 +11,7 @@ async function boot(): Promise<void> {
   }
 
   root.innerHTML =
-    '<p style="font-family:system-ui;padding:1.5rem">Starting Garden Survey…</p>';
+    '<p style="font-family:system-ui;padding:1.5rem">Starting Garden Planting…</p>';
 
   // Finish redirect handshake before the UI paints signed-out.
   await initAuth();
@@ -22,7 +22,7 @@ async function boot(): Promise<void> {
 
 boot().catch((err) => {
   console.error(err);
-  const msg = err instanceof Error ? err.message : 'Garden Survey failed to start.';
+  const msg = err instanceof Error ? err.message : 'Garden Planting failed to start.';
   logError(msg, {
     stack: err instanceof Error ? err.stack : undefined,
     source: 'boot',
