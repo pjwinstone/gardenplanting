@@ -1,4 +1,4 @@
-/** Garden Survey document model — points, baselines, layers/objects, photos, setups. */
+/** Garden Planting document model — points, baselines, layers/objects, photos, setups. */
 
 import { migratePreviewPixels } from './photoOriginal';
 

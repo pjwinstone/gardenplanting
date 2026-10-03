@@ -1,4 +1,4 @@
-# Roadmap — Garden Survey toward a planted garden
+# Roadmap — Garden Planting toward a planted garden
 
 **Status:** planning note, 2026-10-02. Pass bars follow the maths review on PR #2. Marker stages added after Phase 1. Grounded in [ARCHITECTURE_REVIEW.md](ARCHITECTURE_REVIEW.md). Does not change the survey method in `AGENTS.md`.
 
