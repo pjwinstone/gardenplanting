@@ -214,6 +214,53 @@ async function readManifest(
   }
 }
 
+/**
+ * Photo ids and file names another device has dropped.
+ * `deletedAt` on a manifest row, or a file sitting in `photos/deleted/`.
+ * Any failure returns the keys found so far — this must not block adopting a garden.
+ */
+export async function loadDeletedPhotoKeys(opts: {
+  client: GraphRequest;
+  manifestPath: string;
+  deletedFolderPath: string;
+}): Promise<{ photoIds: string[]; fileNames: string[] }> {
+  const photoIds = new Set<string>();
+  const fileNames = new Set<string>();
+  try {
+    const manifest = await readManifest(opts.client, opts.manifestPath);
+    if (manifest.ok) {
+      for (const row of manifest.manifest.photos) {
+        if (!row?.deletedAt) continue;
+        if (row.photoId) photoIds.add(row.photoId);
+        if (row.fileName) fileNames.add(row.fileName);
+      }
+    }
+  } catch {
+    /* A missing or unreadable manifest is not a list of deletes. */
+  }
+  try {
+    for (const name of await listChildNames(opts.client, opts.deletedFolderPath)) fileNames.add(name);
+  } catch {
+    /* photos/deleted/ may not exist yet. */
+  }
+  return { photoIds: [...photoIds], fileNames: [...fileNames] };
+}
+
+async function listChildNames(client: GraphRequest, folderPath: string): Promise<string[]> {
+  const url = `${graphItemUrl(folderPath)}:/children?$select=name&$top=200`;
+  const res = await client.fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${client.token}` },
+  });
+  if (!res.ok) return [];
+  const body = (await res.json()) as { value?: Array<{ name?: unknown }> };
+  const names: string[] = [];
+  for (const item of body.value ?? []) {
+    if (typeof item?.name === 'string' && item.name) names.push(item.name);
+  }
+  return names;
+}
+
 async function writeManifest(
   client: GraphRequest,
   manifestPath: string,

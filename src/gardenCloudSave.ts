@@ -23,8 +23,9 @@ import {
   owedSaveMatches,
   readOwedGardenSave,
 } from './cloudSignIn';
-import { getGardenCloudFileName, onedrivePathFor } from './cloudConfig';
+import { deletedPhotosFolderPath, getGardenCloudFileName, onedrivePathFor, photosManifestPath } from './cloudConfig';
 import type { GardenDocument, Photo } from './model';
+import { loadDeletedPhotoKeys } from './photosManifest';
 import {
   loadGardenFromOneDrive,
   saveGardenToOneDrive,
@@ -312,23 +313,43 @@ export function conflictGardenFileName(iso: string): string {
   return `garden-conflict-${iso.replace(/:/g, '-')}.json`;
 }
 
-/** Photos whose id and original file name are absent from the OneDrive garden. */
-export function photosOnlyInLocal(local: GardenDocument, remote: GardenDocument): Photo[] {
+/**
+ * Photos whose id and original file name are absent from the OneDrive garden.
+ * Ids recorded as deleted (manifest `deletedAt`, or a file now in `photos/deleted/`)
+ * are left out: another device may have dropped them on purpose.
+ */
+export function photosOnlyInLocal(
+  local: GardenDocument,
+  remote: GardenDocument,
+  deleted?: { photoIds?: Iterable<string>; fileNames?: Iterable<string> },
+): Photo[] {
   const ids = new Set(remote.photos.map((photo) => photo.id));
   const names = new Set(
     remote.photos.map((photo) => photo.originalFile?.fileName).filter((name): name is string => Boolean(name)),
   );
+  const deletedIds = new Set(deleted?.photoIds ?? []);
+  const deletedNames = new Set(deleted?.fileNames ?? []);
   return local.photos.filter((photo) => {
-    if (ids.has(photo.id)) return false;
+    if (ids.has(photo.id) || deletedIds.has(photo.id)) return false;
     const name = photo.originalFile?.fileName;
-    if (name && names.has(name)) return false;
+    if (name && (names.has(name) || deletedNames.has(name))) return false;
     return true;
   });
 }
 
 export function reattachPhotosPrompt(count: number): string {
-  const noun = count === 1 ? '1 photo' : `${count} photos`;
-  return `${noun} from your local copy weren't in the OneDrive version — re-attach?`;
+  if (count === 1) {
+    return "1 photo from this device isn't in the OneDrive version (it may have been deleted on another device). Re-attach it?";
+  }
+  return `${count} photos from this device aren't in the OneDrive version (they may have been deleted on another device). Re-attach them?`;
+}
+
+/** Shown when a local-only photo's point is not on the adopted OneDrive garden. The point is not recreated. */
+export function photosWithoutPointsNote(count: number, conflictFile: string): string {
+  if (count === 1) {
+    return `1 photo belongs to a point not in the OneDrive version; it's kept in ${conflictFile}`;
+  }
+  return `${count} photos belong to points not in the OneDrive version; they're kept in ${conflictFile}`;
 }
 
 /** Runs a critical section while this tab holds the cross-tab save lock. The conflict prompt stays outside it. */
@@ -676,6 +697,12 @@ async function settleRemoteChoice(
   clearPrompted(opts.storage);
   clearGardenDirty(opts.storage);
   const remoteUpdatedAt = again.remoteUpdatedAt || again.doc.updatedAt || '';
+  // Read-only. A failure here still offers every local-only photo; nothing is deleted.
+  const deleted = await loadDeletedPhotoKeys({
+    client: { fetch: opts.fetchImpl ?? fetch, token: opts.token },
+    manifestPath: photosManifestPath(),
+    deletedFolderPath: deletedPhotosFolderPath(),
+  });
   return {
     kind: 'result',
     result: {
@@ -690,7 +717,7 @@ async function settleRemoteChoice(
       reason: 'chose-remote',
       preservedAs: preserved.where,
       message: preserved.message,
-      localOnlyPhotos: photosOnlyInLocal(preserved.doc, again.doc),
+      localOnlyPhotos: photosOnlyInLocal(preserved.doc, again.doc, deleted),
     },
   };
 }
