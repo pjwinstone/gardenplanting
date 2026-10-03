@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyRedirectOwedSave,
+  commitGardenSave,
   gardenConflictPrompt,
   type GardenCopyChoice,
 } from '../src/gardenCloudSave';
@@ -12,6 +13,18 @@ const ACCOUNT = 'home-account';
 const LOCAL_AT = '2026-10-03T10:00:00.000Z';
 const REMOTE_OLDER = '2026-10-03T09:00:00.000Z';
 const REMOTE_NEWER = '2026-10-03T11:00:00.000Z';
+const IPAD_AT = '2026-10-03T10:30:00.000Z';
+const CONFLICT_AT = '2026-10-03T10:00:00.000Z';
+const CONFLICT_NAME = 'garden-conflict-2026-10-03T10-00-00.000Z.json';
+
+interface PutRecord {
+  ifMatch: string | null;
+  ifNoneMatch: string | null;
+  name: string;
+  fileName: string;
+  updatedAt?: string;
+  body: GardenDocument;
+}
 
 function memoryStorage(): OwedSaveStorage {
   const map = new Map<string, string>();
@@ -46,34 +59,47 @@ function owe(storage: OwedSaveStorage, patch: Partial<OwedGardenSave> = {}): voi
   );
 }
 
+function gardenFileFromUrl(url: string): string {
+  const decoded = decodeURIComponent(url);
+  const match = decoded.match(/Garden Survey\/([^?]+)/);
+  if (!match?.[1]) return '';
+  return match[1].replace(/:\/content$/, '').replace(/:$/, '');
+}
+
 function graph(opts: {
   remotes: GardenDocument[];
   etags: string[];
   putStatuses?: number[];
+  /** First metadata read is 404 until a 412 PUT, then later reads use remotes. */
+  missing?: boolean;
 }): {
   fetchImpl: typeof fetch;
-  puts: { ifMatch: string | null; name: string; updatedAt?: string }[];
-  calls: number;
+  puts: PutRecord[];
+  events: string[];
 } {
   let reads = 0;
   let putsN = 0;
-  const puts: { ifMatch: string | null; name: string; updatedAt?: string }[] = [];
-  let calls = 0;
+  let saw412 = false;
+  const puts: PutRecord[] = [];
+  const events: string[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
-    calls += 1;
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const method = init?.method ?? 'GET';
+    const fileName = gardenFileFromUrl(url);
     if (method === 'POST') return json(409, { error: { code: 'nameAlreadyExists' } });
     if (method === 'GET' && url.includes('$select=')) {
-      const i = Math.min(reads, opts.remotes.length - 1);
+      events.push(`GET ${fileName}`);
+      if (opts.missing && !saw412) return json(404, {});
+      const i = Math.min(reads, Math.max(opts.remotes.length - 1, 0));
       return json(200, {
-        eTag: opts.etags[Math.min(reads, opts.etags.length - 1)],
+        eTag: opts.etags[Math.min(reads, Math.max(opts.etags.length - 1, 0))],
         lastModifiedDateTime: opts.remotes[i]?.updatedAt,
         '@microsoft.graph.downloadUrl': `https://download.example/garden/${i}`,
       });
     }
     if (url.startsWith('https://download.example/garden/')) {
-      const i = Math.min(reads, opts.remotes.length - 1);
+      events.push(`BODY ${fileName || url}`);
+      const i = Math.min(reads, Math.max(opts.remotes.length - 1, 0));
       reads += 1;
       return json(200, opts.remotes[i]);
     }
@@ -82,27 +108,31 @@ function graph(opts: {
       const body = JSON.parse(String(init?.body)) as GardenDocument;
       puts.push({
         ifMatch: headers.get('If-Match'),
+        ifNoneMatch: headers.get('If-None-Match'),
         name: body.name,
+        fileName,
         updatedAt: body.updatedAt,
+        body,
       });
+      events.push(`PUT ${fileName}`);
       const status = opts.putStatuses?.[putsN] ?? 200;
       putsN += 1;
-      if (status === 412) return json(412, { error: { message: 'precondition failed' } });
+      if (status === 412) {
+        saw412 = true;
+        return json(412, { error: { message: 'precondition failed' } });
+      }
+      if (status !== 200 && status !== 201) {
+        return json(status, { error: { message: 'put failed' } });
+      }
       return json(201, { eTag: '"written"' }, { etag: '"written"' });
     }
     throw new Error(`unexpected ${method} ${url}`);
   };
-  return {
-    fetchImpl,
-    puts,
-    get calls() {
-      return calls;
-    },
-  };
+  return { fetchImpl, puts, events };
 }
 
 describe('applyRedirectOwedSave', () => {
-  it('writes the owed garden after a redirect when the account and file match', async () => {
+  it('writes the owed garden after a redirect when the eTags match', async () => {
     const storage = memoryStorage();
     owe(storage);
     const remote = graph({
@@ -118,13 +148,73 @@ describe('applyRedirectOwedSave', () => {
       fetchImpl: remote.fetchImpl,
     });
     expect(outcome.kind).toBe('saved');
-    expect(remote.puts).toEqual([
-      { ifMatch: '"v1"', name: 'This browser', updatedAt: LOCAL_AT },
-    ]);
+    expect(remote.puts).toHaveLength(1);
+    expect(remote.puts[0]).toMatchObject({
+      ifMatch: '"v1"',
+      ifNoneMatch: null,
+      name: 'This browser',
+      fileName: FILE,
+      updatedAt: LOCAL_AT,
+    });
     expect(readOwedGardenSave(storage)).toBeNull();
   });
 
-  it('asks which copy to keep on 412 and does not write a newer remote', async () => {
+  it('keeps the phone edits when the iPad saved later, and files them before adopting', async () => {
+    const storage = memoryStorage();
+    owe(storage, { docUpdatedAt: LOCAL_AT });
+    const phone = garden(LOCAL_AT, 'Phone edit');
+    phone.points = [{ id: 'HSE01', kind: 'HSE', label: 'Phone corner' }];
+    const ipad = garden(IPAD_AT, 'iPad save');
+    ipad.points = [{ id: 'HSE02', kind: 'HSE', label: 'iPad corner' }];
+    const remote = graph({ remotes: [ipad], etags: ['"v2"'] });
+    let choice: GardenCopyChoice | null = null;
+    const outcome = await applyRedirectOwedSave({
+      account: ACCOUNT,
+      fileName: FILE,
+      localDoc: phone,
+      token: 'tok',
+      storage,
+      fetchImpl: remote.fetchImpl,
+      now: () => CONFLICT_AT,
+      choose: async (next) => {
+        choice = next;
+        remote.events.push('choose');
+        return 'remote';
+      },
+    });
+    expect(choice).not.toBeNull();
+    expect(choice!.localUpdatedAt).toBe(LOCAL_AT);
+    expect(choice!.remoteUpdatedAt).toBe(IPAD_AT);
+    expect(choice!.localDoc.points[0]?.label).toBe('Phone corner');
+    expect(choice!.message).toContain(LOCAL_AT);
+    expect(choice!.message).toContain(IPAD_AT);
+    expect(gardenConflictPrompt(choice!)).toContain('Times are only a guide');
+    const chooseAt = remote.events.indexOf('choose');
+    const conflictAt = remote.events.indexOf(`PUT ${CONFLICT_NAME}`);
+    expect(chooseAt).toBeGreaterThanOrEqual(0);
+    expect(conflictAt).toBeGreaterThan(chooseAt);
+    expect(remote.events.some((event) => event === `PUT ${FILE}`)).toBe(false);
+    expect(remote.puts).toHaveLength(1);
+    expect(remote.puts[0]).toMatchObject({
+      fileName: CONFLICT_NAME,
+      ifNoneMatch: '*',
+      ifMatch: null,
+      name: 'Phone edit',
+      updatedAt: LOCAL_AT,
+    });
+    expect(remote.puts[0]?.body.points[0]?.label).toBe('Phone corner');
+    expect(outcome.kind).toBe('kept-remote');
+    if (outcome.kind === 'kept-remote') {
+      expect(outcome.doc.name).toBe('iPad save');
+      expect(outcome.doc.points[0]?.label).toBe('iPad corner');
+      expect(outcome.preservedAs).toContain(CONFLICT_NAME);
+      expect(outcome.message).toContain(CONFLICT_NAME);
+      expect(outcome.message).toContain('/Garden Survey/');
+    }
+    expect(readOwedGardenSave(storage)).toBeNull();
+  });
+
+  it('Cancel at a 412 writes nothing further and adopts nothing', async () => {
     const storage = memoryStorage();
     owe(storage);
     const remote = graph({
@@ -150,58 +240,201 @@ describe('applyRedirectOwedSave', () => {
     expect(choice!.remoteUpdatedAt).toBe(REMOTE_NEWER);
     expect(choice!.message).toContain(LOCAL_AT);
     expect(choice!.message).toContain(REMOTE_NEWER);
-    expect(gardenConflictPrompt(choice!)).toContain(LOCAL_AT);
-    expect(gardenConflictPrompt(choice!)).toContain(REMOTE_NEWER);
     expect(remote.puts).toHaveLength(1);
-    expect(remote.puts[0]?.ifMatch).toBe('"v1"');
-    expect(outcome.kind).toBe('kept-remote');
-    if (outcome.kind === 'kept-remote') {
-      expect(outcome.doc.name).toBe('Newer OneDrive');
-      expect(outcome.message).toContain(LOCAL_AT);
-      expect(outcome.message).toContain(REMOTE_NEWER);
+    expect(remote.puts[0]).toMatchObject({ ifMatch: '"v1"', fileName: FILE });
+    expect(outcome.kind).toBe('cancelled');
+    if (outcome.kind === 'cancelled') {
+      expect(outcome.message).toMatch(/still waiting/i);
     }
-    expect(readOwedGardenSave(storage)).toBeNull();
+    expect(readOwedGardenSave(storage)?.baseETag).toBe('"v1"');
   });
 
-  it('never writes a stale or empty local copy', async () => {
-    const staleStore = memoryStorage();
-    owe(staleStore);
-    const stale = graph({
-      remotes: [garden(REMOTE_NEWER, 'Newer OneDrive')],
-      etags: ['"v9"'],
+  it('ignores clock skew when the eTag matches, and still asks when it does not', async () => {
+    const matching = memoryStorage();
+    owe(matching);
+    let asked = 0;
+    const sameTag = graph({
+      remotes: [garden(REMOTE_NEWER, 'Clock ahead')],
+      etags: ['"v1"'],
     });
-    const staleOutcome = await applyRedirectOwedSave({
+    const wrote = await applyRedirectOwedSave({
       account: ACCOUNT,
       fileName: FILE,
-      localDoc: garden(LOCAL_AT, 'Old browser'),
+      localDoc: garden(LOCAL_AT, 'Clock behind'),
       token: 'tok',
-      storage: staleStore,
-      fetchImpl: stale.fetchImpl,
+      storage: matching,
+      fetchImpl: sameTag.fetchImpl,
+      choose: async () => {
+        asked += 1;
+        return 'remote';
+      },
     });
-    expect(stale.puts).toEqual([]);
-    expect(staleOutcome.kind).toBe('kept-remote');
-    if (staleOutcome.kind === 'kept-remote') expect(staleOutcome.doc.name).toBe('Newer OneDrive');
-    expect(readOwedGardenSave(staleStore)).toBeNull();
+    expect(asked).toBe(0);
+    expect(wrote.kind).toBe('saved');
+    expect(sameTag.puts).toHaveLength(1);
+    expect(sameTag.puts[0]).toMatchObject({
+      ifMatch: '"v1"',
+      fileName: FILE,
+      name: 'Clock behind',
+      updatedAt: LOCAL_AT,
+    });
 
-    const undated = graph({
-      remotes: [garden(REMOTE_NEWER, 'Dated OneDrive')],
-      etags: ['"v9"'],
-    });
-    const undatedStore = memoryStorage();
-    owe(undatedStore);
-    const local = garden(LOCAL_AT, 'Undated');
-    delete local.updatedAt;
-    const undatedOutcome = await applyRedirectOwedSave({
+    const differing = memoryStorage();
+    owe(differing);
+    const localLater = garden('2026-10-03T12:00:00.000Z', 'Clock ahead locally');
+    const remoteEarlier = garden(LOCAL_AT, 'Earlier OneDrive');
+    const skew = graph({ remotes: [remoteEarlier], etags: ['"v2"'] });
+    const askedSkew = await applyRedirectOwedSave({
       account: ACCOUNT,
       fileName: FILE,
-      localDoc: local,
+      localDoc: localLater,
       token: 'tok',
-      storage: undatedStore,
-      fetchImpl: undated.fetchImpl,
+      storage: differing,
+      fetchImpl: skew.fetchImpl,
+      choose: async (choice) => {
+        asked += 1;
+        expect(choice.localUpdatedAt).toBe('2026-10-03T12:00:00.000Z');
+        expect(choice.remoteUpdatedAt).toBe(LOCAL_AT);
+        return 'local';
+      },
     });
-    expect(undated.puts).toEqual([]);
-    expect(undatedOutcome.kind).toBe('kept-remote');
+    expect(asked).toBe(1);
+    expect(skew.puts).toEqual([]);
+    expect(askedSkew.kind).toBe('cancelled');
+    expect(readOwedGardenSave(differing)).not.toBeNull();
+  });
 
+  it('creates a missing garden with If-None-Match, and a 412 there asks', async () => {
+    const storage = memoryStorage();
+    owe(storage, { baseETag: '' });
+    const created = graph({ remotes: [], etags: [], missing: true });
+    const outcome = await applyRedirectOwedSave({
+      account: ACCOUNT,
+      fileName: FILE,
+      localDoc: garden(LOCAL_AT, 'First save'),
+      token: 'tok',
+      storage,
+      fetchImpl: created.fetchImpl,
+    });
+    expect(outcome.kind).toBe('saved');
+    expect(created.puts).toHaveLength(1);
+    expect(created.puts[0]).toMatchObject({
+      ifNoneMatch: '*',
+      ifMatch: null,
+      fileName: FILE,
+      name: 'First save',
+    });
+    expect(readOwedGardenSave(storage)).toBeNull();
+
+    const raced = memoryStorage();
+    owe(raced, { baseETag: '' });
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Created elsewhere')],
+      etags: ['"v9"'],
+      missing: true,
+      putStatuses: [412],
+    });
+    let prompted = false;
+    const conflict = await applyRedirectOwedSave({
+      account: ACCOUNT,
+      fileName: FILE,
+      localDoc: garden(LOCAL_AT, 'First save'),
+      token: 'tok',
+      storage: raced,
+      fetchImpl: remote.fetchImpl,
+      choose: async (choice) => {
+        prompted = true;
+        expect(choice.remoteETag).toBe('"v9"');
+        expect(choice.remoteUpdatedAt).toBe(IPAD_AT);
+        return 'local';
+      },
+    });
+    expect(prompted).toBe(true);
+    expect(remote.puts).toHaveLength(1);
+    expect(remote.puts[0]).toMatchObject({ ifNoneMatch: '*', ifMatch: null, fileName: FILE });
+    expect(conflict.kind).toBe('cancelled');
+    expect(readOwedGardenSave(raced)).not.toBeNull();
+  });
+
+  it('downloads the local copy when the conflict file cannot be uploaded', async () => {
+    const storage = memoryStorage();
+    owe(storage);
+    const phone = garden(LOCAL_AT, 'Phone edit');
+    const offline = graph({
+      remotes: [garden(IPAD_AT, 'iPad save')],
+      etags: ['"v2"'],
+      putStatuses: [500],
+    });
+    const downloaded: { name: string; label?: string }[] = [];
+    const outcome = await applyRedirectOwedSave({
+      account: ACCOUNT,
+      fileName: FILE,
+      localDoc: phone,
+      token: 'tok',
+      storage,
+      fetchImpl: offline.fetchImpl,
+      now: () => CONFLICT_AT,
+      choose: async () => 'remote',
+      downloadLocal: (doc, name) => {
+        downloaded.push({ name, label: doc.points[0]?.label });
+      },
+    });
+    expect(downloaded).toEqual([{ name: CONFLICT_NAME, label: 'Phone edit' }]);
+    expect(outcome.kind).toBe('kept-remote');
+    if (outcome.kind === 'kept-remote') {
+      expect(outcome.message).toContain(CONFLICT_NAME);
+      expect(outcome.doc.name).toBe('iPad save');
+    }
+    expect(offline.puts.some((put) => put.fileName === FILE)).toBe(false);
+
+    const stuck = memoryStorage();
+    owe(stuck);
+    const noDownload = graph({
+      remotes: [garden(IPAD_AT, 'iPad save')],
+      etags: ['"v2"'],
+      putStatuses: [500],
+    });
+    const failed = await applyRedirectOwedSave({
+      account: ACCOUNT,
+      fileName: FILE,
+      localDoc: phone,
+      token: 'tok',
+      storage: stuck,
+      fetchImpl: noDownload.fetchImpl,
+      now: () => CONFLICT_AT,
+      choose: async () => 'remote',
+    });
+    expect(failed.kind).toBe('failed');
+    expect(readOwedGardenSave(stuck)).not.toBeNull();
+  });
+
+  it('asks instead of writing when OneDrive has a garden and this browser has no eTag', async () => {
+    const storage = memoryStorage();
+    owe(storage, { baseETag: '' });
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Already there')],
+      etags: ['"v4"'],
+    });
+    let asked = false;
+    const outcome = await applyRedirectOwedSave({
+      account: ACCOUNT,
+      fileName: FILE,
+      localDoc: garden(LOCAL_AT, 'No base'),
+      token: 'tok',
+      storage,
+      fetchImpl: remote.fetchImpl,
+      choose: async () => {
+        asked = true;
+        return 'local';
+      },
+    });
+    expect(asked).toBe(true);
+    expect(remote.puts).toEqual([]);
+    expect(outcome.kind).toBe('cancelled');
+    expect(readOwedGardenSave(storage)).not.toBeNull();
+  });
+
+  it('never writes an empty local garden', async () => {
     const emptyStore = memoryStorage();
     owe(emptyStore);
     let emptyCalls = 0;
@@ -219,6 +452,76 @@ describe('applyRedirectOwedSave', () => {
     expect(emptyCalls).toBe(0);
     expect(emptyOutcome.kind).toBe('empty');
     expect(readOwedGardenSave(emptyStore)).toBeNull();
+  });
+
+  it('asks an auto-save at most once until the user acts or the eTag changes', async () => {
+    const storage = memoryStorage();
+    let asks = 0;
+    const choose = async () => {
+      asks += 1;
+      return 'local' as const;
+    };
+    const first = graph({ remotes: [garden(IPAD_AT, 'iPad')], etags: ['"v2"'] });
+    const opened = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'Phone'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      prompt: 'auto',
+      fetchImpl: first.fetchImpl,
+      choose,
+    });
+    expect(opened.ok).toBe(false);
+    if (!opened.ok) expect(opened.cancelled).toBe(true);
+    expect(asks).toBe(1);
+
+    const again = graph({ remotes: [garden(IPAD_AT, 'iPad')], etags: ['"v2"'] });
+    const skipped = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'Phone'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      prompt: 'auto',
+      fetchImpl: again.fetchImpl,
+      choose,
+    });
+    expect(asks).toBe(1);
+    expect(again.puts).toEqual([]);
+    expect(skipped.ok).toBe(false);
+    if (!skipped.ok) expect(skipped.deferred).toBe(true);
+
+    const explicit = graph({ remotes: [garden(IPAD_AT, 'iPad')], etags: ['"v2"'] });
+    await commitGardenSave({
+      doc: garden(LOCAL_AT, 'Phone'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      prompt: 'user',
+      fetchImpl: explicit.fetchImpl,
+      choose,
+    });
+    expect(asks).toBe(2);
+
+    const moved = graph({ remotes: [garden(REMOTE_NEWER, 'iPad again')], etags: ['"v3"'] });
+    await commitGardenSave({
+      doc: garden(LOCAL_AT, 'Phone'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      prompt: 'auto',
+      fetchImpl: moved.fetchImpl,
+      choose,
+    });
+    expect(asks).toBe(3);
+    expect(moved.puts).toEqual([]);
   });
 
   it('ignores an owed save for a different account or file', async () => {

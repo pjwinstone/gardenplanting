@@ -1,8 +1,11 @@
 /**
- * Garden JSON writes that refuse to clobber a newer or real OneDrive file.
- * Ordinary saves send If-Match whenever an eTag is known. A 412 reloads the
- * remote copy and asks which timestamps to keep. An empty garden, or one
- * whose updatedAt is older than the remote, is never written.
+ * Garden JSON writes decided by the OneDrive eTag.
+ * Write only when the remote eTag equals the base eTag. Anything else is a
+ * conflict that asks the user. Timestamps are shown in the prompt and are
+ * never used to choose. Cancel writes nothing and adopts nothing.
+ * Adopting the remote first stores this browser’s copy as
+ * `/Garden Survey/garden-conflict-<time>.json` (or a local download).
+ * An empty garden is never PUT. A first save with no eTag uses If-None-Match: *.
  */
 
 import type { OwedSaveStorage } from './cloudSignIn';
@@ -11,15 +14,17 @@ import {
   owedSaveMatches,
   readOwedGardenSave,
 } from './cloudSignIn';
-import { getGardenCloudFileName } from './cloudConfig';
+import { getGardenCloudFileName, onedrivePathFor } from './cloudConfig';
 import type { GardenDocument } from './model';
 import {
   loadGardenFromOneDrive,
   saveGardenToOneDrive,
   type CloudLoadResult,
+  type CloudSaveResult,
 } from './onedrive';
 
 const ETAG_KEY = 'garden-survey:drive-etags';
+const PROMPTED_KEY = 'garden-survey:conflict-prompted';
 
 export interface GardenCopyChoice {
   fileName: string;
@@ -28,7 +33,7 @@ export interface GardenCopyChoice {
   localDoc: GardenDocument;
   remoteDoc: GardenDocument;
   remoteETag: string;
-  /** Plain-language prompt. Both timestamps are in the text. */
+  /** Plain-language prompt. Both timestamps are in the text as information. */
   message: string;
 }
 
@@ -45,10 +50,27 @@ export type GardenCommitResult =
       eTag?: string;
       localUpdatedAt: string;
       remoteUpdatedAt: string;
-      reason: 'stale' | 'empty' | 'chose-remote' | 'older-than-remote';
+      reason: 'chose-remote';
+      /** Where this browser’s copy was kept before the remote was adopted. */
+      preservedAs: string;
       message: string;
     }
-  | { ok: false; error: string; conflict?: boolean; refused?: 'empty' | 'stale' };
+  | {
+      ok: false;
+      error: string;
+      conflict?: boolean;
+      refused?: 'empty';
+      /** User left both copies alone, or the auto-save prompt is waiting. */
+      cancelled?: boolean;
+      /** Auto-save already asked about this remote eTag. The save stays owed. */
+      deferred?: boolean;
+    };
+
+interface PromptedConflict {
+  account: string;
+  fileName: string;
+  remoteETag: string;
+}
 
 function storageOf(storage?: OwedSaveStorage): OwedSaveStorage | null {
   if (storage) return storage;
@@ -97,6 +119,46 @@ function etagMapKey(account: string, fileName: string): string {
   return `${account}\n${fileName}`;
 }
 
+function readPrompted(storage?: OwedSaveStorage): PromptedConflict | null {
+  const store = storageOf(storage);
+  if (!store) return null;
+  try {
+    const parsed = JSON.parse(store.getItem(PROMPTED_KEY) || 'null') as PromptedConflict | null;
+    if (!parsed || typeof parsed.account !== 'string' || typeof parsed.fileName !== 'string') return null;
+    if (typeof parsed.remoteETag !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function rememberPrompted(
+  account: string,
+  fileName: string,
+  remoteETag: string,
+  storage?: OwedSaveStorage,
+): void {
+  const store = storageOf(storage);
+  if (!store) return;
+  const record: PromptedConflict = { account, fileName, remoteETag };
+  store.setItem(PROMPTED_KEY, JSON.stringify(record));
+}
+
+function clearPrompted(storage?: OwedSaveStorage): void {
+  storageOf(storage)?.removeItem(PROMPTED_KEY);
+}
+
+function alreadyPrompted(
+  account: string,
+  fileName: string,
+  remoteETag: string,
+  storage?: OwedSaveStorage,
+): boolean {
+  const prev = readPrompted(storage);
+  if (!prev) return false;
+  return prev.account === account && prev.fileName === fileName && prev.remoteETag === remoteETag;
+}
+
 /** A garden with no survey content. createEmptyGarden() matches this. */
 export function isEmptySurveyGarden(doc: GardenDocument): boolean {
   return (
@@ -110,18 +172,9 @@ export function isEmptySurveyGarden(doc: GardenDocument): boolean {
   );
 }
 
-export function localCopyMustNotOverwrite(
-  local: GardenDocument,
-  remoteUpdatedAt: string,
-): 'empty' | 'stale' | null {
-  if (isEmptySurveyGarden(local)) return 'empty';
-  if (!remoteUpdatedAt) return null;
-  const localAt = local.updatedAt ?? '';
-  if (!localAt) return 'stale';
-  const localMs = Date.parse(localAt);
-  const remoteMs = Date.parse(remoteUpdatedAt);
-  if (Number.isFinite(localMs) && Number.isFinite(remoteMs) && localMs < remoteMs) return 'stale';
-  return null;
+/** `garden-conflict-2026-10-03T10-00-00.000Z.json` — colons are illegal in OneDrive names. */
+export function conflictGardenFileName(iso: string): string {
+  return `garden-conflict-${iso.replace(/:/g, '-')}.json`;
 }
 
 export function gardenConflictPrompt(choice: {
@@ -133,7 +186,7 @@ export function gardenConflictPrompt(choice: {
     `${choice.fileName} on OneDrive does not match this browser.`,
     `This browser: ${formatWhen(choice.localUpdatedAt)} (${choice.localUpdatedAt || 'unknown time'}).`,
     `OneDrive: ${formatWhen(choice.remoteUpdatedAt)} (${choice.remoteUpdatedAt || 'unknown time'}).`,
-    'OK keeps the OneDrive copy. Cancel keeps this browser’s copy.',
+    'Times are only a guide. OK keeps the OneDrive copy and files this browser’s copy beside it. Cancel leaves both as they are.',
   ].join('\n');
 }
 
@@ -148,27 +201,29 @@ function formatWhen(iso: string): string {
   }
 }
 
-function keptRemoteMessage(fileName: string, localUpdatedAt: string, remoteUpdatedAt: string, reason: string): string {
-  if (reason === 'empty') {
-    return `Not saving an empty garden over ${fileName}.`;
-  }
-  return `Kept the OneDrive copy of ${fileName}. This browser: ${localUpdatedAt || 'unknown time'}. OneDrive: ${remoteUpdatedAt || 'unknown time'}.`;
-}
-
 export async function commitGardenSave(opts: {
   doc: GardenDocument;
   fileName?: string;
   token: string;
-  /** Preferred If-Match value. The live eTag is used when this is empty. */
+  /** ETag this browser last saved or loaded. Empty on a first save. */
   ifMatch?: string;
   fetchImpl?: typeof fetch;
   choose?: GardenCopyChooser;
   account?: string;
   storage?: OwedSaveStorage;
+  /**
+   * `auto` asks at most once per remote eTag. `user` (Save, or the sign-in
+   * redirect) always asks.
+   */
+  prompt?: 'auto' | 'user';
+  now?: () => string;
+  /** Used when the conflict file cannot be uploaded. */
+  downloadLocal?: (doc: GardenDocument, fileName: string) => void;
 }): Promise<GardenCommitResult> {
   const fileName = opts.fileName || getGardenCloudFileName();
   const fetchImpl = opts.fetchImpl;
   const localUpdatedAt = opts.doc.updatedAt ?? '';
+  const promptMode = opts.prompt ?? 'user';
 
   if (isEmptySurveyGarden(opts.doc)) {
     return {
@@ -178,59 +233,177 @@ export async function commitGardenSave(opts: {
     };
   }
 
-  const probed = await loadGardenFromOneDrive(fileName, { token: opts.token, fetchImpl });
+  const probed = await loadGardenFromOneDrive(fileName, {
+    token: opts.token,
+    fetchImpl,
+    exact: true,
+  });
   if (!probed.ok && !probed.missing) {
     return { ok: false, error: probed.error };
   }
 
-  if (probed.ok) {
-    const remoteUpdatedAt = probed.remoteUpdatedAt || probed.doc.updatedAt || '';
-    const block = localCopyMustNotOverwrite(opts.doc, remoteUpdatedAt);
-    if (block) {
-      return keptRemote(probed, fileName, localUpdatedAt, remoteUpdatedAt, block);
-    }
+  const baseETag = opts.ifMatch || '';
+
+  if (!probed.ok) {
+    const put = await saveGardenToOneDrive(opts.doc, fileName, opts.token, {
+      ifNoneMatch: '*',
+      fetchImpl,
+    });
+    if (put.ok) return wroteResult(put, opts.account, fileName, opts.storage);
+    if (!put.conflict) return { ok: false, error: put.error };
+    const again = await loadGardenFromOneDrive(fileName, {
+      token: opts.token,
+      fetchImpl,
+      exact: true,
+    });
+    if (!again.ok) return { ok: false, error: again.error || put.error, conflict: true };
+    return resolveConflict(opts, again, fileName, localUpdatedAt, promptMode);
   }
 
-  const ifMatch = opts.ifMatch || (probed.ok ? probed.eTag : undefined) || undefined;
-  const put = await saveGardenToOneDrive(opts.doc, fileName, opts.token, {
-    ifMatch: probed.ok ? ifMatch : undefined,
-    fetchImpl,
-  });
-  if (put.ok) {
-    if (put.eTag && opts.account) rememberDriveETag(opts.account, fileName, put.eTag, opts.storage);
-    return { ok: true, wrote: true, savedAt: put.savedAt, fileName: put.fileName, eTag: put.eTag };
-  }
-  if (!put.conflict) return { ok: false, error: put.error, conflict: false };
-
-  const again = await loadGardenFromOneDrive(fileName, { token: opts.token, fetchImpl });
-  if (!again.ok) {
-    return { ok: false, error: again.error || put.error, conflict: true };
-  }
-  const remoteUpdatedAt = again.remoteUpdatedAt || again.doc.updatedAt || '';
-  const block = localCopyMustNotOverwrite(opts.doc, remoteUpdatedAt);
-  const choice = choiceFor(opts.doc, again, fileName, localUpdatedAt, remoteUpdatedAt);
-  const pick = opts.choose ? await opts.choose(choice) : 'remote';
-  if (pick === 'remote' || block) {
-    const reason = block === 'empty' ? 'empty' : block === 'stale' ? 'stale' : 'chose-remote';
-    return keptRemote(again, fileName, localUpdatedAt, remoteUpdatedAt, reason === 'chose-remote' && block ? block : reason);
+  const remoteETag = probed.eTag || '';
+  if (baseETag && remoteETag && baseETag === remoteETag) {
+    const put = await saveGardenToOneDrive(opts.doc, fileName, opts.token, {
+      ifMatch: baseETag,
+      fetchImpl,
+    });
+    if (put.ok) return wroteResult(put, opts.account, fileName, opts.storage);
+    if (!put.conflict) return { ok: false, error: put.error };
+    const again = await loadGardenFromOneDrive(fileName, {
+      token: opts.token,
+      fetchImpl,
+      exact: true,
+    });
+    if (!again.ok) return { ok: false, error: again.error || put.error, conflict: true };
+    return resolveConflict(opts, again, fileName, localUpdatedAt, promptMode);
   }
 
-  const overwrite = await saveGardenToOneDrive(opts.doc, fileName, opts.token, {
-    ifMatch: again.eTag,
-    fetchImpl,
-  });
-  if (!overwrite.ok) {
-    return { ok: false, error: overwrite.error, conflict: overwrite.conflict };
+  return resolveConflict(opts, probed, fileName, localUpdatedAt, promptMode);
+}
+
+function wroteResult(
+  put: Extract<CloudSaveResult, { ok: true }>,
+  account: string | undefined,
+  fileName: string,
+  storage?: OwedSaveStorage,
+): GardenCommitResult {
+  clearPrompted(storage);
+  if (put.eTag && account) rememberDriveETag(account, fileName, put.eTag, storage);
+  return { ok: true, wrote: true, savedAt: put.savedAt, fileName: put.fileName, eTag: put.eTag };
+}
+
+async function resolveConflict(
+  opts: {
+    doc: GardenDocument;
+    token: string;
+    fetchImpl?: typeof fetch;
+    choose?: GardenCopyChooser;
+    account?: string;
+    storage?: OwedSaveStorage;
+    now?: () => string;
+    downloadLocal?: (doc: GardenDocument, fileName: string) => void;
+  },
+  remote: Extract<CloudLoadResult, { ok: true }>,
+  fileName: string,
+  localUpdatedAt: string,
+  promptMode: 'auto' | 'user',
+): Promise<GardenCommitResult> {
+  const remoteUpdatedAt = remote.remoteUpdatedAt || remote.doc.updatedAt || '';
+  const remoteETag = remote.eTag ?? '';
+  const account = opts.account ?? '';
+
+  if (promptMode === 'auto' && alreadyPrompted(account, fileName, remoteETag, opts.storage)) {
+    return {
+      ok: false,
+      cancelled: true,
+      deferred: true,
+      conflict: true,
+      error: `Still waiting on your choice for ${fileName}. Nothing was written.`,
+    };
   }
-  if (overwrite.eTag && opts.account) {
-    rememberDriveETag(opts.account, fileName, overwrite.eTag, opts.storage);
+
+  rememberPrompted(account, fileName, remoteETag, opts.storage);
+  const choice = choiceFor(opts.doc, remote, fileName, localUpdatedAt, remoteUpdatedAt);
+  if (!opts.choose) {
+    return {
+      ok: false,
+      cancelled: true,
+      conflict: true,
+      error: `${fileName} on OneDrive does not match this browser. Nothing was written.`,
+    };
   }
+  const pick = await opts.choose(choice);
+  if (pick !== 'remote') {
+    return {
+      ok: false,
+      cancelled: true,
+      conflict: true,
+      error: `Left ${fileName} on OneDrive as it is. This browser’s save is still waiting.`,
+    };
+  }
+
+  const preserved = await preserveLocalCopy(opts, fileName);
+  if (!preserved.ok) {
+    return { ok: false, error: preserved.error, conflict: true };
+  }
+  clearPrompted(opts.storage);
   return {
     ok: true,
-    wrote: true,
-    savedAt: overwrite.savedAt,
-    fileName: overwrite.fileName,
-    eTag: overwrite.eTag,
+    wrote: false,
+    kept: 'remote',
+    doc: remote.doc,
+    fileName: remote.fileName || fileName,
+    eTag: remote.eTag,
+    localUpdatedAt,
+    remoteUpdatedAt,
+    reason: 'chose-remote',
+    preservedAs: preserved.where,
+    message: preserved.message,
+  };
+}
+
+async function preserveLocalCopy(
+  opts: {
+    doc: GardenDocument;
+    token: string;
+    fetchImpl?: typeof fetch;
+    now?: () => string;
+    downloadLocal?: (doc: GardenDocument, fileName: string) => void;
+  },
+  gardenFileName: string,
+): Promise<{ ok: true; where: string; message: string } | { ok: false; error: string }> {
+  const iso = opts.now?.() ?? new Date().toISOString();
+  const conflictName = conflictGardenFileName(iso);
+  const put = await saveGardenToOneDrive(opts.doc, conflictName, opts.token, {
+    ifNoneMatch: '*',
+    fetchImpl: opts.fetchImpl,
+  });
+  const path = `/${onedrivePathFor(conflictName)}`;
+  if (put.ok) {
+    return {
+      ok: true,
+      where: path,
+      message: `Kept the OneDrive copy of ${gardenFileName}. This browser’s copy is saved as ${path}.`,
+    };
+  }
+  if (opts.downloadLocal) {
+    try {
+      opts.downloadLocal(opts.doc, conflictName);
+      return {
+        ok: true,
+        where: conflictName,
+        message: `Kept the OneDrive copy of ${gardenFileName}. OneDrive did not take the spare copy (${put.error}). Downloaded ${conflictName} in this browser instead.`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Download failed.';
+      return {
+        ok: false,
+        error: `Could not keep this browser’s copy before using OneDrive: ${put.error} ${message}`,
+      };
+    }
+  }
+  return {
+    ok: false,
+    error: `Could not keep this browser’s copy before using OneDrive (${put.error}). Nothing was replaced.`,
   };
 }
 
@@ -252,27 +425,6 @@ function choiceFor(
   };
 }
 
-function keptRemote(
-  remote: Extract<CloudLoadResult, { ok: true }>,
-  fileName: string,
-  localUpdatedAt: string,
-  remoteUpdatedAt: string,
-  reason: 'stale' | 'empty' | 'chose-remote' | 'older-than-remote',
-): GardenCommitResult {
-  return {
-    ok: true,
-    wrote: false,
-    kept: 'remote',
-    doc: remote.doc,
-    fileName: remote.fileName || fileName,
-    eTag: remote.eTag,
-    localUpdatedAt,
-    remoteUpdatedAt,
-    reason,
-    message: keptRemoteMessage(fileName, localUpdatedAt, remoteUpdatedAt, reason),
-  };
-}
-
 export type RedirectOwedResult =
   | { kind: 'absent' }
   | { kind: 'mismatch' }
@@ -285,13 +437,16 @@ export type RedirectOwedResult =
       eTag?: string;
       localUpdatedAt: string;
       remoteUpdatedAt: string;
+      preservedAs: string;
       message: string;
     }
+  | { kind: 'cancelled'; message: string }
   | { kind: 'failed'; error: string };
 
 /**
  * After a Microsoft redirect, write the owed garden only when the signed-in
  * account and file still match the record. Otherwise clear the flag and do nothing.
+ * Cancel leaves the flag set.
  */
 export async function applyRedirectOwedSave(opts: {
   account: string;
@@ -301,6 +456,8 @@ export async function applyRedirectOwedSave(opts: {
   storage?: OwedSaveStorage;
   fetchImpl?: typeof fetch;
   choose?: GardenCopyChooser;
+  now?: () => string;
+  downloadLocal?: (doc: GardenDocument, fileName: string) => void;
 }): Promise<RedirectOwedResult> {
   const owed = readOwedGardenSave(opts.storage);
   if (!owed) return { kind: 'absent' };
@@ -322,9 +479,13 @@ export async function applyRedirectOwedSave(opts: {
     choose: opts.choose,
     account: opts.account,
     storage: opts.storage,
+    prompt: 'user',
+    now: opts.now,
+    downloadLocal: opts.downloadLocal,
   });
 
   if (!result.ok) {
+    if (result.cancelled) return { kind: 'cancelled', message: result.error };
     if (result.refused === 'empty') {
       clearGardenSaveOwed(opts.storage);
       return { kind: 'empty' };
@@ -344,6 +505,7 @@ export async function applyRedirectOwedSave(opts: {
     eTag: result.eTag,
     localUpdatedAt: result.localUpdatedAt,
     remoteUpdatedAt: result.remoteUpdatedAt,
+    preservedAs: result.preservedAs,
     message: result.message,
   };
 }

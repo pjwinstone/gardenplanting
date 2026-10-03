@@ -92,6 +92,8 @@ async function ensureFolder(
 export interface SaveGardenOptions {
   /** When set, Graph rejects the write with 412 if the file has moved on. */
   ifMatch?: string;
+  /** First save of a missing file uses `*`, so a 412 means someone else created it. */
+  ifNoneMatch?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -114,6 +116,7 @@ export async function saveGardenToOneDrive(
     'Content-Type': 'application/json',
   };
   if (opts?.ifMatch) headers['If-Match'] = opts.ifMatch;
+  if (opts?.ifNoneMatch) headers['If-None-Match'] = opts.ifNoneMatch;
   const res = await fetchImpl(itemContentUrl(fileName), {
     method: 'PUT',
     headers,
@@ -226,14 +229,14 @@ async function loadNamedFile(
  */
 export async function loadGardenFromOneDrive(
   fileName = getGardenCloudFileName(),
-  opts?: { token?: string; fetchImpl?: typeof fetch },
+  opts?: { token?: string; fetchImpl?: typeof fetch; exact?: boolean },
 ): Promise<CloudLoadResult> {
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const auth = opts?.token ? { ok: true as const, token: opts.token } : await withToken();
   if (!auth.ok) return { ok: false, error: auth.error };
 
   const primary = await loadNamedFile(auth.token, fileName, fetchImpl);
-  if (primary.ok || !primary.missing) return primary;
+  if (primary.ok || !primary.missing || opts?.exact) return primary;
 
   const tried = new Set<string>([fileName]);
   const listed = await listGardenFilesWithToken(auth.token);

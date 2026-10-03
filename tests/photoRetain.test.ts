@@ -28,11 +28,13 @@ describe('deleted photo retention', () => {
     const queue = createIndexedDbPhotoQueue();
     await queue.put(queuedRecord());
     let patches = 0;
+    const patchBodies: string[] = [];
     const manifestBodies: PhotosManifest[] = [];
     const methods: string[] = [];
     const fetchImpl = photoFetch({
-      onPatch: () => {
+      onPatch: (_url, init) => {
         patches += 1;
+        patchBodies.push(String(init?.body ?? ''));
         return patches === 1 ? json(500, { error: { message: 'move failed' } }) : json(200, {});
       },
       onManifest: (body) => {
@@ -67,6 +69,31 @@ describe('deleted photo retention', () => {
     expect(manifestBodies.at(-1)?.photos[0]?.deletedAt).toBe('2026-10-03T12:00:00.000Z');
     expect(manifestBodies.at(-1)?.photos[0]?.fileName).toBe(queuedRecord().fileName);
     expect(methods).not.toContain('DELETE');
+    expect(patchBodies.at(-1)).toContain('"@microsoft.graph.conflictBehavior":"rename"');
+  });
+
+  it('does not write deletedAt when the photo was never uploaded', async () => {
+    const queue = createIndexedDbPhotoQueue();
+    await queue.put(queuedRecord());
+    let manifestPuts = 0;
+    let patchBody = '';
+    const fetchImpl = photoFetch({
+      onPatch: (_url, init) => {
+        patchBody = String(init?.body ?? '');
+        return json(404, {});
+      },
+      onManifest: () => {
+        manifestPuts += 1;
+      },
+    });
+    const result = await discardQueuedPhoto('ph-1', queue, {
+      client: { token: 'tok', fetch: fetchImpl },
+      now: '2026-10-03T12:02:00.000Z',
+    });
+    expect(result.ok).toBe(true);
+    expect(manifestPuts).toBe(0);
+    expect(patchBody).toContain('"@microsoft.graph.conflictBehavior":"rename"');
+    expect(await queue.list()).toEqual([]);
   });
 
   it('keeps the manifest row when the photo is deleted after the manifest write', async () => {
@@ -258,7 +285,7 @@ function photoFetch(opts: {
   methods?: string[];
   manifest?: () => PhotosManifest | null;
   onManifest?: (body: PhotosManifest) => void | Promise<void>;
-  onPatch?: (url: string) => Response | Promise<Response>;
+  onPatch?: (url: string, init?: RequestInit) => Response | Promise<Response>;
   onJpgPut?: (url: string) => Response | Promise<Response>;
   onItemGet?: (url: string) => Response | Promise<Response>;
 }): typeof fetch {
@@ -267,7 +294,7 @@ function photoFetch(opts: {
     const method = init?.method ?? 'GET';
     opts.methods?.push(method);
     if (method === 'POST') return json(409, { error: { code: 'nameAlreadyExists' } });
-    if (method === 'PATCH') return (await opts.onPatch?.(url)) ?? json(200, {});
+    if (method === 'PATCH') return (await opts.onPatch?.(url, init)) ?? json(200, {});
     if (method === 'PUT' && url.includes('.jpg')) {
       return (await opts.onJpgPut?.(url)) ?? json(200, item(bytes.byteLength, hash));
     }

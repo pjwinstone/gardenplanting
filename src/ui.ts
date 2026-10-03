@@ -1310,6 +1310,17 @@ function askWhichGardenCopy(choice: GardenCopyChoice): Promise<'local' | 'remote
   return Promise.resolve(keepRemote ? 'remote' : 'local');
 }
 
+/** Spare copy when OneDrive will not take garden-conflict-<time>.json. */
+function downloadConflictCopy(doc: GardenDocument, fileName: string): void {
+  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function adoptRemoteGarden(doc: GardenDocument, fileName: string, eTag?: string): void {
   const account = accountKey() ?? '';
   if (eTag) rememberDriveETag(account, fileName, eTag);
@@ -1351,6 +1362,8 @@ async function quietCloudSave(
     ifMatch: rememberedDriveETag(account, fileName) || undefined,
     choose: askWhichGardenCopy,
     account,
+    prompt: 'auto',
+    downloadLocal: downloadConflictCopy,
   });
   if (result.ok && result.wrote) {
     clearGardenSaveOwed();
@@ -1375,11 +1388,17 @@ async function quietCloudSave(
     setCloudMessage(result.message);
     return;
   }
-  if (result.refused === 'empty' || result.refused === 'stale') {
-    clearGardenSaveOwed();
-  } else {
+  if (result.cancelled) {
     noteOwedGardenSave(doc);
+    if (!result.deferred) {
+      setCloudMessage(
+        opts.afterLocalQuota ? `Browser storage full. ${result.error}` : result.error,
+      );
+    }
+    return;
   }
+  if (result.refused === 'empty') clearGardenSaveOwed();
+  else noteOwedGardenSave(doc);
   setCloudMessage(
     opts.afterLocalQuota
       ? `Browser storage full, and OneDrive save failed: ${result.error}. Export garden.json now.`
@@ -1473,6 +1492,7 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
       localDoc: state.doc,
       token: auth.token,
       choose: askWhichGardenCopy,
+      downloadLocal: downloadConflictCopy,
     });
     setCloudBusy(false);
     void refreshGardenFileList();
@@ -1484,6 +1504,10 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
     }
     if (outcome.kind === 'kept-remote') {
       adoptRemoteGarden(outcome.doc, outcome.fileName, outcome.eTag);
+      setCloudMessage(outcome.message);
+      return;
+    }
+    if (outcome.kind === 'cancelled') {
       setCloudMessage(outcome.message);
       return;
     }
@@ -2316,6 +2340,8 @@ async function onOneDriveSave(): Promise<void> {
     ifMatch: rememberedDriveETag(account, fileName) || undefined,
     choose: askWhichGardenCopy,
     account,
+    prompt: 'user',
+    downloadLocal: downloadConflictCopy,
   });
   setCloudBusy(false);
   if (result.ok && result.wrote) {
@@ -2333,7 +2359,12 @@ async function onOneDriveSave(): Promise<void> {
     void refreshGardenFileList();
     return;
   }
-  if (result.refused) clearGardenSaveOwed();
+  if (result.cancelled) {
+    noteOwedGardenSave(state.doc);
+    setCloudMessage(result.error);
+    return;
+  }
+  if (result.refused === 'empty') clearGardenSaveOwed();
   logError(result.error, { source: 'onedrive' });
   setCloudMessage(result.error);
 }

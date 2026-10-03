@@ -139,12 +139,12 @@ export async function uploadAndVerifyOriginal(opts: {
 /**
  * Move an original that the survey dropped into `/Garden Survey/photos/deleted/`.
  * Survey originals are raw data: this never sends a hard DELETE.
- * A 404 means the live name is already gone (moved, or never stored).
+ * A 404 means this name was never stored. Callers must not invent a manifest row.
  */
 export async function movePhotoToDeletedFolder(
   client: GraphRequest,
   fileName: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; missing?: boolean } | { ok: false; error: string }> {
   const photos = await ensurePhotosFolder(client);
   if (!photos.ok) return photos;
   const deleted = await ensureFolder(client, photosFolderPath(), 'deleted');
@@ -161,13 +161,15 @@ export async function movePhotoToDeletedFolder(
       },
       body: JSON.stringify({
         parentReference: { path: `/drive/root:/${deletedPhotosFolderPath()}` },
+        '@microsoft.graph.conflictBehavior': 'rename',
       }),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Move failed.';
     return { ok: false, error: message };
   }
-  if (res.ok || res.status === 404) return { ok: true };
+  if (res.status === 404) return { ok: true, missing: true };
+  if (res.ok) return { ok: true };
   return { ok: false, error: await graphError(res) };
 }
 
@@ -181,6 +183,7 @@ export async function retireDrivePhoto(opts: {
   if (!moved.ok) {
     return { ok: false, error: `Could not move ${opts.record.fileName} to photos/deleted: ${moved.error}` };
   }
+  if (moved.missing) return { ok: true };
   const marked = await setManifestPhotoDeleted({
     client: opts.client,
     manifestPath: photosManifestPath(),
