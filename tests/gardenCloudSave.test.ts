@@ -1036,6 +1036,113 @@ describe('save generation and in-memory revision', () => {
   });
 });
 
+describe('conflict prompt and local-only photos', () => {
+  it('does not hold the save lock while the conflict prompt is open, then re-checks the eTag', async () => {
+    const storage = memoryStorage();
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    let depth = 0;
+    let depthAtPrompt = -1;
+    let depthAtConflictPut = -1;
+    const outcome = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'This browser'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      usingLock: async (fn) => {
+        depth += 1;
+        try {
+          return await fn();
+        } finally {
+          depth -= 1;
+        }
+      },
+      fetchImpl: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (method === 'PUT' && url.includes('garden-conflict')) depthAtConflictPut = depth;
+        return remote.fetchImpl(input, init);
+      },
+      choose: async () => {
+        depthAtPrompt = depth;
+        return 'remote';
+      },
+    });
+    expect(depthAtPrompt).toBe(0);
+    expect(depthAtConflictPut).toBe(1);
+    expect(depth).toBe(0);
+    expect(outcome.ok && !outcome.wrote).toBe(true);
+  });
+
+  it('asks again when OneDrive changes while the prompt is open, and adopts the newer copy', async () => {
+    const storage = memoryStorage();
+    const first = garden(IPAD_AT, 'First remote');
+    const moved = garden(REMOTE_NEWER, 'Moved remote');
+    const remote = graph({
+      remotes: [first, moved, moved],
+      etags: ['"v2"', '"v3"', '"v3"'],
+    });
+    const seen: string[] = [];
+    const outcome = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'This browser'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      fetchImpl: remote.fetchImpl,
+      choose: async (choice) => {
+        seen.push(choice.remoteETag);
+        return 'remote';
+      },
+    });
+    expect(seen).toEqual(['"v2"', '"v3"']);
+    expect(outcome.ok && !outcome.wrote && outcome.kept === 'remote').toBe(true);
+    if (outcome.ok && !outcome.wrote) {
+      expect(outcome.doc.name).toBe('Moved remote');
+      expect(outcome.eTag).toBe('"v3"');
+    }
+    expect(remote.puts.filter((put) => put.fileName.startsWith('garden-conflict'))).toHaveLength(1);
+  });
+
+  it('reports photos that exist only in the filed local copy', async () => {
+    const storage = memoryStorage();
+    const local = garden(LOCAL_AT, 'With a roll');
+    local.photos = [uploadingPhoto('ph-roll')];
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    const outcome = await commitGardenSave({
+      doc: local,
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      fetchImpl: remote.fetchImpl,
+      choose: async () => 'remote',
+    });
+    expect(outcome.ok && !outcome.wrote).toBe(true);
+    if (outcome.ok && !outcome.wrote) {
+      expect(outcome.localOnlyPhotos.map((photo) => photo.id)).toEqual(['ph-roll']);
+      expect(outcome.localOnlyPhotos[0]?.originalFile?.uploadStatus).toBe('uploading');
+      expect(outcome.localOnlyPhotos[0]?.originalFile?.fileName).toBe('ph-roll.jpg');
+    }
+    const filed = remote.puts.find((put) => put.fileName.startsWith('garden-conflict'));
+    expect(filed?.body.photos[0]?.id).toBe('ph-roll');
+    expect(remote.events.some((event) => event.includes('manifest'))).toBe(false);
+    expect(remote.puts.some((put) => put.fileName.includes('manifest'))).toBe(false);
+  });
+});
+
 function json(status: number, body: unknown, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,

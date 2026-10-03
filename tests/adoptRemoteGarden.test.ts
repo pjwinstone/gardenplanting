@@ -1,9 +1,10 @@
 import type { AuthenticationResult } from '@azure/msal-browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getGardenCloudFileName } from '../src/cloudConfig';
+import { getCloudStatus } from '../src/cloudStatus';
 import { gardenIsDirty, gardenRevision, rememberDriveETag, rememberedDriveETag } from '../src/gardenCloudSave';
 import { setGraphTokenClientForTests } from '../src/msalAuth';
-import { emptyDocument, type GardenDocument } from '../src/model';
+import { emptyDocument, type GardenDocument, type Photo } from '../src/model';
 import { gardenCloudUiForTests, getState } from '../src/ui';
 
 const authFlag = vi.hoisted(() => ({ signedIn: false }));
@@ -245,4 +246,170 @@ describe('adopt remote garden', () => {
     expect(rememberedDriveETag('home-account', getGardenCloudFileName())).toBe('"E2"');
     expect(getState().doc.name).toBe('Typed while the first save was uploading');
   });
+
+  it('runs Load after an in-flight save so the save keeps its eTag', async () => {
+    const result = await followInFlightSave(() => gardenCloudUiForTests.loadNow());
+    expect(result.getsWhileSaving).toBe(0);
+    expect(result.asked).toBe(false);
+    expect(result.ifMatches).toEqual(['"E0"', '"E1"']);
+    expect(rememberedDriveETag('home-account', getGardenCloudFileName())).toBe('"E2"');
+  });
+
+  it('runs sign-in after an in-flight save so the save keeps its eTag', async () => {
+    const result = await followInFlightSave(() => gardenCloudUiForTests.afterSignIn());
+    expect(result.getsWhileSaving).toBe(0);
+    expect(result.asked).toBe(false);
+    expect(result.ifMatches).toEqual(['"E0"', '"E1"']);
+  });
+
+  it('says it is waiting for another tab while that tab holds the save lock', async () => {
+    const seen: Array<string | null> = [];
+    vi.stubGlobal('navigator', {
+      locks: {
+        query: async () => ({ held: [{ name: 'garden-survey-save', mode: 'exclusive' as const }], pending: [] }),
+        request: async (_name: string, callback: () => Promise<void>) => {
+          seen.push(getCloudStatus().message);
+          return callback();
+        },
+      },
+    });
+    authFlag.signedIn = false;
+    gardenCloudUiForTests.edit(namedGarden('Wait'));
+    authFlag.signedIn = true;
+    await gardenCloudUiForTests.saveNow();
+    expect(seen[0]).toBe('Waiting for another tab…');
+  });
+
+  it('re-attaches local-only photos after adopt and does not touch the manifest', () => {
+    let prompt = '';
+    vi.stubGlobal('window', {
+      confirm: (text: string) => {
+        prompt = text;
+        return true;
+      },
+    });
+    gardenCloudUiForTests.adopt(namedGarden('Remote'), 'garden-v1.json', '"v9"', [uploadingPhoto('ph-roll')]);
+    expect(prompt).toBe("1 photo from your local copy weren't in the OneDrive version — re-attach?");
+    expect(getState().doc.name).toBe('Remote');
+    expect(getState().doc.photos.map((photo) => photo.id)).toEqual(['ph-roll']);
+    expect(getState().doc.photos[0]?.originalFile?.fileName).toBe('ph-roll.jpg');
+    expect(getState().doc.photos[0]?.originalFile?.uploadStatus).toBe('uploading');
+    expect(gardenIsDirty()).toBe(true);
+    expect(fetches).toBe(0);
+  });
+
+  it('leaves the adopted garden unchanged when re-attach is declined', () => {
+    vi.stubGlobal('window', { confirm: () => false });
+    gardenCloudUiForTests.adopt(namedGarden('Remote'), 'garden-v1.json', '"v9"', [uploadingPhoto('ph-roll')]);
+    expect(getState().doc.photos).toEqual([]);
+    expect(gardenIsDirty()).toBe(false);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
+    expect(fetches).toBe(0);
+  });
 });
+
+function uploadingPhoto(id: string): Photo {
+  return {
+    id,
+    setupId: 'setup-1',
+    width: 8,
+    height: 8,
+    clicks: [],
+    originalFile: {
+      fileName: `${id}.jpg`,
+      size: 4,
+      quickXorHash: 'hash',
+      uploadStatus: 'uploading',
+    },
+  };
+}
+
+async function followInFlightSave(follow: () => Promise<unknown>): Promise<{
+  ifMatches: Array<string | null>;
+  getsWhileSaving: number;
+  asked: boolean;
+}> {
+  let asked = false;
+  vi.stubGlobal('window', {
+    confirm: () => {
+      asked = true;
+      return true;
+    },
+  });
+  let remoteEtag = '"E0"';
+  let releaseFirstPut = (): void => {};
+  const gate = new Promise<void>((resolve) => {
+    releaseFirstPut = resolve;
+  });
+  let markPutStarted = (): void => {};
+  const putStarted = new Promise<void>((resolve) => {
+    markPutStarted = resolve;
+  });
+  const ifMatches: Array<string | null> = [];
+  let watching = false;
+  let putFinished = false;
+  let getsWhileSaving = 0;
+  const remoteBody = namedGarden('Remote');
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const method = init?.method ?? 'GET';
+    if (method === 'POST') return new Response('', { status: 409 });
+    if (method === 'GET' && url.includes('$select=')) {
+      if (watching && !putFinished) getsWhileSaving += 1;
+      return new Response(
+        JSON.stringify({
+          eTag: remoteEtag,
+          lastModifiedDateTime: remoteBody.updatedAt,
+          '@microsoft.graph.downloadUrl': 'https://download.example/garden',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.startsWith('https://download.example/garden')) {
+      return new Response(JSON.stringify(remoteBody), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (method === 'PUT') {
+      const headers = new Headers(init?.headers);
+      ifMatches.push(headers.get('If-Match'));
+      if (ifMatches.length === 1) {
+        markPutStarted();
+        await gate;
+        putFinished = true;
+        remoteEtag = '"E1"';
+        return new Response(JSON.stringify({ eTag: '"E1"' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', etag: '"E1"' },
+        });
+      }
+      remoteEtag = '"E2"';
+      return new Response(JSON.stringify({ eTag: '"E2"' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', etag: '"E2"' },
+      });
+    }
+    return new Response(JSON.stringify({ error: { message: 'missing' } }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  authFlag.signedIn = false;
+  gardenCloudUiForTests.edit(namedGarden('Queued'));
+  authFlag.signedIn = true;
+  rememberDriveETag('home-account', getGardenCloudFileName(), '"E0"');
+  const auto = gardenCloudUiForTests.autoSave();
+  await putStarted;
+  watching = true;
+  const followed = follow();
+  await Promise.resolve();
+  expect(getsWhileSaving).toBe(0);
+  releaseFirstPut();
+  await auto;
+  await followed;
+  const manual = gardenCloudUiForTests.saveNow();
+  await manual;
+  return { ifMatches, getsWhileSaving, asked };
+}
