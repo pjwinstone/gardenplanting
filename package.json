@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test:field-circle": "node scripts/check-field-circle-baseline.mjs",
     "test:occ-off-baseline": "node scripts/check-occ-off-baseline.mjs",
-    "test:station-baseline": "node scripts/check-station-baseline.mjs"
+    "test:station-baseline": "node scripts/check-station-baseline.mjs",
+    "build:checklist-pdf": "node scripts/build-checklist-pdf.mjs"
   },
   "devDependencies": {
     "puppeteer": "^24.15.0",
