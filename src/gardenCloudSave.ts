@@ -9,6 +9,12 @@
  * A first save with no eTag uses If-None-Match: *.
  * Sign-in loads OneDrive only when this browser is empty, or the stored eTag
  * matches and the local garden is not dirty.
+ * A successful write clears the dirty flag only when the garden revision is
+ * still the one captured when that save started, and only when no adopt or
+ * load has replaced the working garden since that save began.
+ * One save runs at a time in the UI. A conflict copy is built from the garden
+ * at the moment it is filed, and the remote is adopted only when that copy
+ * still matches the current revision.
  */
 
 import type { OwedSaveStorage } from './cloudSignIn';
@@ -29,6 +35,8 @@ import {
 const ETAG_KEY = 'garden-survey:drive-etags';
 const PROMPTED_KEY = 'garden-survey:conflict-prompted';
 const DIRTY_KEY = 'garden-survey:garden-dirty';
+/** Bumped on every local edit. A save compares this with the value it started with. */
+const REVISION_KEY = 'garden-survey:garden-revision';
 
 /** Shown while this browser has edits that are not the OneDrive copy. */
 export const GARDEN_UNSAVED_STATUS = 'Not saved — tap Save';
@@ -47,7 +55,18 @@ export interface GardenCopyChoice {
 export type GardenCopyChooser = (choice: GardenCopyChoice) => Promise<'local' | 'remote'>;
 
 export type GardenCommitResult =
-  | { ok: true; wrote: true; savedAt: string; fileName: string; eTag?: string }
+  | {
+      ok: true;
+      wrote: true;
+      savedAt: string;
+      fileName: string;
+      eTag?: string;
+      /**
+       * An adopt or load replaced the working garden while this upload was in
+       * flight. The eTag was not stored and dirty was not cleared.
+       */
+      superseded?: boolean;
+    }
   | {
       ok: true;
       wrote: false;
@@ -126,33 +145,111 @@ function etagMapKey(account: string, fileName: string): string {
   return `${account}\n${fileName}`;
 }
 
-/** Every local edit, including while signed out and before a redirect. */
-export function noteLocalGardenEdit(storage?: OwedSaveStorage): void {
+interface RevisionMemory {
+  revision: number;
+  /** `null` until this process has marked or cleared dirty for this storage. */
+  dirty: boolean | null;
+  /** removeItem failed, so a stored '1' may still be there even if getItem throws. */
+  clearFailed: boolean;
+}
+
+const revisionMemory = new WeakMap<object, RevisionMemory>();
+const noStoreRevision: RevisionMemory = { revision: 0, dirty: null, clearFailed: false };
+
+function revisionMemoryFor(storage?: OwedSaveStorage): RevisionMemory {
+  const store = storageOf(storage);
+  if (!store) return noStoreRevision;
+  let memory = revisionMemory.get(store);
+  if (!memory) {
+    memory = { revision: 0, dirty: null, clearFailed: false };
+    revisionMemory.set(store, memory);
+  }
+  return memory;
+}
+
+function storedRevision(storage?: OwedSaveStorage): number {
+  const store = storageOf(storage);
+  if (!store) return 0;
+  try {
+    const raw = store.getItem(REVISION_KEY);
+    if (!raw) return 0;
+    const n = Number(raw);
+    return Number.isSafeInteger(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Monotonic count of local edits. Kept in memory as well as localStorage, so a
+ * failed write does not make the next save look clean. Zero when this browser
+ * has never edited.
+ */
+export function gardenRevision(storage?: OwedSaveStorage): number {
+  return Math.max(revisionMemoryFor(storage).revision, storedRevision(storage));
+}
+
+/** Every local edit, including while signed out and before a redirect. Returns the new revision. */
+export function noteLocalGardenEdit(storage?: OwedSaveStorage): number {
+  const next = gardenRevision(storage) + 1;
+  const memory = revisionMemoryFor(storage);
+  memory.revision = next;
+  memory.dirty = true;
+  memory.clearFailed = false;
+  try {
+    storageOf(storage)?.setItem(REVISION_KEY, String(next));
+  } catch {
+    /* quota — the in-memory revision still moved */
+  }
   markGardenDirty(storage);
+  return next;
 }
 
 export function markGardenDirty(storage?: OwedSaveStorage): void {
+  const memory = revisionMemoryFor(storage);
+  memory.dirty = true;
+  memory.clearFailed = false;
   try {
     storageOf(storage)?.setItem(DIRTY_KEY, '1');
   } catch {
-    /* quota */
+    /* quota — memory stays dirty */
   }
 }
 
 export function clearGardenDirty(storage?: OwedSaveStorage): void {
+  const memory = revisionMemoryFor(storage);
+  memory.dirty = false;
   try {
     storageOf(storage)?.removeItem(DIRTY_KEY);
+    memory.clearFailed = false;
   } catch {
-    /* ignore */
+    memory.clearFailed = true;
   }
 }
 
 export function gardenIsDirty(storage?: OwedSaveStorage): boolean {
+  const memory = revisionMemoryFor(storage);
+  if (memory.dirty === true || memory.clearFailed) return true;
   try {
     return storageOf(storage)?.getItem(DIRTY_KEY) === '1';
   } catch {
     return false;
   }
+}
+
+/**
+ * Bumped when the working garden is replaced (adopt or load). An upload that
+ * started earlier must not store its eTag or clear dirty.
+ */
+let saveGeneration = 0;
+
+export function currentSaveGeneration(): number {
+  return saveGeneration;
+}
+
+export function noteRemoteGardenApplied(): number {
+  saveGeneration += 1;
+  return saveGeneration;
 }
 
 function readPrompted(storage?: OwedSaveStorage): PromptedConflict | null {
@@ -255,11 +352,26 @@ export async function commitGardenSave(opts: {
   now?: () => string;
   /** Used when the conflict file cannot be uploaded. */
   downloadLocal?: (doc: GardenDocument, fileName: string) => void;
+  /**
+   * Revision of `doc` when this save was captured. Dirty is cleared only when
+   * the garden is still that revision after the upload. Defaults to the
+   * revision at the moment this function is called, before any network wait.
+   */
+  revision?: number;
+  /**
+   * Current garden and revision. The conflict prompt and the conflict file
+   * are taken from this immediately before they are used, so an edit made
+   * while the 412 was downloading, while the prompt is open, or while the
+   * conflict file uploads is the copy that gets filed.
+   */
+  readLocal?: () => LocalGardenView;
 }): Promise<GardenCommitResult> {
   const fileName = opts.fileName || getGardenCloudFileName();
   const fetchImpl = opts.fetchImpl;
   const localUpdatedAt = opts.doc.updatedAt ?? '';
   const promptMode = opts.prompt ?? 'user';
+  const revisionAtStart = opts.revision ?? gardenRevision(opts.storage);
+  const generationAtStart = currentSaveGeneration();
 
   if (isEmptySurveyGarden(opts.doc)) {
     return {
@@ -285,7 +397,7 @@ export async function commitGardenSave(opts: {
       ifNoneMatch: '*',
       fetchImpl,
     });
-    if (put.ok) return wroteResult(put, opts.account, fileName, opts.storage);
+    if (put.ok) return wroteResult(put, opts.account, fileName, opts.storage, revisionAtStart, generationAtStart);
     if (!put.conflict) return { ok: false, error: put.error };
     const again = await loadGardenFromOneDrive(fileName, {
       token: opts.token,
@@ -302,7 +414,7 @@ export async function commitGardenSave(opts: {
       ifMatch: baseETag,
       fetchImpl,
     });
-    if (put.ok) return wroteResult(put, opts.account, fileName, opts.storage);
+    if (put.ok) return wroteResult(put, opts.account, fileName, opts.storage, revisionAtStart, generationAtStart);
     if (!put.conflict) return { ok: false, error: put.error };
     const again = await loadGardenFromOneDrive(fileName, {
       token: opts.token,
@@ -320,12 +432,45 @@ function wroteResult(
   put: Extract<CloudSaveResult, { ok: true }>,
   account: string | undefined,
   fileName: string,
-  storage?: OwedSaveStorage,
+  storage: OwedSaveStorage | undefined,
+  revisionAtStart: number,
+  generationAtStart: number,
 ): GardenCommitResult {
+  // Adopt or load replaced the working garden. This upload's eTag belongs to a garden we no longer have.
+  if (currentSaveGeneration() !== generationAtStart) {
+    return {
+      ok: true,
+      wrote: true,
+      savedAt: put.savedAt,
+      fileName: put.fileName,
+      eTag: put.eTag,
+      superseded: true,
+    };
+  }
   clearPrompted(storage);
-  clearGardenDirty(storage);
+  // An edit during the upload bumps the revision. That garden is still unsaved.
+  if (gardenRevision(storage) === revisionAtStart) clearGardenDirty(storage);
   if (put.eTag && account) rememberDriveETag(account, fileName, put.eTag, storage);
   return { ok: true, wrote: true, savedAt: put.savedAt, fileName: put.fileName, eTag: put.eTag };
+}
+
+export interface LocalGardenView {
+  doc: GardenDocument;
+  dirty?: boolean;
+  revision?: number;
+}
+
+function currentLocal(opts: {
+  doc: GardenDocument;
+  storage?: OwedSaveStorage;
+  readLocal?: () => LocalGardenView;
+}): { doc: GardenDocument; revision: number } {
+  const live = opts.readLocal?.();
+  if (!live) return { doc: opts.doc, revision: gardenRevision(opts.storage) };
+  return {
+    doc: live.doc,
+    revision: live.revision ?? gardenRevision(opts.storage),
+  };
 }
 
 async function resolveConflict(
@@ -338,6 +483,7 @@ async function resolveConflict(
     storage?: OwedSaveStorage;
     now?: () => string;
     downloadLocal?: (doc: GardenDocument, fileName: string) => void;
+    readLocal?: () => LocalGardenView;
   },
   remote: Extract<CloudLoadResult, { ok: true }>,
   fileName: string,
@@ -359,7 +505,14 @@ async function resolveConflict(
   }
 
   rememberPrompted(account, fileName, remoteETag, opts.storage);
-  const choice = choiceFor(opts.doc, remote, fileName, localUpdatedAt, remoteUpdatedAt);
+  const atPrompt = currentLocal(opts);
+  const choice = choiceFor(
+    atPrompt.doc,
+    remote,
+    fileName,
+    atPrompt.doc.updatedAt ?? localUpdatedAt,
+    remoteUpdatedAt,
+  );
   if (!opts.choose) {
     return {
       ok: false,
@@ -378,10 +531,23 @@ async function resolveConflict(
     };
   }
 
-  const preserved = await preserveLocalCopy(opts, fileName);
+  const preserved = await preserveMatchingCopy(opts, fileName);
   if (!preserved.ok) {
+    if (preserved.aborted) {
+      return { ok: false, cancelled: true, conflict: true, error: preserved.error };
+    }
     return { ok: false, error: preserved.error, conflict: true };
   }
+  const still = currentLocal(opts);
+  if (still.revision !== preserved.revision) {
+    return {
+      ok: false,
+      cancelled: true,
+      conflict: true,
+      error: `This browser changed while its copy was being filed. Nothing was replaced.`,
+    };
+  }
+  noteRemoteGardenApplied();
   clearPrompted(opts.storage);
   clearGardenDirty(opts.storage);
   return {
@@ -391,7 +557,7 @@ async function resolveConflict(
     doc: remote.doc,
     fileName: remote.fileName || fileName,
     eTag: remote.eTag,
-    localUpdatedAt,
+    localUpdatedAt: preserved.updatedAt || localUpdatedAt,
     remoteUpdatedAt,
     reason: 'chose-remote',
     preservedAs: preserved.where,
@@ -399,39 +565,81 @@ async function resolveConflict(
   };
 }
 
-async function preserveLocalCopy(
+/**
+ * File this browser’s garden, then adopt only if that file is still current.
+ * The body is the whole document, including photo rows whose originals are
+ * still uploading in IndexedDB. Adopting the remote does not delete
+ * `photos/manifest.json` entries; the upload queue keeps those files, and the
+ * rows stay referenced because they are in this copy.
+ * A second attempt uses a different file name so If-None-Match: * can succeed
+ * when the clock has not moved. If the garden is still changing after that,
+ * the remote is left alone.
+ */
+async function preserveMatchingCopy(
   opts: {
     doc: GardenDocument;
     token: string;
     fetchImpl?: typeof fetch;
+    storage?: OwedSaveStorage;
     now?: () => string;
     downloadLocal?: (doc: GardenDocument, fileName: string) => void;
+    readLocal?: () => LocalGardenView;
   },
   gardenFileName: string,
-): Promise<{ ok: true; where: string; message: string } | { ok: false; error: string }> {
-  const iso = opts.now?.() ?? new Date().toISOString();
-  const conflictName = conflictGardenFileName(iso);
-  const put = await saveGardenToOneDrive(opts.doc, conflictName, opts.token, {
-    ifNoneMatch: '*',
-    fetchImpl: opts.fetchImpl,
-  });
-  const path = `/${onedrivePathFor(conflictName)}`;
-  if (put.ok) {
-    return {
-      ok: true,
-      where: path,
-      message: `Kept the OneDrive copy of ${gardenFileName}. This browser’s copy is saved as ${path}.`,
-    };
-  }
-  try {
-    opts.downloadLocal?.(opts.doc, conflictName);
-  } catch {
-    /* A download is a spare copy. It does not prove the local garden was kept. */
+): Promise<
+  | { ok: true; where: string; message: string; revision: number; updatedAt: string }
+  | { ok: false; error: string; aborted?: boolean }
+> {
+  const maxAttempts = 2;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const live = currentLocal(opts);
+    if (isEmptySurveyGarden(live.doc)) {
+      return {
+        ok: false,
+        aborted: true,
+        error: `Not replacing ${gardenFileName}. This browser’s garden is empty, so nothing was filed and nothing was adopted.`,
+      };
+    }
+    const iso = opts.now?.() ?? new Date().toISOString();
+    const conflictName = conflictNameForAttempt(iso, attempt);
+    const put = await saveGardenToOneDrive(live.doc, conflictName, opts.token, {
+      ifNoneMatch: '*',
+      fetchImpl: opts.fetchImpl,
+    });
+    const path = `/${onedrivePathFor(conflictName)}`;
+    if (!put.ok) {
+      try {
+        opts.downloadLocal?.(live.doc, conflictName);
+      } catch {
+        /* A download is a spare copy. It does not prove the local garden was kept. */
+      }
+      return {
+        ok: false,
+        error: `Could not keep this browser’s copy before using OneDrive (${put.error}). Nothing was replaced.`,
+      };
+    }
+    const after = currentLocal(opts);
+    if (after.revision === live.revision) {
+      return {
+        ok: true,
+        where: path,
+        revision: live.revision,
+        updatedAt: live.doc.updatedAt ?? '',
+        message: `Kept the OneDrive copy of ${gardenFileName}. This browser’s copy is saved as ${path}.`,
+      };
+    }
   }
   return {
     ok: false,
-    error: `Could not keep this browser’s copy before using OneDrive (${put.error}). Nothing was replaced.`,
+    aborted: true,
+    error: `This browser changed while its copy was being filed. Nothing was replaced.`,
   };
+}
+
+function conflictNameForAttempt(iso: string, attempt: number): string {
+  const base = conflictGardenFileName(iso);
+  if (attempt === 0) return base;
+  return base.replace(/\.json$/i, `-r${attempt}.json`);
 }
 
 function choiceFor(
@@ -456,7 +664,7 @@ export type RedirectOwedResult =
   | { kind: 'absent' }
   | { kind: 'mismatch' }
   | { kind: 'empty' }
-  | { kind: 'saved'; fileName: string; savedAt: string; eTag?: string }
+  | { kind: 'saved'; fileName: string; savedAt: string; eTag?: string; superseded?: boolean }
   | {
       kind: 'kept-remote';
       doc: GardenDocument;
@@ -485,6 +693,10 @@ export async function applyRedirectOwedSave(opts: {
   choose?: GardenCopyChooser;
   now?: () => string;
   downloadLocal?: (doc: GardenDocument, fileName: string) => void;
+  /** Revision of `localDoc` when it was captured. See `commitGardenSave`. */
+  revision?: number;
+  /** Current garden. The conflict prompt and conflict file use this, not the snapshot. */
+  readLocal?: () => LocalGardenView;
 }): Promise<RedirectOwedResult> {
   const owed = readOwedGardenSave(opts.storage);
   if (!owed) return { kind: 'absent' };
@@ -509,6 +721,8 @@ export async function applyRedirectOwedSave(opts: {
     prompt: 'user',
     now: opts.now,
     downloadLocal: opts.downloadLocal,
+    revision: opts.revision,
+    readLocal: opts.readLocal,
   });
 
   if (!result.ok) {
@@ -521,7 +735,13 @@ export async function applyRedirectOwedSave(opts: {
   }
   if (result.wrote) {
     clearGardenSaveOwed(opts.storage);
-    return { kind: 'saved', fileName: result.fileName, savedAt: result.savedAt, eTag: result.eTag };
+    return {
+      kind: 'saved',
+      fileName: result.fileName,
+      savedAt: result.savedAt,
+      eTag: result.eTag,
+      superseded: result.superseded,
+    };
   }
   clearGardenSaveOwed(opts.storage);
   if (result.eTag) rememberDriveETag(opts.account, result.fileName, result.eTag, opts.storage);
@@ -578,6 +798,13 @@ export async function reconcileGardenOnLoad(opts: {
   now?: () => string;
   downloadLocal?: (doc: GardenDocument, fileName: string) => void;
   prompt?: 'auto' | 'user';
+  /**
+   * Garden and dirty flag once the load has returned. Sign-in and Load pass
+   * this so an edit made while OneDrive was loading is part of the decision.
+   * When omitted, `localDoc` and the stored dirty flag are used.
+   * `revision` lets the conflict file track edits made after this first read.
+   */
+  readLocal?: () => { doc: GardenDocument; dirty: boolean; revision?: number };
 }): Promise<GardenReconcileResult> {
   const fileName = opts.fileName || getGardenCloudFileName();
   const loaded = await loadGardenFromOneDrive(fileName, {
@@ -591,20 +818,24 @@ export async function reconcileGardenOnLoad(opts: {
 
   const remoteFile = loaded.fileName || fileName;
   const remoteETag = loaded.eTag || '';
-  if (isEmptySurveyGarden(opts.localDoc)) {
+  const live = opts.readLocal?.() ?? {
+    doc: opts.localDoc,
+    dirty: gardenIsDirty(opts.storage),
+  };
+  if (isEmptySurveyGarden(live.doc)) {
     return adopted(opts, loaded, remoteFile, remoteETag);
   }
 
   const baseETag = rememberedDriveETag(opts.account, remoteFile, opts.storage);
-  if (!gardenIsDirty(opts.storage) && baseETag && remoteETag && baseETag === remoteETag) {
+  if (!live.dirty && baseETag && remoteETag && baseETag === remoteETag) {
     return adopted(opts, loaded, remoteFile, remoteETag);
   }
 
   const resolved = await resolveConflict(
-    { ...opts, doc: opts.localDoc },
+    { ...opts, doc: live.doc },
     loaded,
     remoteFile,
-    opts.localDoc.updatedAt ?? '',
+    live.doc.updatedAt ?? '',
     opts.prompt ?? 'user',
   );
   if (!resolved.ok) {
@@ -642,6 +873,7 @@ function adopted(
   remoteFile: string,
   remoteETag: string,
 ): GardenReconcileResult {
+  noteRemoteGardenApplied();
   clearGardenDirty(opts.storage);
   clearGardenSaveOwed(opts.storage);
   if (remoteETag && opts.account) rememberDriveETag(opts.account, remoteFile, remoteETag, opts.storage);

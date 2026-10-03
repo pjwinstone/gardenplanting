@@ -4,13 +4,16 @@ import {
   commitGardenSave,
   gardenConflictPrompt,
   gardenIsDirty,
+  gardenRevision,
   noteLocalGardenEdit,
+  noteRemoteGardenApplied,
   reconcileGardenOnLoad,
+  rememberedDriveETag,
   rememberDriveETag,
   type GardenCopyChoice,
 } from '../src/gardenCloudSave';
 import { markGardenSaveOwed, readOwedGardenSave, type OwedGardenSave, type OwedSaveStorage } from '../src/cloudSignIn';
-import { emptyDocument, type GardenDocument } from '../src/model';
+import { emptyDocument, type GardenDocument, type Photo } from '../src/model';
 
 const FILE = 'garden-v1.json';
 const ACCOUNT = 'home-account';
@@ -680,6 +683,356 @@ describe('reconcileGardenOnLoad', () => {
     expect(remote.puts).toEqual([]);
     expect(gardenIsDirty(storage)).toBe(false);
     expect(readOwedGardenSave(storage)).toBeNull();
+  });
+
+  it('decides from the garden and dirty flag when the load finishes', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    const captured = emptyDocument('Untitled garden');
+    const edited = garden(LOCAL_AT, 'Typed during load');
+    edited.points = [{ id: 'HSE01', kind: 'HSE', label: 'During load' }];
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Cloud garden')],
+      etags: ['"v1"'],
+    });
+    let fetchStarted = false;
+    let choice: GardenCopyChoice | null = null;
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: captured,
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: async (input, init) => {
+        fetchStarted = true;
+        return remote.fetchImpl(input, init);
+      },
+      readLocal: () => {
+        expect(fetchStarted).toBe(true);
+        return { doc: edited, dirty: true };
+      },
+      choose: async (next) => {
+        choice = next;
+        return 'local';
+      },
+    });
+    expect(choice).not.toBeNull();
+    expect(choice!.localDoc.name).toBe('Typed during load');
+    expect(choice!.localDoc.points[0]?.label).toBe('During load');
+    expect(choice!.localUpdatedAt).toBe(LOCAL_AT);
+    expect(outcome.kind).toBe('cancelled');
+    expect(remote.puts).toEqual([]);
+    expect(gardenIsDirty(storage)).toBe(true);
+  });
+
+  it('prompts with the edit made during load even when the captured garden matched', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    const captured = garden(REMOTE_OLDER, 'Local cache');
+    const edited = garden(LOCAL_AT, 'Edit during load');
+    edited.points = [{ id: 'HSE09', kind: 'HSE', label: 'New corner' }];
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Cloud copy')],
+      etags: ['"v1"'],
+    });
+    let choice: GardenCopyChoice | null = null;
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: captured,
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      readLocal: () => ({ doc: edited, dirty: true }),
+      choose: async (next) => {
+        choice = next;
+        return 'local';
+      },
+    });
+    expect(choice!.localDoc.name).toBe('Edit during load');
+    expect(choice!.localDoc.points[0]?.id).toBe('HSE09');
+    expect(outcome.kind).toBe('cancelled');
+    expect(remote.puts).toEqual([]);
+  });
+
+  it('still adopts when the garden is clean at decision time', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    const live = garden(LOCAL_AT, 'Still the cache');
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'Cloud copy')],
+      etags: ['"v1"'],
+    });
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: garden(REMOTE_OLDER, 'Snapshot from when load began'),
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      readLocal: () => ({ doc: live, dirty: false }),
+      choose: async () => {
+        throw new Error('clean garden at decision time must not ask');
+      },
+    });
+    expect(outcome.kind).toBe('adopted');
+    if (outcome.kind === 'adopted') expect(outcome.doc.name).toBe('Cloud copy');
+    expect(gardenIsDirty(storage)).toBe(false);
+    expect(remote.puts).toEqual([]);
+  });
+});
+
+describe('commitGardenSave dirty flag', () => {
+  it('clears dirty after a save only when nothing changed during the upload', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    noteLocalGardenEdit(storage);
+    const revision = gardenRevision(storage);
+    expect(revision).toBe(1);
+    const remote = graph({
+      remotes: [garden(REMOTE_OLDER, 'Cloud')],
+      etags: ['"v1"'],
+    });
+    const saved = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'This browser'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      revision,
+      fetchImpl: remote.fetchImpl,
+    });
+    expect(saved.ok && saved.wrote).toBe(true);
+    expect(gardenIsDirty(storage)).toBe(false);
+    expect(gardenRevision(storage)).toBe(revision);
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('"written"');
+
+    noteLocalGardenEdit(storage);
+    const again = gardenRevision(storage);
+    let editedDuringUpload = false;
+    const racing = graph({
+      remotes: [garden(LOCAL_AT, 'This browser')],
+      etags: ['"written"'],
+    });
+    const raced = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'This browser'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"written"',
+      account: ACCOUNT,
+      storage,
+      revision: again,
+      fetchImpl: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        if (method === 'PUT' && !editedDuringUpload) {
+          editedDuringUpload = true;
+          noteLocalGardenEdit(storage);
+        }
+        return racing.fetchImpl(input, init);
+      },
+    });
+    expect(editedDuringUpload).toBe(true);
+    expect(raced.ok && raced.wrote).toBe(true);
+    if (raced.ok && raced.wrote) expect(raced.eTag).toBe('"written"');
+    expect(gardenIsDirty(storage)).toBe(true);
+    expect(gardenRevision(storage)).toBe(again + 1);
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('"written"');
+  });
+});
+
+function uploadingPhoto(id: string): Photo {
+  return {
+    id,
+    setupId: 'setup-1',
+    width: 64,
+    height: 64,
+    clicks: [],
+    originalFile: {
+      fileName: `${id}.jpg`,
+      size: 12,
+      quickXorHash: 'hash',
+      uploadStatus: 'uploading',
+    },
+  };
+}
+
+describe('conflict copy stays current', () => {
+  it('files an edit made while the conflict prompt is open, including an uploading photo', async () => {
+    const storage = memoryStorage();
+    noteLocalGardenEdit(storage);
+    let live = garden(LOCAL_AT, 'Before prompt');
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    const outcome = await reconcileGardenOnLoad({
+      localDoc: garden(LOCAL_AT, 'Stale when the load started'),
+      fileName: FILE,
+      token: 'tok',
+      account: ACCOUNT,
+      storage,
+      fetchImpl: remote.fetchImpl,
+      now: () => CONFLICT_AT,
+      readLocal: () => ({ doc: live, dirty: true, revision: gardenRevision(storage) }),
+      choose: async (choice) => {
+        expect(choice.localDoc.name).toBe('Before prompt');
+        const next = garden(LOCAL_AT, 'Added during prompt');
+        next.points = [
+          { id: 'HSE01', kind: 'HSE', label: 'Before prompt' },
+          { id: 'HSE02', kind: 'HSE', label: 'Added during prompt' },
+        ];
+        next.photos = [uploadingPhoto('ph-roll')];
+        live = next;
+        noteLocalGardenEdit(storage);
+        return 'remote';
+      },
+    });
+    expect(outcome.kind).toBe('kept-remote');
+    const conflicts = remote.puts.filter((put) => put.fileName.startsWith('garden-conflict'));
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.body.name).toBe('Added during prompt');
+    expect(conflicts[0]?.body.points.map((point) => point.id)).toEqual(['HSE01', 'HSE02']);
+    expect(conflicts[0]?.body.photos[0]?.id).toBe('ph-roll');
+    expect(conflicts[0]?.body.photos[0]?.originalFile?.uploadStatus).toBe('uploading');
+    expect(conflicts[0]?.body.photos[0]?.originalFile?.fileName).toBe('ph-roll.jpg');
+    // Adopting the remote does not delete photos/manifest.json. The upload queue keeps the original.
+    expect(remote.events.some((event) => event.includes('manifest'))).toBe(false);
+    expect(remote.puts.some((put) => put.fileName.includes('manifest'))).toBe(false);
+  });
+
+  it('uploads the conflict copy again when the garden changes while it is uploading', async () => {
+    const storage = memoryStorage();
+    noteLocalGardenEdit(storage);
+    let live = garden(LOCAL_AT, 'At the prompt');
+    let bumped = false;
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    const outcome = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'Stale at save start'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      fetchImpl: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (method === 'PUT' && url.includes('garden-conflict') && !bumped) {
+          bumped = true;
+          const next = garden(LOCAL_AT, 'Added during upload');
+          next.points = [
+            { id: 'HSE01', kind: 'HSE', label: 'At the prompt' },
+            { id: 'HSE02', kind: 'HSE', label: 'Added during upload' },
+          ];
+          live = next;
+          noteLocalGardenEdit(storage);
+        }
+        return remote.fetchImpl(input, init);
+      },
+      readLocal: () => ({ doc: live, revision: gardenRevision(storage) }),
+      choose: async () => 'remote',
+    });
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) expect(outcome.wrote).toBe(false);
+    const conflicts = remote.puts.filter((put) => put.fileName.startsWith('garden-conflict'));
+    expect(conflicts.map((put) => put.fileName)).toEqual([
+      CONFLICT_NAME,
+      'garden-conflict-2026-10-03T10-00-00.000Z-r1.json',
+    ]);
+    expect(conflicts[1]?.body.name).toBe('Added during upload');
+    expect(conflicts[1]?.body.points.map((point) => point.id)).toEqual(['HSE01', 'HSE02']);
+    expect(gardenIsDirty(storage)).toBe(false);
+  });
+
+  it('does not adopt when the garden is still changing after the conflict copy is retried', async () => {
+    const storage = memoryStorage();
+    noteLocalGardenEdit(storage);
+    let live = garden(LOCAL_AT, 'At the prompt');
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    const outcome = await commitGardenSave({
+      doc: live,
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      fetchImpl: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (method === 'PUT' && url.includes('garden-conflict')) {
+          live = garden(LOCAL_AT, 'Still moving');
+          noteLocalGardenEdit(storage);
+        }
+        return remote.fetchImpl(input, init);
+      },
+      readLocal: () => ({ doc: live, revision: gardenRevision(storage) }),
+      choose: async () => 'remote',
+    });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.cancelled).toBe(true);
+      expect(outcome.error).toMatch(/Nothing was replaced/);
+    }
+    expect(remote.puts.filter((put) => put.fileName.startsWith('garden-conflict'))).toHaveLength(2);
+    expect(gardenIsDirty(storage)).toBe(true);
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('');
+  });
+});
+
+describe('save generation and in-memory revision', () => {
+  it('does not store the eTag or clear dirty when the garden is replaced during the upload', async () => {
+    const storage = memoryStorage();
+    rememberDriveETag(ACCOUNT, FILE, '"v1"', storage);
+    noteLocalGardenEdit(storage);
+    const remote = graph({
+      remotes: [garden(REMOTE_OLDER, 'Cloud')],
+      etags: ['"v1"'],
+    });
+    const saved = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'In flight'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      revision: gardenRevision(storage),
+      fetchImpl: async (input, init) => {
+        if ((init?.method ?? 'GET') === 'PUT') noteRemoteGardenApplied();
+        return remote.fetchImpl(input, init);
+      },
+    });
+    expect(saved.ok && saved.wrote && saved.superseded).toBe(true);
+    expect(gardenIsDirty(storage)).toBe(true);
+    expect(gardenRevision(storage)).toBe(1);
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('"v1"');
+  });
+
+  it('keeps the revision and dirty flag when localStorage writes throw', () => {
+    const storage: OwedSaveStorage = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => {
+        throw new Error('blocked');
+      },
+      removeItem: () => {
+        throw new Error('blocked');
+      },
+    };
+    expect(gardenRevision(storage)).toBe(0);
+    expect(gardenIsDirty(storage)).toBe(false);
+    expect(noteLocalGardenEdit(storage)).toBe(1);
+    expect(noteLocalGardenEdit(storage)).toBe(2);
+    expect(gardenRevision(storage)).toBe(2);
+    expect(gardenIsDirty(storage)).toBe(true);
   });
 });
 
