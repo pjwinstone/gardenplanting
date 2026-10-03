@@ -214,6 +214,68 @@ async function readManifest(
   }
 }
 
+/**
+ * Photo ids and file names another device has dropped.
+ * `deletedAt` on a manifest row, or a file sitting in `photos/deleted/`.
+ * Any failure returns the keys found so far — this must not block adopting a garden.
+ */
+export async function loadDeletedPhotoKeys(opts: {
+  client: GraphRequest;
+  manifestPath: string;
+  deletedFolderPath: string;
+}): Promise<{ photoIds: string[]; fileNames: string[] }> {
+  const photoIds = new Set<string>();
+  const fileNames = new Set<string>();
+  try {
+    const manifest = await readManifest(opts.client, opts.manifestPath);
+    if (manifest.ok) {
+      for (const row of manifest.manifest.photos) {
+        if (!row?.deletedAt) continue;
+        if (row.photoId) photoIds.add(row.photoId);
+        if (row.fileName) fileNames.add(row.fileName);
+      }
+    }
+  } catch {
+    /* A missing or unreadable manifest is not a list of deletes. */
+  }
+  try {
+    for (const name of await listChildNames(opts.client, opts.deletedFolderPath)) fileNames.add(name);
+  } catch {
+    /* photos/deleted/ may not exist yet. */
+  }
+  return { photoIds: [...photoIds], fileNames: [...fileNames] };
+}
+
+const MAX_DELETED_PAGES = 50;
+
+/** Names in a drive folder, following `@odata.nextLink` past the first page. */
+async function listChildNames(client: GraphRequest, folderPath: string): Promise<string[]> {
+  const names = new Set<string>();
+  let url: string | undefined = `${graphItemUrl(folderPath)}:/children?$select=name&$top=200`;
+  const seen = new Set<string>();
+  for (let page = 0; url && page < MAX_DELETED_PAGES; page++) {
+    if (seen.has(url)) break;
+    seen.add(url);
+    const res = await client.fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${client.token}` },
+    });
+    if (!res.ok) break;
+    let body: { value?: Array<{ name?: unknown }>; '@odata.nextLink'?: unknown };
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      break;
+    }
+    for (const item of body.value ?? []) {
+      if (typeof item?.name === 'string' && item.name) names.add(item.name);
+    }
+    const next = body['@odata.nextLink'];
+    url = typeof next === 'string' && next ? next : undefined;
+  }
+  return [...names];
+}
+
 async function writeManifest(
   client: GraphRequest,
   manifestPath: string,

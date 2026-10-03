@@ -7,6 +7,7 @@ import {
   gardenRevision,
   noteLocalGardenEdit,
   noteRemoteGardenApplied,
+  photosOnlyInLocal,
   reconcileGardenOnLoad,
   rememberedDriveETag,
   rememberDriveETag,
@@ -14,6 +15,7 @@ import {
 } from '../src/gardenCloudSave';
 import { markGardenSaveOwed, readOwedGardenSave, type OwedGardenSave, type OwedSaveStorage } from '../src/cloudSignIn';
 import { emptyDocument, type GardenDocument, type Photo } from '../src/model';
+import { loadDeletedPhotoKeys } from '../src/photosManifest';
 
 const FILE = 'garden-v1.json';
 const ACCOUNT = 'home-account';
@@ -217,8 +219,12 @@ describe('applyRedirectOwedSave', () => {
       expect(outcome.preservedAs).toContain(CONFLICT_NAME);
       expect(outcome.message).toContain(CONFLICT_NAME);
       expect(outcome.message).toContain('/Garden Survey/');
+      expect(outcome.preservedRevision).toBe(gardenRevision(storage));
     }
-    expect(readOwedGardenSave(storage)).toBeNull();
+    // The UI clears the owed flag when it replaces the garden, in the same turn.
+    expect(readOwedGardenSave(storage)).not.toBeNull();
+    expect(readOwedGardenSave(storage)?.baseETag).toBe('"v1"');
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('');
   });
 
   it('Cancel at a 412 writes nothing further and adopts nothing', async () => {
@@ -896,8 +902,7 @@ describe('conflict copy stays current', () => {
     expect(conflicts[0]?.body.photos[0]?.id).toBe('ph-roll');
     expect(conflicts[0]?.body.photos[0]?.originalFile?.uploadStatus).toBe('uploading');
     expect(conflicts[0]?.body.photos[0]?.originalFile?.fileName).toBe('ph-roll.jpg');
-    // Adopting the remote does not delete photos/manifest.json. The upload queue keeps the original.
-    expect(remote.events.some((event) => event.includes('manifest'))).toBe(false);
+    // Adopting may read photos/manifest.json for deletedAt. It must not write or delete that file.
     expect(remote.puts.some((put) => put.fileName.includes('manifest'))).toBe(false);
   });
 
@@ -945,7 +950,11 @@ describe('conflict copy stays current', () => {
     ]);
     expect(conflicts[1]?.body.name).toBe('Added during upload');
     expect(conflicts[1]?.body.points.map((point) => point.id)).toEqual(['HSE01', 'HSE02']);
-    expect(gardenIsDirty(storage)).toBe(false);
+    if (outcome.ok && !outcome.wrote) expect(outcome.preservedRevision).toBe(gardenRevision(storage));
+    // Dirty and the base eTag stay until the UI replaces the garden.
+    expect(gardenIsDirty(storage)).toBe(true);
+    expect(rememberedDriveETag(ACCOUNT, FILE, storage)).toBe('');
+    expect(remote.events.some((event) => event.includes('manifest') || event.includes('deleted'))).toBe(false);
   });
 
   it('does not adopt when the garden is still changing after the conflict copy is retried', async () => {
@@ -1033,6 +1042,254 @@ describe('save generation and in-memory revision', () => {
     expect(noteLocalGardenEdit(storage)).toBe(2);
     expect(gardenRevision(storage)).toBe(2);
     expect(gardenIsDirty(storage)).toBe(true);
+  });
+});
+
+describe('conflict prompt and local-only photos', () => {
+  it('does not hold the save lock while the conflict prompt is open, then re-checks the eTag', async () => {
+    const storage = memoryStorage();
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    let depth = 0;
+    let depthAtPrompt = -1;
+    let depthAtConflictPut = -1;
+    const outcome = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'This browser'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      usingLock: async (fn) => {
+        depth += 1;
+        try {
+          return await fn();
+        } finally {
+          depth -= 1;
+        }
+      },
+      fetchImpl: async (input, init) => {
+        const method = init?.method ?? 'GET';
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (method === 'PUT' && url.includes('garden-conflict')) depthAtConflictPut = depth;
+        return remote.fetchImpl(input, init);
+      },
+      choose: async () => {
+        depthAtPrompt = depth;
+        return 'remote';
+      },
+    });
+    expect(depthAtPrompt).toBe(0);
+    expect(depthAtConflictPut).toBe(1);
+    expect(depth).toBe(0);
+    expect(outcome.ok && !outcome.wrote).toBe(true);
+  });
+
+  it('asks again when OneDrive changes while the prompt is open, and adopts the newer copy', async () => {
+    const storage = memoryStorage();
+    const first = garden(IPAD_AT, 'First remote');
+    const moved = garden(REMOTE_NEWER, 'Moved remote');
+    const remote = graph({
+      remotes: [first, moved, moved],
+      etags: ['"v2"', '"v3"', '"v3"'],
+    });
+    const seen: string[] = [];
+    const outcome = await commitGardenSave({
+      doc: garden(LOCAL_AT, 'This browser'),
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      fetchImpl: remote.fetchImpl,
+      choose: async (choice) => {
+        seen.push(choice.remoteETag);
+        return 'remote';
+      },
+    });
+    expect(seen).toEqual(['"v2"', '"v3"']);
+    expect(outcome.ok && !outcome.wrote && outcome.kept === 'remote').toBe(true);
+    if (outcome.ok && !outcome.wrote) {
+      expect(outcome.doc.name).toBe('Moved remote');
+      expect(outcome.eTag).toBe('"v3"');
+    }
+    expect(remote.puts.filter((put) => put.fileName.startsWith('garden-conflict'))).toHaveLength(1);
+  });
+
+  it('reports photos that exist only in the filed local copy', async () => {
+    const storage = memoryStorage();
+    const local = garden(LOCAL_AT, 'With a roll');
+    local.photos = [uploadingPhoto('ph-roll')];
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    const outcome = await commitGardenSave({
+      doc: local,
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      fetchImpl: remote.fetchImpl,
+      choose: async () => 'remote',
+    });
+    expect(outcome.ok && !outcome.wrote).toBe(true);
+    if (outcome.ok && !outcome.wrote) {
+      expect(outcome.localOnlyPhotos.map((photo) => photo.id)).toEqual(['ph-roll']);
+      expect(outcome.localOnlyPhotos[0]?.originalFile?.uploadStatus).toBe('uploading');
+      expect(outcome.localOnlyPhotos[0]?.originalFile?.fileName).toBe('ph-roll.jpg');
+    }
+    const filed = remote.puts.find((put) => put.fileName.startsWith('garden-conflict'));
+    expect(filed?.body.photos[0]?.id).toBe('ph-roll');
+    expect(remote.puts.some((put) => put.fileName.includes('manifest'))).toBe(false);
+  });
+
+  it('leaves out photos recorded as deleted in the manifest or photos/deleted/', async () => {
+    const storage = memoryStorage();
+    const local = garden(LOCAL_AT, 'With rolls');
+    local.photos = [uploadingPhoto('ph-dead'), uploadingPhoto('ph-moved'), uploadingPhoto('ph-roll')];
+    const remoteGarden = garden(IPAD_AT, 'OneDrive copy');
+    const remote = graph({ remotes: [remoteGarden], etags: ['"v9"'] });
+    const left = photosOnlyInLocal(local, remoteGarden, {
+      photoIds: ['ph-dead'],
+      fileNames: ['ph-moved.jpg'],
+    });
+    expect(left.map((photo) => photo.id)).toEqual(['ph-roll']);
+
+    const outcome = await commitGardenSave({
+      doc: local,
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      choose: async () => 'remote',
+      fetchImpl: async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.includes('photos/manifest.json') && url.includes('$select=')) {
+          return json(200, {
+            eTag: '"manifest"',
+            '@microsoft.graph.downloadUrl': 'https://download.example/manifest',
+          });
+        }
+        if (url === 'https://download.example/manifest') {
+          return json(200, {
+            version: 1,
+            updatedAt: '2026-10-03T12:00:00.000Z',
+            photos: [{ photoId: 'ph-dead', fileName: 'ph-dead.jpg', deletedAt: '2026-10-03T12:00:00.000Z' }],
+          });
+        }
+        if (url.includes('/photos/deleted') && url.includes('children')) {
+          return json(200, { value: [{ name: 'ph-moved.jpg' }] });
+        }
+        return remote.fetchImpl(input, init);
+      },
+    });
+    expect(outcome.ok && !outcome.wrote).toBe(true);
+    if (outcome.ok && !outcome.wrote) {
+      expect(outcome.localOnlyPhotos.map((photo) => photo.id)).toEqual(['ph-roll']);
+    }
+    const filed = remote.puts.find((put) => put.fileName.startsWith('garden-conflict'));
+    expect(filed?.body.photos.map((photo) => photo.id)).toEqual(['ph-dead', 'ph-moved', 'ph-roll']);
+    expect(remote.puts.some((put) => put.fileName.includes('manifest'))).toBe(false);
+  });
+
+  it('keeps an edit made while deleted photos are being listed', async () => {
+    const storage = memoryStorage();
+    noteLocalGardenEdit(storage);
+    let live = garden(LOCAL_AT, 'Before lookup');
+    // A local-only photo is what makes the deleted-photo lookup run.
+    live.photos = [uploadingPhoto('ph-roll')];
+    const remote = graph({
+      remotes: [garden(IPAD_AT, 'OneDrive copy')],
+      etags: ['"v9"'],
+    });
+    const order: string[] = [];
+    const outcome = await commitGardenSave({
+      doc: live,
+      fileName: FILE,
+      token: 'tok',
+      ifMatch: '"v1"',
+      account: ACCOUNT,
+      storage,
+      now: () => CONFLICT_AT,
+      readLocal: () => ({ doc: live, dirty: true, revision: gardenRevision(storage) }),
+      choose: async () => 'remote',
+      fetchImpl: async (input, init) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        const method = init?.method ?? 'GET';
+        if (url.includes('photos/manifest.json') || url.includes('download.example/manifest')) {
+          order.push('manifest');
+          if (order.filter((step) => step === 'manifest').length === 1) {
+            const next = garden(LOCAL_AT, 'Added during deleted lookup');
+            next.points = [
+              { id: 'HSE01', kind: 'HSE', label: 'Before lookup' },
+              { id: 'HSE02', kind: 'HSE', label: 'Added during deleted lookup' },
+            ];
+            live = next;
+            noteLocalGardenEdit(storage);
+          }
+          if (url.includes('$select=')) {
+            return json(200, {
+              eTag: '"manifest"',
+              '@microsoft.graph.downloadUrl': 'https://download.example/manifest',
+            });
+          }
+          return json(200, { version: 1, updatedAt: '', photos: [] });
+        }
+        if (url.includes('/photos/deleted') && url.includes('children')) {
+          order.push('deleted');
+          return json(200, { value: [] });
+        }
+        if (method === 'PUT' && url.includes('garden-conflict')) order.push('conflict');
+        return remote.fetchImpl(input, init);
+      },
+    });
+    expect(order.indexOf('manifest')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('conflict')).toBeGreaterThan(order.indexOf('manifest'));
+    expect(order.indexOf('deleted')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('conflict')).toBeGreaterThan(order.indexOf('deleted'));
+    const conflicts = remote.puts.filter((put) => put.fileName.startsWith('garden-conflict'));
+    const filed = conflicts.some((put) => put.body.points.some((point) => point.id === 'HSE02'));
+    const aborted = !outcome.ok && outcome.cancelled === true && live.points.some((point) => point.id === 'HSE02');
+    expect(filed || aborted).toBe(true);
+    if (outcome.ok && !outcome.wrote) {
+      expect(filed).toBe(true);
+      expect(conflicts.at(-1)?.body.points.map((point) => point.id)).toContain('HSE02');
+    } else {
+      expect(gardenIsDirty(storage)).toBe(true);
+      expect(rememberedDriveETag(ACCOUNT, FILE, storage)).not.toBe('"v9"');
+    }
+  });
+
+  it('reads every page of photos/deleted', async () => {
+    const keys = await loadDeletedPhotoKeys({
+      client: {
+        token: 'tok',
+        fetch: async (input) => {
+          const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+          if (url.includes('manifest')) return json(404, {});
+          if (url.includes('children')) {
+            return json(200, {
+              value: [{ name: 'page-one.jpg' }],
+              '@odata.nextLink': 'https://graph.example/deleted?page=2',
+            });
+          }
+          if (url.includes('page=2')) return json(200, { value: [{ name: 'page-two.jpg' }] });
+          return json(404, {});
+        },
+      },
+      manifestPath: 'Garden Survey/photos/manifest.json',
+      deletedFolderPath: 'Garden Survey/photos/deleted',
+    });
+    expect(keys.fileNames).toEqual(['page-one.jpg', 'page-two.jpg']);
   });
 });
 

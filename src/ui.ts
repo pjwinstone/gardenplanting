@@ -1,6 +1,6 @@
 /** Main UI: plan-first layout, hamburger drawer, print tags. Calls toolbox + workflows. */
 
-import type { GardenDocument, Photo } from './model';
+import type { GardenDocument, Photo, Point } from './model';
 import {
   confirmAbTogether,
   baselineReady,
@@ -125,9 +125,12 @@ import {
   clearGardenDirty,
   gardenIsDirty,
   gardenRevision,
+  markGardenDirty,
   noteLocalGardenEdit,
   noteRemoteGardenApplied,
+  photosWithoutPointsNote,
   reconcileGardenOnLoad,
+  reattachPhotosPrompt,
   rememberedDriveETag,
   rememberDriveETag,
   type GardenCopyChoice,
@@ -1353,16 +1356,137 @@ function downloadConflictCopy(doc: GardenDocument, fileName: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-function adoptRemoteGarden(doc: GardenDocument, fileName: string, eTag?: string): void {
+function adoptRemoteGarden(
+  doc: GardenDocument,
+  fileName: string,
+  eTag?: string,
+  localOnlyPhotos: Photo[] = [],
+  preservedAs?: string,
+  preservedRevision?: number,
+): boolean {
+  // Web Locks resolve in a later task, so an edit can land after the lock
+  // returns and before this runs. The revision check, the dirty clear, the
+  // eTag store, and the replacement are one synchronous block. Nothing above
+  // has cleared dirty or stored this eTag.
+  if (preservedRevision !== undefined && gardenRevision() !== preservedRevision) {
+    noteOwedGardenSave(state.doc);
+    setCloudMessage(
+      'This browser changed while OneDrive was being adopted. Nothing was replaced. Tap Save to retry.',
+    );
+    return false;
+  }
   // In-flight saves that finish after this must not store their eTag or clear dirty.
   // Photo rows whose originals are still uploading stay in the conflict copy
   // (filed before adopt). This replace does not delete photos/manifest.json entries.
+  const localPoints = state.doc.points;
   noteRemoteGardenApplied();
   const account = accountKey() ?? '';
   if (eTag) rememberDriveETag(account, fileName, eTag);
+  clearGardenSaveOwed();
   setGardenCloudFileName(fileName);
   notifyCloudPrefsChanged();
   setState({ doc, refuseMessage: null }, { fromRemote: true });
+  offerReattachLocalPhotos(localOnlyPhotos, preservedAs, localPoints);
+  return true;
+}
+
+/**
+ * Thumbnails and the point inspector read `point.photoIds`, then the photo row.
+ * A photo that is only in `doc.photos` does not show up.
+ */
+export function photosOnPoint(doc: GardenDocument, pointId: string | undefined): Photo[] {
+  const point = pointId ? doc.points.find((p) => p.id === pointId) : undefined;
+  return (point?.photoIds ?? [])
+    .map((id) => doc.photos.find((photo) => photo.id === id))
+    .filter((photo): photo is Photo => Boolean(photo));
+}
+
+/**
+ * Put local-only photos back on the point they belong to. The original bytes stay
+ * in the upload queue, and photos/manifest.json is not rewritten or deleted.
+ * A point that the OneDrive garden does not have is not recreated; that photo
+ * stays only in the conflict copy.
+ */
+function offerReattachLocalPhotos(photos: Photo[], preservedAs?: string, localPoints: Point[] = []): void {
+  if (photos.length === 0) return;
+  const pointIds = new Set(state.doc.points.map((point) => point.id));
+  const attachable: Photo[] = [];
+  const skipped: Photo[] = [];
+  const seen = new Set<string>();
+  for (const photo of photos) {
+    if (seen.has(photo.id)) continue;
+    seen.add(photo.id);
+    const pointId = reattachPointId(state.doc, localPoints, photo);
+    if (pointId && pointIds.has(pointId)) attachable.push(photo);
+    else skipped.push(photo);
+  }
+  const notes: string[] = [];
+  if (attachable.length > 0) notes.push(reattachPhotosPrompt(attachable.length));
+  if (skipped.length > 0) notes.push(photosWithoutPointsNote(skipped.length, conflictCopyName(preservedAs)));
+  const text = notes.join('\n\n');
+  if (attachable.length === 0) {
+    window.alert(text);
+    return;
+  }
+  if (!window.confirm(text)) return;
+  const doc = applyReattachedPhotos(state.doc, attachable, localPoints);
+  if (doc !== state.doc) setDoc(doc);
+}
+
+/**
+ * `addPointId` when the photo has one. Otherwise the local point that already
+ * lists this photo, if that point is still on the adopted garden.
+ */
+function reattachPointId(adopted: GardenDocument, localPoints: Point[], photo: Photo): string | undefined {
+  if (photo.addPointId) return photo.addPointId;
+  const fromLocal = localPoints.find((point) => (point.photoIds ?? []).includes(photo.id));
+  if (fromLocal && adopted.points.some((point) => point.id === fromLocal.id)) return fromLocal.id;
+  return adopted.points.find((point) => (point.photoIds ?? []).includes(photo.id))?.id;
+}
+
+function conflictCopyName(preservedAs?: string): string {
+  const trimmed = preservedAs?.trim();
+  if (!trimmed) return 'the conflict copy';
+  return trimmed.split('/').pop() || trimmed;
+}
+
+function applyReattachedPhotos(doc: GardenDocument, photos: Photo[], localPoints: Point[]): GardenDocument {
+  const have = new Set(doc.photos.map((photo) => photo.id));
+  const added: Photo[] = [];
+  for (const photo of photos) {
+    if (have.has(photo.id)) continue;
+    have.add(photo.id);
+    added.push(photo);
+  }
+  const idsByPoint = new Map<string, string[]>();
+  for (const photo of photos) {
+    const pointId = reattachPointId(doc, localPoints, photo);
+    if (!pointId) continue;
+    const list = idsByPoint.get(pointId) ?? [];
+    if (!list.includes(photo.id)) list.push(photo.id);
+    idsByPoint.set(pointId, list);
+  }
+  let pointsChanged = false;
+  const points = doc.points.map((point) => {
+    const extra = idsByPoint.get(point.id);
+    if (!extra?.length) return point;
+    const photoIds = [...(point.photoIds ?? [])];
+    let grew = false;
+    for (const id of extra) {
+      if (photoIds.includes(id)) continue;
+      photoIds.push(id);
+      grew = true;
+    }
+    if (!grew) return point;
+    pointsChanged = true;
+    return { ...point, photoIds };
+  });
+  if (added.length === 0 && !pointsChanged) return doc;
+  return {
+    ...doc,
+    photos: added.length > 0 ? [...doc.photos, ...added] : doc.photos,
+    points,
+  };
 }
 
 /** Vitest seam. Adopting OneDrive must set the eTag, clear dirty, and not schedule a save. */
@@ -1370,8 +1494,15 @@ export const gardenCloudUiForTests = {
   edit(doc: GardenDocument): void {
     setDoc(doc, null);
   },
-  adopt(doc: GardenDocument, fileName: string, eTag?: string): void {
-    adoptRemoteGarden(doc, fileName, eTag);
+  adopt(
+    doc: GardenDocument,
+    fileName: string,
+    eTag?: string,
+    localOnlyPhotos?: Photo[],
+    preservedAs?: string,
+    preservedRevision?: number,
+  ): boolean {
+    return adoptRemoteGarden(doc, fileName, eTag, localOnlyPhotos, preservedAs, preservedRevision);
   },
   saveScheduled(): boolean {
     return cloudSaveTimer !== null;
@@ -1382,9 +1513,26 @@ export const gardenCloudUiForTests = {
   saveNow(): Promise<void> {
     return onOneDriveSave();
   },
+  loadNow(fileName?: string): Promise<void> {
+    return onOneDriveLoad(fileName);
+  },
+  afterSignIn(): Promise<void> {
+    return restoreFromOneDriveAfterSignIn();
+  },
 };
 
 const GARDEN_SAVE_LOCK = 'garden-survey-save';
+const GARDEN_SAVE_LOCK_MS = 30_000;
+const SAVE_LOCK_BUSY = 'Another tab is busy — tap Save to retry';
+const LOAD_LOCK_BUSY = 'Another tab is busy — tap Load to retry';
+
+/** The other tab still holds the save lock. The message says which button to retry. */
+class GardenSaveLockTimeout extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GardenSaveLockTimeout';
+  }
+}
 
 type PendingSave = {
   prompt: 'auto' | 'user';
@@ -1393,13 +1541,18 @@ type PendingSave = {
   manual?: boolean;
 };
 
-/** One garden save at a time. A second request waits and then saves the latest document. */
-let saveInFlight: Promise<void> | null = null;
-let savePending: PendingSave | null = null;
-let savePendingDone: Array<() => void> = [];
+type GardenQueueSlot = {
+  kind: 'save' | 'task';
+  save?: PendingSave;
+  run: () => Promise<void>;
+  waiters: Array<() => void>;
+};
 
-function coalesceSave(prev: PendingSave | null, next: PendingSave): PendingSave {
-  if (!prev) return next;
+/** One garden save, load, or sign-in at a time. A second save waits and then writes the latest document. */
+let gardenQueueRunning = false;
+const gardenQueue: GardenQueueSlot[] = [];
+
+function coalesceSave(prev: PendingSave, next: PendingSave): PendingSave {
   const prompt = prev.prompt === 'user' || next.prompt === 'user' ? 'user' : 'auto';
   return {
     prompt,
@@ -1409,42 +1562,132 @@ function coalesceSave(prev: PendingSave | null, next: PendingSave): PendingSave 
   };
 }
 
-function enqueueGardenSave(job: PendingSave): Promise<void> {
-  if (saveInFlight) {
-    savePending = coalesceSave(savePending, job);
-    return new Promise((resolve) => {
-      savePendingDone.push(resolve);
-    });
-  }
-  let resolveRun!: () => void;
-  const run = new Promise<void>((resolve) => {
-    resolveRun = resolve;
-  });
-  saveInFlight = run;
+function drainGardenQueue(): void {
+  if (gardenQueueRunning) return;
+  const slot = gardenQueue.shift();
+  if (!slot) return;
+  gardenQueueRunning = true;
   void (async () => {
     try {
-      await withGardenSaveLock(() => executeGardenSave(job));
+      await slot.run();
+    } catch (err) {
+      // A lock timeout already set its own message. Any other failure must
+      // not escape this runner: nothing awaits it, so a throw is unhandled.
+      if (!(err instanceof GardenSaveLockTimeout)) reportQueueFailure(slot.kind, err);
     } finally {
-      saveInFlight = null;
-      resolveRun();
-      const next = savePending;
-      const waiters = savePendingDone;
-      savePending = null;
-      savePendingDone = [];
-      if (next) {
-        const chained = enqueueGardenSave(next);
-        for (const done of waiters) void chained.then(done);
-      }
+      gardenQueueRunning = false;
+      for (const done of slot.waiters) done();
+      drainGardenQueue();
     }
   })();
-  return run;
 }
 
-async function withGardenSaveLock<T>(fn: () => Promise<T>): Promise<T> {
+function shortFailureReason(err: unknown): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  const reason = raw.replace(/\s+/g, ' ').trim() || 'unknown error';
+  return reason.length > 160 ? `${reason.slice(0, 157)}…` : reason;
+}
+
+/** A thrown save stays dirty and owed. A thrown load leaves dirty and owed as they were. */
+function reportQueueFailure(kind: 'save' | 'task', err: unknown): void {
+  const reason = shortFailureReason(err);
+  if (kind === 'save') {
+    markGardenDirty();
+    noteOwedGardenSave(state.doc);
+    setCloudMessage(`Save failed: ${reason}`);
+  } else {
+    setCloudMessage(`Load failed: ${reason}`);
+  }
+  setCloudBusy(false);
+}
+
+function enqueueGardenSave(job: PendingSave): Promise<void> {
+  return new Promise((resolve) => {
+    const last = gardenQueue[gardenQueue.length - 1];
+    if (last?.kind === 'save' && last.save) {
+      last.save = coalesceSave(last.save, job);
+      last.waiters.push(resolve);
+      return;
+    }
+    const slot: GardenQueueSlot = {
+      kind: 'save',
+      save: job,
+      waiters: [resolve],
+      run: () => executeGardenSave(slot.save!),
+    };
+    gardenQueue.push(slot);
+    drainGardenQueue();
+  });
+}
+
+function enqueueGardenTask(run: () => Promise<void>): Promise<void> {
+  return new Promise((resolve) => {
+    gardenQueue.push({ kind: 'task', run, waiters: [resolve] });
+    drainGardenQueue();
+  });
+}
+
+/** Abort a lock that is still waiting. Ignored once the lock is granted. */
+function saveLockSignal(ms: number): { signal: AbortSignal; cancel: () => void } | undefined {
+  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    return { signal: AbortSignal.timeout(ms), cancel: () => {} };
+  }
+  if (typeof AbortController === 'undefined') return undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  const handle = timer as { unref?: () => void };
+  handle.unref?.();
+  let cleared = false;
+  const cancel = (): void => {
+    if (cleared) return;
+    cleared = true;
+    clearTimeout(timer);
+  };
+  controller.signal.addEventListener('abort', cancel, { once: true });
+  return { signal: controller.signal, cancel };
+}
+
+function isLockWaitAbort(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const name = (err as { name?: string }).name;
+  return name === 'AbortError' || name === 'TimeoutError';
+}
+
+async function withGardenSaveLock<T>(fn: () => Promise<T>, purpose: 'save' | 'load' = 'save'): Promise<T> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   if (!locks?.request) return fn();
-  // Not taken inside commitGardenSave — navigator.locks is not reentrant.
-  return locks.request(GARDEN_SAVE_LOCK, () => fn()) as Promise<T>;
+  let waiting = false;
+  if (locks.query) {
+    const snapshot = await locks.query();
+    const named = [...(snapshot.held ?? []), ...(snapshot.pending ?? [])];
+    waiting = named.some((lock) => lock.name === GARDEN_SAVE_LOCK);
+  }
+  const previous = getCloudStatus().message;
+  if (waiting) setCloudMessage('Waiting for another tab…');
+  const abort = saveLockSignal(GARDEN_SAVE_LOCK_MS);
+  // Released when fn returns. The conflict prompt is not inside fn.
+  const run = async (): Promise<T> => {
+    abort?.cancel();
+    if (waiting) setCloudMessage(previous || 'Saving…');
+    return fn();
+  };
+  try {
+    if (abort) {
+      return (await locks.request(GARDEN_SAVE_LOCK, { signal: abort.signal }, run)) as T;
+    }
+    return (await locks.request(GARDEN_SAVE_LOCK, run)) as T;
+  } catch (err) {
+    abort?.cancel();
+    if (!isLockWaitAbort(err)) throw err;
+    const load = purpose === 'load';
+    setCloudMessage(load ? LOAD_LOCK_BUSY : SAVE_LOCK_BUSY);
+    if (!load) {
+      markGardenDirty();
+      noteOwedGardenSave(state.doc);
+    }
+    setCloudBusy(false);
+    throw new GardenSaveLockTimeout(load ? LOAD_LOCK_BUSY : SAVE_LOCK_BUSY);
+  }
 }
 
 function quietCloudSave(
@@ -1508,6 +1751,7 @@ async function executeGardenSave(job: PendingSave): Promise<void> {
     prompt: job.prompt,
     downloadLocal: downloadConflictCopy,
     readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
+    usingLock: withGardenSaveLock,
   });
   if (result.ok && result.wrote) {
     if (result.superseded) return;
@@ -1531,8 +1775,15 @@ async function executeGardenSave(job: PendingSave): Promise<void> {
     return;
   }
   if (result.ok && !result.wrote) {
-    clearGardenSaveOwed();
-    adoptRemoteGarden(result.doc, result.fileName, result.eTag);
+    const replaced = adoptRemoteGarden(
+      result.doc,
+      result.fileName,
+      result.eTag,
+      result.localOnlyPhotos,
+      result.preservedAs,
+      result.preservedRevision,
+    );
+    if (!replaced) return;
     setCloudMessage(result.message);
     if (job.manual) void refreshGardenFileList();
     return;
@@ -1628,6 +1879,11 @@ export function applyAuthReady(init: AuthInitResult): void {
 async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   if (!isSignedIn()) return;
   await resumePhotoUploads();
+  await enqueueGardenTask(() => restoreGardenAfterSignIn());
+}
+
+async function restoreGardenAfterSignIn(): Promise<void> {
+  if (!isSignedIn()) return;
   const account = accountKey() ?? '';
   const preferred = getGardenCloudFileName();
   const auth = await silentGraphToken();
@@ -1655,6 +1911,7 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
       choose: askWhichGardenCopy,
       downloadLocal: downloadConflictCopy,
       readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
+      usingLock: withGardenSaveLock,
     });
     setCloudBusy(false);
     void refreshGardenFileList();
@@ -1667,7 +1924,15 @@ async function restoreFromOneDriveAfterSignIn(): Promise<void> {
       return;
     }
     if (outcome.kind === 'kept-remote') {
-      adoptRemoteGarden(outcome.doc, outcome.fileName, outcome.eTag);
+      const replaced = adoptRemoteGarden(
+        outcome.doc,
+        outcome.fileName,
+        outcome.eTag,
+        outcome.localOnlyPhotos,
+        outcome.preservedAs,
+        outcome.preservedRevision,
+      );
+      if (!replaced) return;
       setCloudMessage(outcome.message);
       return;
     }
@@ -1699,6 +1964,7 @@ function reconcileOpenGarden(fileName: string, token: string, account: string): 
     downloadLocal: downloadConflictCopy,
     prompt: 'user',
     readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
+    usingLock: (fn) => withGardenSaveLock(fn, 'load'),
   });
 }
 
@@ -2081,11 +2347,11 @@ async function onShellClick(e: Event): Promise<void> {
     const pt = state.doc.points.find((p) => p.id === pointId);
     if (!pt) return;
     // Seed sticky panel from this point's measurement history
+    const onPoint = photosOnPoint(state.doc, pointId);
     const seedPhoto =
-      state.doc.session.selectedPhotoId &&
-      (pt.photoIds ?? []).includes(state.doc.session.selectedPhotoId)
+      state.doc.session.selectedPhotoId && onPoint.some((photo) => photo.id === state.doc.session.selectedPhotoId)
         ? state.doc.session.selectedPhotoId
-        : pt.photoIds?.[pt.photoIds.length - 1];
+        : onPoint[onPoint.length - 1]?.id;
     let doc = {
       ...state.doc,
       session: {
@@ -2486,11 +2752,22 @@ async function onOneDriveSave(): Promise<void> {
 
 async function onOneDriveLoad(fileName?: string): Promise<void> {
   const target = fileName || getGardenCloudFileName();
+  if (!isSignedIn()) {
+    setCloudMessage('Sign in to save.');
+    return;
+  }
   setCloudBusy(true);
   setCloudMessage(`Loading ${target} from OneDrive…`);
+  try {
+    await enqueueGardenTask(() => runGardenLoad(target));
+  } finally {
+    setCloudBusy(false);
+  }
+}
+
+async function runGardenLoad(target: string): Promise<void> {
   const auth = await silentGraphToken();
   if (!auth.ok) {
-    setCloudBusy(false);
     if (auth.interactionRequired) {
       noteOwedGardenSave(state.doc);
       notePhotoSignIn(true);
@@ -2501,14 +2778,21 @@ async function onOneDriveLoad(fileName?: string): Promise<void> {
     return;
   }
   const decision = await reconcileOpenGarden(target, auth.token, accountKey() ?? '');
-  setCloudBusy(false);
   void refreshGardenFileList();
   applyLoadedGarden(decision, 'load');
 }
 
 function applyLoadedGarden(decision: GardenReconcileResult, source: 'sign-in' | 'load'): void {
   if (decision.kind === 'adopted' || decision.kind === 'kept-remote') {
-    adoptRemoteGarden(decision.doc, decision.fileName, decision.eTag);
+    const replaced = adoptRemoteGarden(
+      decision.doc,
+      decision.fileName,
+      decision.eTag,
+      decision.kind === 'kept-remote' ? decision.localOnlyPhotos : [],
+      decision.kind === 'kept-remote' ? decision.preservedAs : undefined,
+      decision.kind === 'kept-remote' ? decision.preservedRevision : undefined,
+    );
+    if (!replaced) return;
     if (decision.kind === 'adopted') {
       const via = loadFallbackNote(decision);
       setCloudMessage(
@@ -3859,9 +4143,7 @@ function buildPointDialog(doc: GardenDocument, mode: 'add' | 'inspect'): HTMLEle
     (doc.session.currentAddPointId
       ? doc.points.find((p) => p.id === doc.session.currentAddPointId)
       : undefined);
-  const pointPhotos = (thumbPoint?.photoIds ?? [])
-    .map((id) => doc.photos.find((p) => p.id === id))
-    .filter(Boolean);
+  const pointPhotos = photosOnPoint(doc, thumbPoint?.id);
   const selectedPhotoId =
     (doc.session.selectedPhotoId &&
     pointPhotos.some((p) => p!.id === doc.session.selectedPhotoId)

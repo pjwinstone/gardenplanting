@@ -1,10 +1,12 @@
 import type { AuthenticationResult } from '@azure/msal-browser';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getGardenCloudFileName } from '../src/cloudConfig';
+import { getCloudStatus } from '../src/cloudStatus';
 import { gardenIsDirty, gardenRevision, rememberDriveETag, rememberedDriveETag } from '../src/gardenCloudSave';
+import { gardenSaveIsOwed } from '../src/cloudSignIn';
 import { setGraphTokenClientForTests } from '../src/msalAuth';
-import { emptyDocument, type GardenDocument } from '../src/model';
-import { gardenCloudUiForTests, getState } from '../src/ui';
+import { emptyDocument, type GardenDocument, type Photo } from '../src/model';
+import { gardenCloudUiForTests, getState, photosOnPoint } from '../src/ui';
 
 const authFlag = vi.hoisted(() => ({ signedIn: false }));
 
@@ -154,7 +156,13 @@ describe('adopt remote garden', () => {
     let lockEntries = 0;
     vi.stubGlobal('navigator', {
       locks: {
-        request: async (_name: string, callback: () => Promise<void>) => {
+        request: async (
+          _name: string,
+          optionsOrCallback: { signal?: AbortSignal } | (() => Promise<unknown>),
+          maybeCallback?: () => Promise<unknown>,
+        ) => {
+          const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+          if (!callback) throw new Error('lock request needs a callback');
           lockEntries += 1;
           inLock += 1;
           maxInLock = Math.max(maxInLock, inLock);
@@ -245,4 +253,475 @@ describe('adopt remote garden', () => {
     expect(rememberedDriveETag('home-account', getGardenCloudFileName())).toBe('"E2"');
     expect(getState().doc.name).toBe('Typed while the first save was uploading');
   });
+
+  it('runs Load after an in-flight save so the save keeps its eTag', async () => {
+    const result = await followInFlightSave(() => gardenCloudUiForTests.loadNow());
+    expect(result.getsWhileSaving).toBe(0);
+    expect(result.asked).toBe(false);
+    expect(result.ifMatches).toEqual(['"E0"', '"E1"']);
+    expect(rememberedDriveETag('home-account', getGardenCloudFileName())).toBe('"E2"');
+  });
+
+  it('runs sign-in after an in-flight save so the save keeps its eTag', async () => {
+    const result = await followInFlightSave(() => gardenCloudUiForTests.afterSignIn());
+    expect(result.getsWhileSaving).toBe(0);
+    expect(result.asked).toBe(false);
+    expect(result.ifMatches).toEqual(['"E0"', '"E1"']);
+  });
+
+  it('says it is waiting for another tab while that tab holds the save lock', async () => {
+    const seen: Array<string | null> = [];
+    vi.stubGlobal('navigator', {
+      locks: {
+        query: async () => ({ held: [{ name: 'garden-survey-save', mode: 'exclusive' as const }], pending: [] }),
+        request: async (
+          _name: string,
+          optionsOrCallback: { signal?: AbortSignal } | (() => Promise<void>),
+          maybeCallback?: () => Promise<void>,
+        ) => {
+          const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+          seen.push(getCloudStatus().message);
+          return callback?.();
+        },
+      },
+    });
+    authFlag.signedIn = false;
+    gardenCloudUiForTests.edit(namedGarden('Wait'));
+    authFlag.signedIn = true;
+    await gardenCloudUiForTests.saveNow();
+    expect(seen[0]).toBe('Waiting for another tab…');
+  });
+
+  it('re-attaches a photo onto the point the thumbnails read', () => {
+    let prompt = '';
+    vi.stubGlobal('window', {
+      confirm: (text: string) => {
+        prompt = text;
+        return true;
+      },
+    });
+    const remote = namedGarden('Remote');
+    remote.points[0] = { ...remote.points[0]!, photoIds: ['ph-old'] };
+    remote.photos = [pointPhoto('ph-old', 'HSE01', 'data:image/jpeg;base64,old')];
+    const added = pointPhoto('ph-roll', 'HSE01', 'data:image/jpeg;base64,roll');
+    gardenCloudUiForTests.adopt(remote, 'garden-v1.json', '"v9"', [added, added]);
+    expect(prompt).toBe(
+      "1 photo from this device isn't in the OneDrive version (it may have been deleted on another device). Re-attach it?",
+    );
+    expect(getState().doc.name).toBe('Remote');
+    expect(getState().doc.points.find((point) => point.id === 'HSE01')?.photoIds).toEqual(['ph-old', 'ph-roll']);
+    expect(getState().doc.photos.map((photo) => photo.id)).toEqual(['ph-old', 'ph-roll']);
+    const shown = photosOnPoint(getState().doc, 'HSE01');
+    expect(shown.map((photo) => photo.id)).toEqual(['ph-old', 'ph-roll']);
+    expect(shown[1]?.thumbnailDataUrl).toBe('data:image/jpeg;base64,roll');
+    expect(getState().doc.photos[1]?.originalFile?.uploadStatus).toBe('uploading');
+    expect(gardenIsDirty()).toBe(true);
+    expect(fetches).toBe(0);
+  });
+
+  it('skips a photo whose point is not in the OneDrive garden and says where it was kept', () => {
+    let alerted = '';
+    let confirmed = false;
+    vi.stubGlobal('window', {
+      alert: (text: string) => {
+        alerted = text;
+      },
+      confirm: () => {
+        confirmed = true;
+        return true;
+      },
+    });
+    const conflict = '/Garden Survey/garden-conflict-2026-10-03T10-00-00.000Z.json';
+    gardenCloudUiForTests.adopt(
+      namedGarden('Remote'),
+      'garden-v1.json',
+      '"v9"',
+      [pointPhoto('ph-gone', 'HSE99', 'data:image/jpeg;base64,gone'), pointPhoto('ph-also', 'HSE98')],
+      conflict,
+    );
+    expect(confirmed).toBe(false);
+    expect(alerted).toBe(
+      "2 photos belong to points not in the OneDrive version; they're kept in garden-conflict-2026-10-03T10-00-00.000Z.json",
+    );
+    expect(getState().doc.photos).toEqual([]);
+    expect(getState().doc.points.map((point) => point.id)).toEqual(['HSE01']);
+    expect(photosOnPoint(getState().doc, 'HSE99')).toEqual([]);
+    expect(gardenIsDirty()).toBe(false);
+    expect(fetches).toBe(0);
+  });
+
+  it('names skipped photos in the re-attach prompt and does not create their points', () => {
+    let prompt = '';
+    vi.stubGlobal('window', {
+      confirm: (text: string) => {
+        prompt = text;
+        return true;
+      },
+      alert: () => {},
+    });
+    const conflict = '/Garden Survey/garden-conflict-2026-10-03T10-00-00.000Z.json';
+    gardenCloudUiForTests.adopt(
+      namedGarden('Remote'),
+      'garden-v1.json',
+      '"v9"',
+      [
+        pointPhoto('ph-roll', 'HSE01', 'data:image/jpeg;base64,roll'),
+        pointPhoto('ph-gone', 'HSE99'),
+        pointPhoto('ph-also', 'HSE98'),
+      ],
+      conflict,
+    );
+    expect(prompt).toContain(
+      "1 photo from this device isn't in the OneDrive version (it may have been deleted on another device). Re-attach it?",
+    );
+    expect(prompt).toContain(
+      "2 photos belong to points not in the OneDrive version; they're kept in garden-conflict-2026-10-03T10-00-00.000Z.json",
+    );
+    expect(getState().doc.photos.map((photo) => photo.id)).toEqual(['ph-roll']);
+    expect(getState().doc.points.map((point) => point.id)).toEqual(['HSE01']);
+    expect(photosOnPoint(getState().doc, 'HSE01').map((photo) => photo.id)).toEqual(['ph-roll']);
+    expect(photosOnPoint(getState().doc, 'HSE01')[0]?.thumbnailDataUrl).toBe('data:image/jpeg;base64,roll');
+  });
+
+  it('leaves the adopted garden unchanged when re-attach is declined', () => {
+    vi.stubGlobal('window', { confirm: () => false, alert: () => {} });
+    gardenCloudUiForTests.adopt(namedGarden('Remote'), 'garden-v1.json', '"v9"', [
+      pointPhoto('ph-roll', 'HSE01'),
+    ]);
+    expect(getState().doc.photos).toEqual([]);
+    expect(getState().doc.points[0]?.photoIds).toBeUndefined();
+    expect(gardenIsDirty()).toBe(false);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
+    expect(fetches).toBe(0);
+  });
+
+  it('stops waiting for another tab after 30s and keeps the save owed', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => new AbortController().signal);
+    vi.stubGlobal('navigator', {
+      locks: {
+        query: async () => ({ held: [{ name: 'garden-survey-save', mode: 'exclusive' as const }], pending: [] }),
+        request: async (_name: string, options: { signal?: AbortSignal }) => {
+          expect(options.signal).toBeInstanceOf(AbortSignal);
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        },
+      },
+    });
+    try {
+      gardenCloudUiForTests.edit(namedGarden('Busy tab'));
+      await gardenCloudUiForTests.saveNow();
+      expect(timeout).toHaveBeenCalledWith(30_000);
+      expect(getCloudStatus().message).toBe('Another tab is busy — tap Save to retry');
+      expect(getCloudStatus().busy).toBe(false);
+      expect(gardenIsDirty()).toBe(true);
+      expect(gardenSaveIsOwed()).toBe(true);
+      expect(fetches).toBe(0);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('reattaches a photo with no addPointId when the local point already lists it', () => {
+    let prompt = '';
+    vi.stubGlobal('window', {
+      confirm: (text: string) => {
+        prompt = text;
+        return true;
+      },
+      alert: () => {},
+    });
+    const local = namedGarden('Local');
+    local.points[0] = { ...local.points[0]!, photoIds: ['ph-roll'] };
+    gardenCloudUiForTests.edit(local);
+    const photo = { ...uploadingPhoto('ph-roll'), thumbnailDataUrl: 'data:image/jpeg;base64,roll' };
+    gardenCloudUiForTests.adopt(namedGarden('Remote'), 'garden-v1.json', '"v9"', [photo]);
+    expect(prompt).toContain('Re-attach it?');
+    expect(getState().doc.points.find((point) => point.id === 'HSE01')?.photoIds).toEqual(['ph-roll']);
+    expect(photosOnPoint(getState().doc, 'HSE01')[0]?.thumbnailDataUrl).toBe('data:image/jpeg;base64,roll');
+    expect(getState().doc.points.map((point) => point.id)).toEqual(['HSE01']);
+  });
+
+  it('does not dirty a clean garden when Load times out waiting for the lock', async () => {
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async () => {
+          throw new DOMException('The operation was aborted.', 'AbortError');
+        },
+      },
+    });
+    expect(gardenIsDirty()).toBe(false);
+    await gardenCloudUiForTests.loadNow();
+    expect(getCloudStatus().message).toBe('Another tab is busy — tap Load to retry');
+    expect(gardenIsDirty()).toBe(false);
+    expect(gardenSaveIsOwed()).toBe(false);
+    expect(getCloudStatus().busy).toBe(false);
+  });
+
+  it('reports a save failure from the queue and keeps the garden dirty and owed', async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onRejection);
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async () => {
+          throw new Error('disk full');
+        },
+      },
+    });
+    try {
+      gardenCloudUiForTests.edit(namedGarden('Needs a save'));
+      await gardenCloudUiForTests.saveNow();
+      await Promise.resolve();
+      expect(getCloudStatus().message).toBe('Save failed: disk full');
+      expect(gardenIsDirty()).toBe(true);
+      expect(gardenSaveIsOwed()).toBe(true);
+      expect(getCloudStatus().busy).toBe(false);
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  });
+
+  it('reports a load failure from the queue and leaves dirty unchanged', async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => {
+      rejections.push(reason);
+    };
+    process.on('unhandledRejection', onRejection);
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async () => {
+          throw new Error('network down');
+        },
+      },
+    });
+    try {
+      expect(gardenIsDirty()).toBe(false);
+      await gardenCloudUiForTests.loadNow();
+      await Promise.resolve();
+      expect(getCloudStatus().message).toBe('Load failed: network down');
+      expect(gardenIsDirty()).toBe(false);
+      expect(gardenSaveIsOwed()).toBe(false);
+      expect(getCloudStatus().busy).toBe(false);
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onRejection);
+    }
+  });
+
+  it('passes an AbortSignal when AbortSignal.timeout is missing', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
+    Object.defineProperty(AbortSignal, 'timeout', { configurable: true, value: undefined });
+    let sawSignal = false;
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (
+          _name: string,
+          options: { signal?: AbortSignal },
+          callback: () => Promise<void>,
+        ) => {
+          sawSignal = options.signal instanceof AbortSignal;
+          options.signal?.addEventListener('abort', () => {});
+          return callback();
+        },
+      },
+    });
+    try {
+      gardenCloudUiForTests.edit(namedGarden('Fallback signal'));
+      await gardenCloudUiForTests.saveNow();
+      expect(sawSignal).toBe(true);
+    } finally {
+      if (descriptor) Object.defineProperty(AbortSignal, 'timeout', descriptor);
+    }
+  });
+
+  it('keeps an edit made after the save lock resolves and before the garden is replaced', async () => {
+    vi.stubGlobal('window', { confirm: () => true, alert: () => {} });
+    const remoteBody = namedGarden('OneDrive copy');
+    let grants = 0;
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (
+          _name: string,
+          optionsOrCallback: { signal?: AbortSignal } | (() => Promise<unknown>),
+          maybeCallback?: () => Promise<unknown>,
+        ) => {
+          const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+          if (!callback) throw new Error('lock request needs a callback');
+          const result = await callback();
+          grants += 1;
+          // The Web Locks promise resolves in a later task. An edit here is the
+          // input that can land after settle returns and before adopt runs.
+          if (grants === 2) {
+            const edited = namedGarden('Edited after the lock');
+            edited.points = [
+              { id: 'HSE01', kind: 'HSE', label: 'Edited after the lock' },
+              { id: 'HSE02', kind: 'HSE', label: 'Added after the lock' },
+            ];
+            gardenCloudUiForTests.edit(edited);
+          }
+          return result;
+        },
+      },
+    });
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const method = init?.method ?? 'GET';
+      if (method === 'POST') return new Response('', { status: 409 });
+      if (method === 'GET' && url.includes('$select=')) {
+        return new Response(
+          JSON.stringify({
+            eTag: '"v9"',
+            lastModifiedDateTime: remoteBody.updatedAt,
+            '@microsoft.graph.downloadUrl': 'https://download.example/garden',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.startsWith('https://download.example/garden')) {
+        return new Response(JSON.stringify(remoteBody), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (method === 'PUT') {
+        return new Response(JSON.stringify({ eTag: '"filed"' }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json', etag: '"filed"' },
+        });
+      }
+      return new Response(JSON.stringify({ error: { message: 'missing' } }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    const fileName = getGardenCloudFileName();
+    authFlag.signedIn = false;
+    gardenCloudUiForTests.edit(namedGarden('Before save'));
+    authFlag.signedIn = true;
+    rememberDriveETag('home-account', fileName, '"v1"');
+    await gardenCloudUiForTests.saveNow();
+
+    expect(grants).toBe(2);
+    expect(getState().doc.name).toBe('Edited after the lock');
+    expect(getState().doc.points.map((point) => point.id)).toEqual(['HSE01', 'HSE02']);
+    expect(gardenIsDirty()).toBe(true);
+    expect(gardenSaveIsOwed()).toBe(true);
+    expect(rememberedDriveETag('home-account', fileName)).toBe('"v1"');
+    expect(getCloudStatus().message).toBe(
+      'This browser changed while OneDrive was being adopted. Nothing was replaced. Tap Save to retry.',
+    );
+  });
 });
+
+function pointPhoto(id: string, addPointId: string, thumbnailDataUrl?: string): Photo {
+  return { ...uploadingPhoto(id), addPointId, thumbnailDataUrl };
+}
+
+function uploadingPhoto(id: string): Photo {
+  return {
+    id,
+    setupId: 'setup-1',
+    width: 8,
+    height: 8,
+    clicks: [],
+    originalFile: {
+      fileName: `${id}.jpg`,
+      size: 4,
+      quickXorHash: 'hash',
+      uploadStatus: 'uploading',
+    },
+  };
+}
+
+async function followInFlightSave(follow: () => Promise<unknown>): Promise<{
+  ifMatches: Array<string | null>;
+  getsWhileSaving: number;
+  asked: boolean;
+}> {
+  let asked = false;
+  vi.stubGlobal('window', {
+    confirm: () => {
+      asked = true;
+      return true;
+    },
+  });
+  let remoteEtag = '"E0"';
+  let releaseFirstPut = (): void => {};
+  const gate = new Promise<void>((resolve) => {
+    releaseFirstPut = resolve;
+  });
+  let markPutStarted = (): void => {};
+  const putStarted = new Promise<void>((resolve) => {
+    markPutStarted = resolve;
+  });
+  const ifMatches: Array<string | null> = [];
+  let watching = false;
+  let putFinished = false;
+  let getsWhileSaving = 0;
+  const remoteBody = namedGarden('Remote');
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const method = init?.method ?? 'GET';
+    if (method === 'POST') return new Response('', { status: 409 });
+    if (method === 'GET' && url.includes('$select=')) {
+      if (watching && !putFinished) getsWhileSaving += 1;
+      return new Response(
+        JSON.stringify({
+          eTag: remoteEtag,
+          lastModifiedDateTime: remoteBody.updatedAt,
+          '@microsoft.graph.downloadUrl': 'https://download.example/garden',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.startsWith('https://download.example/garden')) {
+      return new Response(JSON.stringify(remoteBody), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (method === 'PUT') {
+      const headers = new Headers(init?.headers);
+      ifMatches.push(headers.get('If-Match'));
+      if (ifMatches.length === 1) {
+        markPutStarted();
+        await gate;
+        putFinished = true;
+        remoteEtag = '"E1"';
+        return new Response(JSON.stringify({ eTag: '"E1"' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', etag: '"E1"' },
+        });
+      }
+      remoteEtag = '"E2"';
+      return new Response(JSON.stringify({ eTag: '"E2"' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', etag: '"E2"' },
+      });
+    }
+    return new Response(JSON.stringify({ error: { message: 'missing' } }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+
+  authFlag.signedIn = false;
+  gardenCloudUiForTests.edit(namedGarden('Queued'));
+  authFlag.signedIn = true;
+  rememberDriveETag('home-account', getGardenCloudFileName(), '"E0"');
+  const auto = gardenCloudUiForTests.autoSave();
+  await putStarted;
+  watching = true;
+  const followed = follow();
+  await Promise.resolve();
+  expect(getsWhileSaving).toBe(0);
+  releaseFirstPut();
+  await auto;
+  await followed;
+  const manual = gardenCloudUiForTests.saveNow();
+  await manual;
+  return { ifMatches, getsWhileSaving, asked };
+}
