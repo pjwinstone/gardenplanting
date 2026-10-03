@@ -8,7 +8,7 @@ This note reads `main` and four open drafts. PR #3 (`cursor/phase1-geometry-solv
 
 A survey still is the wide (1×) camera, 4032×3024, HEIC or JPEG, with lens and time EXIF, focus locked **for that shot**, zoom held at 1, and gravity at the photo timestamp. The coach, plan, and solver already exist.
 
-Figures below are effort, not a calendar. “Agent days” is implementation work. Paul’s days are time at a Mac or on the phone.
+Figures below are effort, not a calendar. “Agent days” is implementation work. Paul’s time is in the browser and on the phone. He has no Mac. The step-by-step is [IOS_SETUP_NO_MAC.md](IOS_SETUP_NO_MAC.md).
 
 ## What any native shutter can use
 
@@ -34,9 +34,20 @@ The 1° check needs an axis map before the numbers are compared. ExifTool’s Ap
 
 **ARKit, later and a separate mode.** [`ARCamera.intrinsics`](https://developer.apple.com/documentation/arkit/arcamera/intrinsics) on a streaming frame belong to [`capturedImage`](https://developer.apple.com/documentation/arkit/arframe/capturedimage), a YCbCr video buffer. From iOS 16, [`captureHighResolutionFrame`](https://developer.apple.com/documentation/arkit/arsession/capturehighresolutionframe(completion:)) can return a high-resolution still with that frame’s intrinsics and pose. That is a different camera mode from the locked wide-camera shutter, not a switch inside it. LiDAR scene depth is metres on a smaller map, only where `supportsFrameSemantics(.sceneDepth)` is true ([scene depth](https://developer.apple.com/documentation/arkit/arconfiguration/framesemantics-swift.struct/scenedepth)). Apple states no millimetre accuracy. Keep both off the first build.
 
-**Accounts, CI, Graph.** A Mac with current Xcode is required to sign and run. Apple’s account page says a free Apple Account can install from Xcode onto a personal phone (10 App IDs, 3 devices, 3 apps, profiles expire after 7 days, no TestFlight) ([account overview](https://developer.apple.com/help/account/basics/about-your-developer-account/)). Those limits are **not yet tried** on Paul’s Apple ID. The [Developer Program](https://developer.apple.com/programs/whats-included/) is 99 USD/year. [TestFlight](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/) builds last 90 days. A free account is the spike path if the published limits hold and he rebuilds from his Mac. It does not let an agent hand him a build.
+**Accounts, CI, Graph.** There is no local Xcode. Builds and signing run on GitHub-hosted `macos-latest`, which includes Xcode. The [Developer Program](https://developer.apple.com/programs/whats-included/) is 99 USD per year and is required: TestFlight and cloud signing are membership features. A free Apple Account can install from Xcode onto a personal phone, with short-lived profiles and no TestFlight ([account overview](https://developer.apple.com/help/account/basics/about-your-developer-account/)). That path needs a Mac, so it is not this pipeline. [TestFlight](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/) builds last 90 days. Paul installs them with the TestFlight app. The camera is tested only on those builds. The Simulator is only for UI and unit tests in CI. It has no survey lens.
 
-The repo is public. Standard runners, including `macos-latest`, are free there; larger runners are billed even then ([billing](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions), [runners](https://docs.github.com/en/actions/using-jobs/choosing-the-runner-for-a-job)). The macOS image includes Xcode, so [fastlane](https://docs.fastlane.tools/) (`scan`, `gym`, `pilot`, `match`) or `xcodebuild` can build and boot the Simulator. The Simulator has no survey lens. Linux agents cannot run Xcode. Device signing needs a certificate and profile, or match, plus an App Store Connect API key, as Actions secrets, after the paid program. The `.p8` and `.p12` stay out of git.
+Signing uses an App Store Connect API key (a `.p8`, a key ID, and an issuer ID), stored as Actions secrets, never committed. Two ways to sign:
+
+- **Recommended: `xcodebuild` cloud signing.** Xcode 13 and later can distribute without a local distribution certificate. Pass `-allowProvisioningUpdates` plus `-authenticationKeyPath`, `-authenticationKeyID`, and `-authenticationKeyIssuerID` ([WWDC21 session 10204](https://developer.apple.com/videos/play/wwdc2021/10204/)). Apple holds the distribution key. No certs repo and no match passphrase. Upload with [fastlane pilot](https://docs.fastlane.tools/actions/pilot/) using the same key. Apple’s Transporter CLI is the other uploader. `altool` is the older command and new workflows should not depend on it.
+- **fastlane match** stores the certificate and profiles, encrypted, in a private git repo or in S3 or Google Cloud, unlocked with `MATCH_PASSWORD` ([match](https://docs.fastlane.tools/actions/match/)). It is the right tool when several Macs must share one identity. Here there is no Mac to share with. It adds a private repo and a passphrase, and the private key then lives outside Apple.
+
+**Uncertain until the first green run:** a blank runner has an empty keychain. Cloud signing is documented for the export step. If the archive step still creates a new Apple Development certificate on every build, stop. Apple limits how many certificates a team can hold (the portal states the cap when you hit it; this note does not guess the number). Store that one development key as a secret and import it, or only then switch to match. Do not mint a certificate per build.
+
+Each upload needs a higher [`CFBundleVersion`](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion) (the build number). Use the GitHub run number. Set `ITSAppUsesNonExemptEncryption` to false in Info.plist: the app’s encryption is HTTPS, which is the exempt case ([Xcode export-compliance keys](https://help.apple.com/xcode/mac/current/en.lproj/dev0dc15d044.html), [TestFlight compliance](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-export-compliance-information-for-beta-builds/)). If a build still shows Missing Compliance, answer it once in the browser.
+
+Internal testers are App Store Connect users, up to 100, and an internal build is not sent for beta review. External testing can require review, starting with the first build added to an external group ([TestFlight overview](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/), [internal testers](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers)). Paul is the internal tester. Turn on automatic distribution for that group.
+
+The repo is public, so standard runners including `macos-latest` are free. Larger runners are billed even then ([billing](https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions), [runners](https://docs.github.com/en/actions/using-jobs/choosing-the-runner-for-a-job)). With the exception of `GITHUB_TOKEN`, secrets are not passed to a workflow triggered from a fork ([secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions)). A pull request from this same repo would still receive secrets, so the signing workflow runs only on a push to `main` and on `workflow_dispatch`. It does not run on `pull_request` or `pull_request_target`. Linux `npm test` stays as it is. The `.p8` stays out of git.
 
 Graph upload sessions are HTTPS with a delegated `Files.ReadWrite` token ([createUploadSession](https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession?view=graph-rest-1.0)). Add an iOS platform to the existing registration: redirect `msauth.<bundle-id>://auth`, URL scheme in Info.plist, and `msauthv2` / `msauthv3` if the broker is used ([mobile setup](https://learn.microsoft.com/en-us/entra/identity-platform/scenario-mobile-app-configuration), [redirect URIs](https://learn.microsoft.com/en-us/entra/msal/objc/redirect-uris-ios)). The Pages SPA redirects stay. No client secret. `@azure/msal-browser` inside WKWebView is the wrong login: SPA redirects are https, and the iOS guide uses the system browser or the broker.
 
@@ -46,9 +57,9 @@ Graph upload sessions are HTTPS with a delegated `Files.ReadWrite` token ([creat
 
 **Reuse.** `ui.ts` is about 4,100 lines; the web app is about 11,700 lines of TS/CSS/HTML. SwiftUI rewrites that. Keep the solver. It has no DOM, and its only outside import is a type from `model.ts`. Bundle it and run it in [JavaScriptCore](https://developer.apple.com/documentation/javascriptcore). The accuracy bars stay the Node tests. A macOS job can smoke-test that bundle. Porting `adjust.ts` (1,984 lines) would be a second solver the current CI does not grade. Shared `fx` is future work on that TypeScript solver, fed by the `fx(lensPosition)` table, not a reason to port it.
 
-**Effort.** About 40–60 agent days to match today’s survey with the solver and Graph left in TypeScript, and about 5–8 days of Paul’s on the Mac, TestFlight, Entra, and the phone. A Swift solver port adds about 15–25 agent days.
+**Effort.** About 40–60 agent days to match today’s survey with the solver and Graph left in TypeScript, and about 2–4 days of Paul’s on enrolment, the API key, and TestFlight installs. A Swift solver port adds about 15–25 agent days.
 
-**Toolchain and OneDrive.** The shared section. This option wants the paid program, because the signed binary is the whole product. CI runs logic tests in the Simulator. Paul adds the iOS redirect and takes the proving still.
+**Toolchain and OneDrive.** The shared section. The signed binary is the product, so this option wants the paid program and the TestFlight path. CI runs logic tests in the Simulator. Paul installs the proving build from TestFlight.
 
 **Risks.** A second UI if Pages stays for the iPad plan. A long gap before he can survey in the new app. Export-compliance questions on the first TestFlight upload, because the app uses HTTPS.
 
@@ -62,9 +73,9 @@ The official plugin is the wrong shutter. [`@capacitor/camera`](https://capacito
 
 **Reuse.** Essentially all of the TypeScript. The WKWebView is already JavaScriptCore, so `npm test` stays the accuracy gate. A thin MSAL plugin returns a Graph token; `onedrive.ts` keeps the upload session when that path is the one in use. `msalAuth.ts` stays the website path.
 
-**Effort.** The spike (plugin plus a shell he runs from Xcode) is about 4–6 agent days and one afternoon of his, once it builds. A TestFlight that captures, stores the file and the motion sample, and uploads is about 15–25 agent days and about 2–4 days of his.
+**Effort.** The spike (plugin, Capacitor shell, and a `workflow_dispatch` upload) is about 4–6 agent days. Paul’s part is the setup guide, then installing the build in TestFlight, about half a day once membership is active. A build that captures, stores the file and the motion sample, and uploads is about 15–25 agent days and about 2–4 days of his, mostly waiting on TestFlight processing and repeating a garden still.
 
-**Toolchain and OneDrive.** Same Mac and same account choice. Linux `npm test` is untouched. The macOS job proves the plugin compiles and that a fixture file round-trips. Sign-in is the native redirect. The Pages URI is unchanged.
+**Toolchain and OneDrive.** Same paid account and the same cloud-signing path. Linux `npm test` is untouched. The macOS job compiles the plugin, runs Simulator tests, and on `main` or `workflow_dispatch` uploads to TestFlight. Sign-in is the native redirect. The Pages URI is unchanged.
 
 **Risks.** Capacitor upgrades move the Xcode project. The plugin is only believable on his iPhone. `window.print()` may later need a share sheet. IndexedDB eviction and bridge memory are open questions below, not the design of the file store.
 
@@ -84,21 +95,21 @@ The official plugin is the wrong shutter. [`@capacitor/camera`](https://capacito
 
 Build the hybrid, and start with a custom camera plugin.
 
-The broken part is the shutter (PR #6). The UI and the Node-tested solver stay. Capacitor’s own camera encodes JPEG and only chooses front or rear, so the plugin uses `builtInWideAngleCamera`, zoom 1, tap-to-focus locked per shot, `.balanced`, and 4032×3024 HEIC or JPEG. The file goes to Application Support and into the Graph upload only as a path. The survey shutter has no intrinsic matrix. Focal length is `fx(lensPosition)` from a checkerboard in the same geometric-distortion mode, and that table is what a future shared-`fx` solve in PR #3 would consume. ARKit high-resolution frames stay a later, separate mode. SwiftUI waits until this plugin has been on the phone and the web view is actually in the way.
+The broken part is the shutter (PR #6). The UI and the Node-tested solver stay. Capacitor’s own camera encodes JPEG and only chooses front or rear, so the plugin uses `builtInWideAngleCamera`, zoom 1, tap-to-focus locked per shot, `.balanced`, and 4032×3024 HEIC or JPEG. The file goes to Application Support and into the Graph upload only as a path. The survey shutter has no intrinsic matrix. Focal length is `fx(lensPosition)` from a checkerboard in the same geometric-distortion mode, and that table is what a future shared-`fx` solve in PR #3 would consume. ARKit high-resolution frames stay a later, separate mode. There is no Mac on the desk: `macos-latest` signs with the API key, and the phone installs from TestFlight. SwiftUI waits until this plugin has been on the phone and the web view is actually in the way.
 
 **Phasing**
 
-1. Paul answers the list below. The website keeps shipping. This note does not block PRs #3, #5, or #6.
-2. Spike. The agent writes the plugin and a Capacitor shell. Paul runs it from Xcode. Pass: device type is `builtInWideAngleCamera`; zoom is 1; `lensPosition` and both geometric-distortion flags are stored; LensModel is present and contains “back”, or the spike fails closed, as PR #5 does when LensModel is missing; the 35 mm equivalent is 23–27; DateTimeOriginal is set; after the `(−x, −y, −z)` map above, the MakerNote `AccelerationVector` is within about 1° of `CMDeviceMotion.gravity`; after upload, size and `quickXorHash` match Graph. SHA-256 is recorded locally and is not the upload check. Fail: stop, and look again at Camera.app or a native shell.
-3. If it passes: token plugin, the path queue, and a `macos-latest` compile. TestFlight only with the paid program.
+1. Paul answers the list below and follows [IOS_SETUP_NO_MAC.md](IOS_SETUP_NO_MAC.md): paid membership, API key, bundle id, app record, GitHub secrets, Entra redirect, internal tester. The website keeps shipping. This note does not block PRs #3, #5, or #6.
+2. Spike. The agent writes the plugin and a Capacitor shell. A `workflow_dispatch` on `macos-latest` signs with the API key and uploads to TestFlight. Paul installs that build. The Simulator job does not count as a camera pass. Pass: device type is `builtInWideAngleCamera`; zoom is 1; `lensPosition` and both geometric-distortion flags are stored; LensModel is present and contains “back”, or the spike fails closed, as PR #5 does when LensModel is missing; the 35 mm equivalent is 23–27; DateTimeOriginal is set; after the `(−x, −y, −z)` map above, the MakerNote `AccelerationVector` is within about 1° of `CMDeviceMotion.gravity`; after upload, size and `quickXorHash` match Graph. SHA-256 is recorded locally and is not the upload check. Fail: stop, and look again at Camera.app or a native shell.
+3. If it passes: token plugin and the path queue, still shipped the same way.
 4. The circle walk (PR #5) uses that shutter. The checkerboard at two or three focus distances can be the same trip.
 5. SwiftUI only if step 2 shows a hard web-view limit. The solver stays TypeScript, in JavaScriptCore if the UI is no longer a web view.
 
 ## Decisions for Paul
 
 1. **Next step.** Hybrid (same screens, new shutter), a full Swift rewrite, or keep Camera.app plus Library.
-2. **Apple account.** 99 USD/year and TestFlight, or a free account and a reinstall from the Mac on whatever schedule the free profile actually enforces. Free is the spike, once those limits are confirmed.
-3. **Mac and phone.** A Mac that runs current Xcode, and the iPhone model. The model decides whether a separate depth or LiDAR capture exists. The survey lens is the 1× wide camera either way.
+2. **Apple account.** Enrol as an individual in the Developer Program, 99 USD/year. TestFlight is how the phone gets builds. A free account cannot feed this pipeline.
+3. **Phone.** No Mac. An iPhone with the TestFlight app. The model decides whether a separate depth or LiDAR capture exists. The survey lens is the 1× wide camera either way.
 4. **Entra.** Add `msauth.<bundle-id>://auth` to the existing Garden Survey app, same client id. The Pages redirect stays. Refusing this keeps sign-in on the website only.
 5. **Heading.** Gravity only. Compass heading is not an observation: steel in the fences and the shed makes a magnetic heading unreliable, and location stays off.
 6. **Focal length.** No matrix on the survey still. Shared `fx` is a checkerboard in the same distortion-correction mode, at two or three focus distances, stored against `lensPosition`. A missing matrix does not block the app.
@@ -113,5 +124,5 @@ Untested until Paul’s phone says otherwise:
 - Whether Camera.app’s 24/28/35 mm choice and its 24 MP setting carry into an AVFoundation session. The spike sets 4032×3024 itself.
 - The zero-shutter-lag default, and which moment `photo.timestamp` marks inside the exposure.
 - How much Deep Fusion moves pixels.
-- The free-account limits on his Apple ID.
+- Whether the first archive on an empty runner creates an Apple Development certificate. If it does, keep that one key and do not create another per build.
 - Whether WKWebView IndexedDB eviction still matters once originals are files. Bridge memory if any code path still base64-encodes a still.
