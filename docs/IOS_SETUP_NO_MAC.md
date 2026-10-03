@@ -8,11 +8,11 @@ Replace every placeholder. Use the same bundle id in every step.
 
 | Placeholder | Example | Where you get the real value |
 |---|---|---|
-| `<APP_BUNDLE_ID>` | `com.example.gardensurvey` | You invent this. Reverse-DNS, letters, digits, dots. It cannot be changed later. |
+| `<APP_BUNDLE_ID>` | `com.<yourname>.gardenplanting` | You invent the `<yourname>` part. Reverse-DNS, letters, digits, dots. It cannot be changed later. |
 | `<APPLE_TEAM_ID>` | `A1B2C3D4E5` | Membership page, after enrolment. Ten characters. |
 | `<KEY_ID>` | `AB12CD34EF` | Shown next to the API key. |
 | `<ISSUER_ID>` | a UUID | Top of the App Store Connect API page. |
-| `<APP_SKU>` | `garden-survey-ios` | You invent this. Only Apple and you see it. |
+| `<APP_SKU>` | `garden-planting-ios` | Only Apple and you see it. |
 
 ## 1. Enrol in the Apple Developer Program
 
@@ -40,7 +40,7 @@ A free Apple Account is not a substitute. It cannot upload to TestFlight.
 In the browser: [App Store Connect](https://appstoreconnect.apple.com) → Users and Access → Integrations → App Store Connect API. Apple’s guide is [Creating API keys](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api). The page layout moves; if “Integrations” is missing, look for “Keys” under Users and Access.
 
 1. Copy the **Issuer ID** at the top. That is `<ISSUER_ID>`.
-2. Generate a key. Name: `Garden Survey CI`. Access: **Admin**.
+2. Generate a key. Name: `Garden Planting CI`. Access: **Admin**.
 3. Download the `.p8` file. Apple shows it **once**. If you close the page without downloading, revoke that key and make another. You cannot retrieve it.
 4. Copy the **Key ID**. That is `<KEY_ID>`.
 
@@ -52,7 +52,7 @@ Keep the `.p8` only until step 6. Then delete the download from the phone or the
 
 Browser: [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list) → Identifiers → **+** → App IDs → App → Continue.
 
-- Description: `Garden Survey`
+- Description: `Garden Planting`
 - Bundle ID: Explicit, `<APP_BUNDLE_ID>`
 - Capabilities: leave them **off**
 
@@ -65,7 +65,7 @@ Register. This page does not need a Mac.
 Browser: [My Apps](https://appstoreconnect.apple.com/apps) → **+** → New App. Apple’s steps: [Add a new app](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app).
 
 - Platforms: iOS
-- Name: `Garden Survey` (if that name is taken, add a suffix; the name must be unique on the store)
+- Name: `Garden Planting` (if that name is taken, add a suffix; the name must be unique on the store)
 - Primary language: English (U.K.)
 - Bundle ID: the one you just registered
 - SKU: `<APP_SKU>`
@@ -104,9 +104,9 @@ There is no workflow to run today. When it lands, Actions → the signing workfl
 
 ## 7. Add the OneDrive redirect
 
-The existing Garden Survey Entra app stays. Add a platform. Do not remove the GitHub Pages redirect.
+Use the Entra app registration the website already signs in with. Leave its name as it already appears in the portal. Add a platform. Do not remove the GitHub Pages redirect. The OneDrive folder stays `/Garden Survey/`. That folder name is legacy and is kept so existing files stay put.
 
-Entra → App registrations → Garden Survey → **Authentication** → Add a platform → **iOS / macOS**.
+Entra → App registrations → the existing registration → **Authentication** → Add a platform → **iOS / macOS**.
 
 Bundle ID: `<APP_BUNDLE_ID>`
 
@@ -116,10 +116,10 @@ The redirect it shows must be exactly:
 msauth.<APP_BUNDLE_ID>://auth
 ```
 
-Example, if the bundle id is `com.example.gardensurvey`:
+Example, if the bundle id is `com.<yourname>.gardenplanting`:
 
 ```text
-msauth.com.example.gardensurvey://auth
+msauth.com.<yourname>.gardenplanting://auth
 ```
 
 Also add that same string under Mobile and desktop applications if the iOS button did not. Enable public client flows if the page asks. Leave the SPA redirects (`http://localhost:5173/` and `https://pjwinstone.github.io/gardenplanting/`) in place. No client secret. Details: [mobile app configuration](https://learn.microsoft.com/en-us/entra/identity-platform/scenario-mobile-app-configuration), [MSAL redirect URIs](https://learn.microsoft.com/en-us/entra/msal/objc/redirect-uris-ios), and [entra-onedrive-setup.md](entra-onedrive-setup.md).
@@ -146,12 +146,12 @@ If a job must make a CSR without Keychain Access, this is the command. It writes
 openssl req -nodes -newkey rsa:2048 \
   -keyout distribution.key \
   -out distribution.csr \
-  -subj "/CN=Garden Survey Distribution/O=Individual/C=GB"
+  -subj "/CN=Garden Planting Distribution/O=Individual/C=GB"
 ```
 
 ## After the first build appears
 
-1. Open TestFlight on the iPhone and install Garden Survey.
+1. Open TestFlight on the iPhone and install Garden Planting.
 2. If the build says **Missing Compliance**, open it in App Store Connect → TestFlight → the build → Provide Export Compliance Information. The project should set `ITSAppUsesNonExemptEncryption` to false, because the only encryption is HTTPS ([Xcode’s key](https://help.apple.com/xcode/mac/current/en.lproj/dev0dc15d044.html), [beta compliance](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-export-compliance-information-for-beta-builds/)). One browser answer clears a build the plist did not cover.
 3. Each later upload must use a higher build number (`CFBundleVersion`). The workflow uses the GitHub run number so you do not edit it by hand ([CFBundleVersion](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion)).
 
