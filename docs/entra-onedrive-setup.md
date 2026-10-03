@@ -1,8 +1,8 @@
-# Entra ID + OneDrive setup (Garden Survey)
+# Entra ID + OneDrive setup (Garden Planting)
 
 Stage 1 persistence: sign in with Microsoft (MSAL SPA), then save/load `garden.json` to **personal OneDrive** via Microsoft Graph.
 
-**Canonical OneDrive path:** `/Garden Survey/garden.json` under the signed-in user's OneDrive (not the app-data folder). The app also keeps **localStorage** as an offline cache; **Export / Import** remain as backup.
+**Canonical OneDrive path:** `/Garden Survey/garden.json` under the signed-in user's OneDrive (not the app-data folder). The folder keeps its legacy name **Garden Survey** so existing surveys stay readable. A migration to a new folder is a possible later step. The app also keeps **localStorage** as an offline cache; **Export / Import** remain as backup.
 
 **Hosted app URL (GitHub Pages):** https://pjwinstone.github.io/gardenplanting/
 
@@ -14,7 +14,7 @@ Stage 1 persistence: sign in with Microsoft (MSAL SPA), then save/load `garden.j
 
 1. Open [Microsoft Entra admin center](https://entra.microsoft.com/) (or Azure Portal → **Microsoft Entra ID**).
 2. Go to **App registrations** → **New registration** (or open the existing **Garden Survey** app).
-3. Name: e.g. `Garden Survey`.
+3. Name: e.g. `Garden Survey`. The app registration display name is set in the Azure portal and is not stored in this repo.
 4. **Supported account types** — required for personal OneDrive:
    - **Accounts in any organizational directory and personal Microsoft accounts** (maps to tenant authority `/common`), **or**
    - **Personal Microsoft accounts only**

@@ -15,8 +15,8 @@ export default defineConfig({
         navigateFallbackDenylist: [/\?code=/, /\?error=/, /\?state=/],
       },
       manifest: {
-        name: 'Garden Survey',
-        short_name: 'GardenSurvey',
+        name: 'Garden Planting',
+        short_name: 'GardenPlanting',
         description: 'Chatty field survey PWA for a ~20×20 m UK garden',
         theme_color: '#1a3a2a',
         background_color: '#f3efe6',

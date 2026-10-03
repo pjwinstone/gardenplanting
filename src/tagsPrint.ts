@@ -21,7 +21,7 @@ function rodBelt(id: string): string {
       <rect x="0" y="35" width="${wrapW}" height="15" fill="#000"/>
       <rect x="0" y="50" width="${wrapW}" height="50" fill="#fff" stroke="#000" stroke-width="0.4"/>
       <text x="${wrapW / 2}" y="28" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="14" font-weight="700" fill="#000">${id}</text>
-      <text x="${wrapW / 2}" y="78" text-anchor="middle" font-family="Georgia, serif" font-size="10" fill="#000">Garden Survey · toilet-roll belt</text>
+      <text x="${wrapW / 2}" y="78" text-anchor="middle" font-family="Georgia, serif" font-size="10" fill="#000">Garden Planting · toilet-roll belt</text>
       <text x="4" y="94" font-family="monospace" font-size="7" fill="#000">← overlap 10 mm</text>
     </svg>
   </div>`;
@@ -71,7 +71,7 @@ export function renderTagsPrintHtml(doc: GardenDocument): string {
   return `
   <div class="print-sheet" id="print-sheet">
     <header class="print-header">
-      <h1>Garden Survey — printable tags</h1>
+      <h1>Garden Planting — printable tags</h1>
       <p>Document: <strong>${escapeHtml(doc.name)}</strong> · IDs match garden.json</p>
     </header>
     <h2 class="print-section-title">Rod belts (A1 A2 A0 B1 B2 B0)</h2>

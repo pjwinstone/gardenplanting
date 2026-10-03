@@ -1,6 +1,6 @@
-# Garden Survey — AGENTS.md
+# Garden Planting — AGENTS.md
 
-You are building **Garden Survey**, a static PWA (Vite + TypeScript) for a ~20×20 m UK garden. No backend, no Xcode, no native iOS. Cursor on the web is the IDE.
+You are building **Garden Planting**, a static PWA (Vite + TypeScript) for a ~20×20 m UK garden. No backend, no Xcode, no native iOS. Cursor on the web is the IDE.
 
 ## Product tone
 The UI is **chatty and procedural**. At every moment the app states:
@@ -82,7 +82,7 @@ JSON document: points (with optional `offsetMm`), lines, polygons, **baselines**
 
 Architecture: `docs/architecture-toolbox-workflows.md`. Method plan: `docs/plan-baseline-then-house.md`. Layers/objects plan: `docs/plan-layers-objects-add-point.md`.
 
-localStorage + export/import garden.json. OneDrive via Microsoft Graph (`/Garden Survey/garden-v{version}.json`, legacy `garden.json` still loadable) when MSAL env is set — see `docs/entra-onedrive-setup.md`. Version/name remembered in local prefs (Sign in accordion).
+localStorage + export/import garden.json. OneDrive via Microsoft Graph (`/Garden Survey/garden-v{version}.json`, legacy `garden.json` still loadable) when MSAL env is set — see `docs/entra-onedrive-setup.md`. The OneDrive folder keeps its legacy name "Garden Survey" so existing surveys stay readable. A migration is a possible later step. Version/name remembered in local prefs (Sign in accordion).
 
 ## First milestone (historical) + Stage 2
 1. Minimal coach chrome + hamburger drawer + legal transitions.

@@ -163,7 +163,7 @@ export async function initAuth(): Promise<AuthInitResult> {
     }
   } catch (e) {
     error = plainAuthError(e);
-    console.warn('Garden Survey: MSAL redirect handling failed', e);
+    console.warn('Garden Planting: MSAL redirect handling failed', e);
     // Still try cached accounts — a prior session may be usable.
     restoreCachedAccount();
   }

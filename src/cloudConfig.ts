@@ -1,5 +1,9 @@
-/** Vite env helpers for MSAL + OneDrive (Garden Survey). */
+/** Vite env helpers for MSAL + OneDrive (Garden Planting). */
 
+/**
+ * OneDrive folder. Kept as the legacy name "Garden Survey" so existing
+ * surveys stay readable. A migration to a new folder is a possible later step.
+ */
 export const ONEDRIVE_FOLDER = 'Garden Survey';
 /** Legacy fixed name — still loadable when present. */
 export const ONEDRIVE_FILE = 'garden.json';

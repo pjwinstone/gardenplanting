@@ -85,7 +85,7 @@ async function ensureFolder(
   if (res.status === 401 || res.status === 403) {
     return { ok: false, error: plainGraphStatus(res.status, detail, ONEDRIVE_FILE) };
   }
-  console.warn('Garden Survey: folder ensure', detail);
+  console.warn('Garden Planting: folder ensure', detail);
   return { ok: true };
 }
 
