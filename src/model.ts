@@ -322,6 +322,11 @@ export interface GardenDocument {
    * readers that don't know the field ignore it.
    */
   photosManifest?: PhotosManifestLink;
+  /**
+   * Guided-workflow ticks. Optional, so an older reader still loads the garden.
+   * Rides the same OneDrive save as the rest of the document.
+   */
+  workflowProgress?: import('./workflows/guided/types').WorkflowProgress;
 }
 
 export const SIGMA = {

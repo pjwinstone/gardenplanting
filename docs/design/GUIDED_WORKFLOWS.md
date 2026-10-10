@@ -1,8 +1,15 @@
 # Guided workflows
 
-Design proposal only. The app does not do this yet. `src/ui.ts` is unchanged.
+**Approved by Paul.** Built in this change. Defaults he set:
 
-The circle field sheet and the marker printing sheet ([FIELD_CHECKLIST_CIRCLE.md](../FIELD_CHECKLIST_CIRCLE.md), [PRINT_MARKERS.md](../PRINT_MARKERS.md)) become in-app workflows. The same data can later emit the markdown. The survey method does not change.
+- Keep the thumb Next.
+- Store progress on the garden document (`workflowProgress`), riding the existing OneDrive save. Older readers ignore the field.
+- A surveyor may hand-tick a step the app can detect. The tick is labelled manual until the real event arrives.
+- Keep the PDFs until a generated sheet is what gets printed.
+- Step sentences live on the workflow, not in `coach.ts`.
+- Sleeve R, heights, the laser check, and the station tapes stay in the step note for now.
+
+The circle field sheet and the marker printing sheet ([FIELD_CHECKLIST_CIRCLE.md](../FIELD_CHECKLIST_CIRCLE.md), [PRINT_MARKERS.md](../PRINT_MARKERS.md)) are in-app workflows. `docs/generated/WORKFLOWS.md` is generated from the same data. The survey method does not change. The pictures below are the design mockups; the implementation screenshots are on the pull request.
 
 Pictures, at iPhone 15 size (393×852, 3×), over a capture of the running app:
 
@@ -217,17 +224,25 @@ Opening a step follows `link`: focus that menu section, or set the session mode 
 
 ```ts
 interface WorkflowProgress {
-  workflowId: string;
-  revision: number;
-  currentStepId: string;
-  updatedAt: string;
-  steps: Record<string, {
-    status: 'pending' | 'complete';
-    completedBy: 'manual' | 'auto' | null;
-    completedAt?: string;
-    /** Write-in the app cannot store yet: two baseline pulls, sleeve R, height. */
-    note?: string;
-  }>;
+  version: 1;
+  activeId?: WorkflowId;
+  /** One run per workflow, so a paused marker sheet survives beside the circle test. */
+  runs: Partial<Record<WorkflowId, {
+    workflowId: WorkflowId;
+    revision: number;
+    currentStepId: string;
+    updatedAt: string;
+    finishedAt?: string;
+    parkedStepIds?: string[];
+    steps: Record<string, {
+      status: 'pending' | 'complete';
+      completedBy: 'manual' | 'auto' | null;
+      completedAt?: string;
+      /** Write-in the app cannot store yet: two baseline pulls, sleeve R, height. */
+      note?: string;
+      seen?: string[];
+    }>;
+  }>>;
 }
 ```
 
@@ -277,23 +292,23 @@ Seven steps, from [PRINT_MARKERS.md](../PRINT_MARKERS.md). All manual. The app c
 |---|---|---|
 | 1 | Assign the sleeves | BAS01 315, BAS02 36E, CRC01 459, CRC02 6BA, CRC03 8A3, CRC04 952, CRC05 DAC, CRC06 EC5. Pencil the code on the dowel. STN01, STN02, and STN03 are not sleeved. Calibration reuses a cane. No ninth code. No checkerboard. |
 | 2 | Print at actual size | A4 portrait, 210×297 mm. Actual size / 100%. No fit-to-page, no shrink, no scaling, no borderless, no two-up. Highest quality. Black only. Colour management off. Link: `docs/markers/all-sleeves.pdf` and the eight single pages. |
-| 3 | Check the rulers | The 100 mm bar must be 100 mm within ±0.5 mm. The 50 mm bar is on the glue flap. The sheet also has 250 mm down the flap and 180 mm along the bottom legend. A miss means the driver scaled the page. Reprint. Do not use that sheet. The four black bars at TOP are the sync. Together they are 52 mm. |
+| 3 | Check the rulers | The 100 mm bar must be 100 mm within ±0.5 mm. The 50 mm bar is on the blank tab. The sheet also has 250 mm down the tab and 180 mm along the bottom legend. A miss means the driver scaled the page. Reprint. Do not use that sheet. The four black bars at TOP are the sync. Together they are 52 mm. |
 | 4 | Paper and film | Matte. Laser or pigment on matte polypropylene or polyester. If paper: matte, 120–160 gsm, not dye. Matte film over toner only. After any film, measure the 100 mm bar again. Gloss blinds the reader. Keep the sheets dry until the glue has set. |
-| 5 | Cut | Cut the right edge on TRIM 205 mm. Cut 5 mm off the top and 5 mm off the bottom. Finished sleeve 205×287 mm. Do not cut the left edge. The left 16.5 mm is the glue flap. |
-| 6 | Wrap the sleeve | Dowel 60 mm, not a 63 mm pipe. Bands horizontal. TOP up. Printed face outward. Glue flap down first. Both seam crosses on the cut edge. Glue the flap and press the seam flat. Overlap on a 60 mm dowel is about 16.5 mm. Diagram: `sleeve-bands`. |
+| 5 | Cut | Laminate first if you use film. Cut the left edge exactly on the dashed line marked CUT HERE. Cut the right edge on its dashed line, or the sheet edge if the dashes did not print. Cut 5 mm off the top and the bottom. Do not crease the fold. |
+| 6 | Join the sleeve | Fasten the blank tab to the 60 mm dowel before the wrap (staple-gun or drawing-pin in wood, glue or thin double-sided tape on a tube). Staples only in the blank, at least 4 mm from the fold, never through the bands. Wrap snug, printed face out, TOP up. Stick the cut left edge down over the tab. Turn the seam away from the stations and the camera. Diagram: `sleeve-join`. |
 | 7 | Measure R, height, and plumb | After the glue is dry, and after any film. Three heights. Paper strip or cloth tape, not a steel tape. R = C / 2π, to 0.1 mm. One R per sleeve. Height to the middle of the paper. 0.5 m is the target. Write the height you measure. Bubble in two directions, about 1°. App offsets stay 0. |
 
 ## Persistence
 
-Local mirror, written on every tick: `localStorage` key `garden-survey:workflow-progress`. Separate from `garden-survey:document`, so a tick does not rewrite the garden and does not get caught in the photo-slim path.
+Approved: an optional `workflowProgress` field on the garden document, same pattern as `photosManifest`. Older readers ignore it. It is small, no photo bytes. A tick goes through the existing save path: it marks the garden dirty and the save queue uploads it. The garden’s own conflict copy is the conflict copy for the ticks. Do not merge ticks in a second file.
 
-OneDrive, recommended: an optional `workflowProgress` field on the garden document, same pattern as `photosManifest`. Older readers ignore it. It is small, no photo bytes. It rides the existing Save. It does not upload on every tick. In the field the radio is the local mirror. On load, the newer `updatedAt` wins. If both changed, keep the phone’s copy and say so. Do not merge ticks. A tick is a fact, and the garden save already has conflict copies for the document. A second file `/Garden Survey/workflow-progress.json` can drift from the garden. That is why the field is the recommendation, not a sidecar.
+A local mirror, `localStorage` key `garden-survey:workflow-progress`, is also written on every tick. It is not copied over a garden that already has the field, so a newer OneDrive copy is not overwritten on boot. Sunlight is a separate pref (`garden-survey:workflow-sunlight`) and does not dirty the survey.
 
 The step `note` holds the write-in numbers until the model has real boxes for sleeve R, height, plumb, the laser check, and the station tapes. Those boxes are not part of this proposal.
 
 ## Capacitor
 
-The shell is not in the repo yet. These are the constraints for when it is.
+The shell is not in the repo yet. This build adds no Capacitor plugin. Insets are `env(safe-area-inset-*)`. Progress uses `localStorage` and the garden document, which the app already uses. These are the constraints for when the shell exists.
 
 - Insets come only from `env(safe-area-inset-*)`. If the native status bar also pads the web view, the bar sits twice as low. Overlay the web view and let CSS do the inset.
 - `localStorage` in WKWebView can be dropped under storage pressure. When `window.Capacitor` is present, write the same progress through Preferences as well as `localStorage`.
@@ -306,7 +321,7 @@ The shell is not in the repo yet. These are the constraints for when it is.
 
 ## Implementation plan
 
-Each item is a PR on its own. None of them change the survey method.
+Built together in this change, in the modules below. None of it changes the survey method. The original split is kept here so a later pass can see what was in scope.
 
 1. **Definitions.** `src/workflows/guided/types.ts` plus the circle and marker objects, and the two `later` stubs with empty steps. Tests: unique step ids, every trigger and link is one of the types above. No UI.
 2. **Generated sheet.** A script writes markdown from those objects into `docs/generated/`. The current PDF build stays until that sheet is the one you print.
@@ -322,11 +337,13 @@ Each item is a PR on its own. None of them change the survey method.
 
 The house traverse and iOS setup get their own definition PRs when those sheets are written. Until then the rows stay **Later**. The Stage 2 panel in Tools stays until the house workflow replaces it.
 
-## Open questions
+## Approved
 
-1. The thumb **Next** repeats the bar’s Next, because the top of the phone is a poor reach. Drop it if the pole is always a two-handed hold.
-2. Progress on the garden document is the recommendation. A sidecar file is the alternative if a checklist tick should not touch `garden-v{n}.json` at all.
-3. Manual tick on a step the app can see is allowed, and labelled as manual. Say if an auto step must wait for the event.
-4. The PDF stays until the generated sheet prints. Say if the PDF should go in the same effort.
-5. Step sentences live on the workflow, not in `coach.ts`. `coach.ts` keeps the session-mode coach. AGENTS.md currently says coach copy lives only in `coach.ts`. This splits field-sheet sentences from mode coach. Confirm that split.
-6. Sleeve R, heights, the laser check, and the station tapes stay in the step note. They do not become solver fields in these PRs.
+Paul approved the six open questions as follows.
+
+1. The thumb **Next** stays. It repeats the bar’s Next, and it hides while the sheet is open.
+2. Progress is the optional `workflowProgress` field on the garden document. A local mirror (`garden-survey:workflow-progress`) is written on every tick as well. The mirror is not merged over a garden that already came from OneDrive.
+3. A hand tick completes an auto step and is labelled manual. When the real event arrives later, `completedBy` becomes `auto`.
+4. The PDFs stay until a generated sheet is the one that prints. `docs/generated/WORKFLOWS.md` is the reference, checked in CI.
+5. Step sentences live on the workflow. `coach.ts` stays the session-mode coach.
+6. Sleeve R, heights, the laser check, and the station tapes stay in the step note.
