@@ -98,6 +98,13 @@ import { GEOMETRY_CHOICES, placeholderThumb, type GeometryType, type PhotoClick 
 import { imageNaturalSize, suggestTagBlobs, type TagSuggestion } from './tagSuggest';
 import { dngRejectionMessage, type PreviewPixelMap } from './photoOriginal';
 import {
+  captureSurveyPhoto,
+  installedCameraClient,
+  nativeCaptureRecordFor,
+  nativeSurveyCaptureAvailable,
+  readInstalledNativeFile,
+} from './surveyCapture';
+import {
   discardQueuedPhoto,
   kickPhotoUploads,
   listQueuedPhotos,
@@ -460,19 +467,47 @@ function launchNewPointCamera(): void {
   const take = (file: File) => {
     void handleNewPointCapture(file);
   };
-  void openAimingPreview(
-    () => openCaptureInput('camera', take),
-    () => openCaptureInput('library', take),
-  );
+  void beginSurveyCapture(take);
 }
 
 function launchAgainPhotoCamera(pointId: string): void {
   const take = (file: File) => {
     void handleAgainPhotoCapture(pointId, file);
   };
+  void beginSurveyCapture(take);
+}
+
+/**
+ * iOS app: native shutter (original file, EXIF kept). Browser: aiming preview
+ * then the system camera or library input. Both paths hand the same File to
+ * the existing original-upload queue.
+ */
+async function beginSurveyCapture(onFile: (file: File) => void): Promise<void> {
+  if (nativeSurveyCaptureAvailable()) {
+    try {
+      const choice = await captureSurveyPhoto({
+        native: true,
+        camera: installedCameraClient(),
+        readFile: readInstalledNativeFile,
+      });
+      if (choice.route === 'cancelled') return;
+      if (choice.route === 'library') {
+        openCaptureInput('library', onFile);
+        return;
+      }
+      if (choice.route === 'capacitor') {
+        onFile(choice.file);
+        return;
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'The camera did not return a photo.';
+      surfaceFail(msg, 'photo');
+      return;
+    }
+  }
   void openAimingPreview(
-    () => openCaptureInput('camera', take),
-    () => openCaptureInput('library', take),
+    () => openCaptureInput('camera', onFile),
+    () => openCaptureInput('library', onFile),
   );
 }
 
@@ -650,8 +685,9 @@ async function queueCapturedOriginal(file: File, pixels?: PreviewPixelMap): Prom
       pixels,
       sessionStartedAt: setup?.startedAt,
       sessionEndedAt: setup?.endedAt,
+      nativeCapture: nativeCaptureRecordFor(file),
     });
-    applyPhotoUploadStatus(statusFromDraft(photoId, draft));
+    applyPhotoUploadStatus(statusFromDraft(photoId, draft, file));
     kickPhotoUploads();
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not queue the original photo.';
@@ -659,7 +695,11 @@ async function queueCapturedOriginal(file: File, pixels?: PreviewPixelMap): Prom
   }
 }
 
-function statusFromDraft(photoId: string, draft: Awaited<ReturnType<typeof rememberOriginalPhoto>>): PhotoStatusUpdate {
+function statusFromDraft(
+  photoId: string,
+  draft: Awaited<ReturnType<typeof rememberOriginalPhoto>>,
+  file?: File,
+): PhotoStatusUpdate {
   return {
     photoId,
     status: 'queued',
@@ -681,6 +721,7 @@ function statusFromDraft(photoId: string, draft: Awaited<ReturnType<typeof remem
     previewScaleX: draft.pixels?.previewScaleX,
     previewScaleY: draft.pixels?.previewScaleY,
     clickMap: draft.pixels?.clickMap,
+    nativeCapture: file ? nativeCaptureRecordFor(file) : undefined,
   };
 }
 
@@ -709,6 +750,7 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
         clickMap: update.clickMap ?? p.originalFile?.clickMap,
         uploadPermanent: update.permanent ?? p.originalFile?.uploadPermanent,
         usabilityNote: update.usabilityNote ?? p.originalFile?.usabilityNote,
+        nativeCapture: update.nativeCapture ?? p.originalFile?.nativeCapture,
         uploadStatus: update.status,
         uploadError: update.error,
       },

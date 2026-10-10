@@ -4,7 +4,7 @@
  */
 
 import type { AppleMakerNote, SurveyExif } from './photoExif';
-import type { PhotoUploadStatus } from './model';
+import type { NativeCaptureRecord, PhotoUploadStatus } from './model';
 import type { PhotoProvenance } from './photosManifest';
 import { migratePreviewPixels, type PreviewPixelMap } from './photoOriginal';
 
@@ -28,6 +28,8 @@ export interface PhotoQueueRecord {
   sha256?: string;
   calibrationKey?: string;
   makerNote?: AppleMakerNote;
+  /** Survey-shutter sidecar (distortion correction, quality, resolution). */
+  nativeCapture?: NativeCaptureRecord;
   pixels?: PreviewPixelMap;
   usabilityNote?: string;
   quickXorHash: string;

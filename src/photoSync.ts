@@ -7,7 +7,7 @@
  */
 
 import { PHOTOS_MANIFEST_RELATIVE } from './cloudConfig';
-import type { Photo, PhotoOriginalFile, PhotoUploadStatus } from './model';
+import type { NativeCaptureRecord, Photo, PhotoOriginalFile, PhotoUploadStatus } from './model';
 import { inspectOriginalFile, suffixedPhotoFileName, type OriginalPhotoDraft } from './photoOriginal';
 import {
   createIndexedDbPhotoQueue,
@@ -65,6 +65,8 @@ export interface PhotoStatusUpdate {
   /** Hash mismatch or a name still taken after -4. Retry will not clear this. */
   permanent?: boolean;
   error?: string;
+  /** Kept on the photo when the iOS shutter supplied it. Upload status updates omit it. */
+  nativeCapture?: NativeCaptureRecord;
 }
 
 /** String token (tests) or a silent-auth result. interactionRequired must not mark the photo failed. */
@@ -172,6 +174,7 @@ export async function rememberOriginalPhoto(
     pixels?: OriginalPhotoDraft['pixels'];
     sessionStartedAt?: string;
     sessionEndedAt?: string;
+    nativeCapture?: NativeCaptureRecord;
   },
   queue: PhotoQueue = getAppPhotoQueue(),
 ): Promise<OriginalPhotoDraft> {
@@ -191,6 +194,7 @@ export async function rememberOriginalPhoto(
     sha256: draft.sha256,
     calibrationKey: draft.calibrationKey,
     makerNote: draft.makerNote,
+    nativeCapture: meta.nativeCapture,
     pixels: draft.pixels,
     usabilityNote: draft.usabilityNote,
     quickXorHash: draft.quickXorHash,

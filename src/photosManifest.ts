@@ -8,6 +8,7 @@
  * The metadata eTag is the If-Match value.
  */
 
+import type { NativeCaptureRecord } from './model';
 import type { AppleMakerNote, SurveyExif } from './photoExif';
 
 /**
@@ -53,6 +54,12 @@ export interface ManifestPhoto {
   clickSpace: 'upright';
   /** Set when the survey dropped this original. The row stays; the file moves to photos/deleted/. */
   deletedAt?: string;
+  /**
+   * Survey-shutter sidecar. Geometric distortion correction, quality
+   * (`speed`), and requested vs delivered resolution live here next to the
+   * original file. Absent on website captures and older rows.
+   */
+  nativeCapture?: NativeCaptureRecord;
 }
 
 export interface PhotosManifest {

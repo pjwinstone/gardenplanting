@@ -1,12 +1,20 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-/** Project Pages URL: https://pjwinstone.github.io/gardenplanting/ */
-const base = '/gardenplanting/';
+/**
+ * GitHub Pages: https://pjwinstone.github.io/gardenplanting/
+ * Capacitor (`VITE_CAPACITOR=1`, `npm run build:ios`) uses a relative base
+ * so the same app loads inside WKWebView. The Pages workflow does not set
+ * that variable, so its `dist` and deploy stay on `/gardenplanting/`.
+ */
+const capacitor = process.env.VITE_CAPACITOR === '1';
+const base = capacitor ? './' : '/gardenplanting/';
 
 export default defineConfig({
   base,
-  plugins: [
+  plugins: capacitor
+    ? []
+    : [
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {

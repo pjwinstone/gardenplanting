@@ -90,6 +90,7 @@ export function manifestEntryFromRecord(record: PhotoQueueRecord): ManifestPhoto
     previewScaleY: record.pixels?.previewScaleY,
     clickMap: CLICK_MAP,
     clickSpace: 'upright',
+    nativeCapture: record.nativeCapture,
   };
 }
 
