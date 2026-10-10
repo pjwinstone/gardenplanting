@@ -9,7 +9,7 @@
     "build:ios": "tsc && VITE_CAPACITOR=1 vite build && cap sync ios",
     "preview": "vite preview",
     "test": "vitest run && npm run test:solver && npm run test:field-circle && npm run test:occ-off-baseline && npm run test:station-baseline",
-    "test:solver": "tsc -p tsconfig.solver.json --noEmit && tsx --test tests/phase1-solver.test.ts",
+    "test:solver": "tsc -p tsconfig.solver.json --noEmit && tsx --test tests/phase1-solver.test.ts tests/traverse-stage12.test.ts",
     "test:field-circle": "tsx scripts/check-field-circle-baseline.ts",
     "test:occ-off-baseline": "node scripts/check-occ-off-baseline.mjs",
     "test:station-baseline": "node scripts/check-station-baseline.mjs",

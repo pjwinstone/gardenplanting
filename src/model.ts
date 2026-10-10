@@ -246,6 +246,8 @@ export interface Photo {
   thumbnailDataUrl?: string;
   width: number;
   height: number;
+  /** Calibrated fx / width. Omitted on older photos: the frame is not resected. */
+  fxOverWidth?: number;
   clicks: PhotoClick[];
   /** Baseline whose ends were marked in this frame (sighting). */
   sightedBaselineId?: string;
@@ -253,6 +255,23 @@ export interface Photo {
   /** Original camera file (full resolution). Optional so older garden.json still loads. */
   originalFile?: PhotoOriginalFile;
   note?: string;
+  /**
+   * Phone that took this frame. The same phone and 1× lens share one fx.
+   * Absent on older gardens: each photo keeps its own scale.
+   */
+  phoneId?: string;
+  /**
+   * Lens with `phoneId`. '1×' and '1.0x' are the same key. Omitted: the solver
+   * reads EXIF on the original file. If that fails, the photo does not join 1×.
+   */
+  lens?: string;
+  /** Relative 1σ of fx, e.g. 0.02 from EXIF. Omitted: fx is not estimated. */
+  fxRelativeUncertainty?: number;
+  /**
+   * Camera occupation. Photos with the same id share one 2D offset.
+   * Not the session `setupId`. Absent: per-ray centring, as before.
+   */
+  cameraSetupId?: string;
   /** Estimated camera pose after adjust (metres, radians). */
   pose?: { x: number; y: number; yawRad: number };
   /**

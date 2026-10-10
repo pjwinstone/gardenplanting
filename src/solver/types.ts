@@ -100,12 +100,38 @@ export interface SolverPhotoInput {
   /** Replaces the pixel formula for every ray in this photo. */
   bearingSigmaRad?: number;
   /**
-   * Relative 1σ of fx, e.g. 0.01. When set, fx is a parameter with this prior
-   * and every ray from the photo carries it into the ellipses. Omitted means
-   * fx is treated as exact (the caller already folded it into bearing σ, or
-   * the rays must not check a point).
+   * Relative 1σ of fx, e.g. 0.02 for an EXIF prior. When set, fx is a
+   * parameter with this prior and every ray from the photo carries it into
+   * the ellipses. Omitted means fx is treated as exact (the caller already
+   * folded it into bearing σ, or the rays must not check a point).
    */
   fxRelativeUncertainty?: number;
+  /**
+   * Photos with the same phone and lens share one fx scale. Absent: this
+   * photo keeps its own scale, so a garden saved before shared fx still solves.
+   */
+  phoneId?: string;
+  /**
+   * Lens with `phoneId`. '1x', '1×' and '1.0x' are one key. Omitted: derived
+   * from `lensModel` / `focalLengthIn35mmFilm`. If that fails, this photo
+   * keeps a private scale and the solve flags `lens-unknown`. It does not
+   * join the 1× group.
+   */
+  lens?: string;
+  /** EXIF LensModel. Used when `phoneId` is set and `lens` is omitted. */
+  lensModel?: string;
+  /** EXIF FocalLengthIn35mmFilm. Same fallback as `lensModel`. */
+  focalLengthIn35mmFilm?: number;
+  /**
+   * Photos at one station with the same id share one 2D camera offset (pole
+   * lean and lens). The same id at another station does not: each station
+   * keeps its own offset, and the solve flags `setup-station`. The prior is
+   * `sigmaCentringM` when that is positive, or 8 mm when it is omitted. A
+   * value ≤ 0 is rejected (`centring-sigma`) and 8 mm is not substituted.
+   * The per-ray centring term is not added as well. Absent: per-ray centring,
+   * unchanged.
+   */
+  cameraSetupId?: string;
   /** Hold yaw (radians). The station position may still be free. */
   yawHeldRad?: number;
 }
@@ -133,11 +159,19 @@ export interface SolverBranchChoice {
   /** Station or free-point id. */
   id: string;
   /**
-   * Which circle intersection. For tapes to the datum ends the circles are
+   * Which intersection to keep. The index does not mean the same thing for
+   * every seed.
+   *
+   * Tape pair (two circles). For tapes to the datum ends the circles are
    * taken origin then axis, so 0 is the +Y side of origin→axis and 1 is −Y.
    * With BAS01 at the origin and BAS02 on +X, the peg side of the circle
    * sheet (right of BAS01→BAS02) is index 1. Bearings that contradict the
-   * index leave the station unset as `branch-conflict` instead of being overridden.
+   * index leave the station unset as `branch-conflict`.
+   *
+   * Tape plus one ray. 0 is the nearer crossing along the ray and 1 is the
+   * farther. That is not a side of origin→axis, and this path does not make
+   * a y-mirror. A station outside the tape circle can have two forward
+   * crossings. A station inside the circle, or at its centre, has one.
    */
   candidateIndex: 0 | 1;
 }
@@ -213,9 +247,23 @@ export interface SolvePoint {
   markCount?: number;
 }
 
+export interface SolveFocal {
+  /** `phone:<id>|<lens>`, or the photo id when fx is not shared. */
+  id: string;
+  phoneId?: string;
+  lens?: string;
+  photoIds: string[];
+  /** True when two or more photos use this scale. */
+  shared: boolean;
+  /** Adjusted s in fx = fx₀(1+s). */
+  scale: number;
+  /** A-priori 1σ of s. Null when the normal matrix was not inverted. */
+  sigma: number | null;
+}
+
 export interface SolveObservation {
   id: string;
-  kind: 'distance' | 'bearing' | 'angle' | 'focal';
+  kind: 'distance' | 'bearing' | 'angle' | 'focal' | 'offset';
   /** Observed minus computed. Metres or radians. Meaningless when used is false. */
   residual: number;
   sigma: number;
@@ -274,5 +322,19 @@ export interface SolveResult {
   inseparableObservationIds: string[];
   /** Photos the document adapter refused to resect. */
   skippedPhotos: { id: string; code: 'no-fx' }[];
+  /** One entry per fx parameter that entered the adjustment. */
+  focals: SolveFocal[];
+  /** True when one fx parameter is shared by two or more photos. */
+  fxSharedInSolve: boolean;
+  /** Lens, setup and seeding notes. Empty when nothing was flagged. */
+  warnings: SolveWarning[];
   datum: { originId: string; axisPointId: string; gardenSign: 1 | -1 };
+}
+
+export type SolveWarningCode = 'lens-unknown' | 'centring-sigma' | 'setup-station' | 'seeding-cap';
+
+export interface SolveWarning {
+  code: SolveWarningCode;
+  message: string;
+  photoIds?: string[];
 }

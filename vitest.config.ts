@@ -4,6 +4,6 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
-    exclude: ['tests/phase1-solver.test.ts'],
+    exclude: ['tests/phase1-solver.test.ts', 'tests/traverse-stage12.test.ts'],
   },
 });
