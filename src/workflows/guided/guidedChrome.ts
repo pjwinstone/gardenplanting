@@ -394,17 +394,34 @@ function renderPicker(progress: WorkflowProgress): HTMLElement {
   const past = progress.pastRuns ?? [];
   if (past.length) {
     picker.append(el('h3', 'workflow-past-title', 'Past runs'));
-    for (const item of past) picker.append(el('p', 'workflow-detail', pastRunLine(item)));
+    for (const item of past) picker.append(el('p', 'workflow-detail', formatPastRunLine(item)));
   }
   const close = button('Close', 'workflow-close-picker', { className: 'workflow-btn workflow-primary workflow-picker-close' });
   picker.append(close);
   return picker;
 }
 
-function pastRunLine(item: WorkflowPastRun): string {
-  const when = item.finishedAt ?? item.archivedAt;
-  const notes = item.notes.map((note) => `${note.stepId}: ${note.note}`);
-  return [item.workflowId, when, ...notes].join(' · ');
+/** Workflow title, step titles, and a local time. Stored ids and ISO strings stay in the document. */
+export function formatPastRunLine(item: WorkflowPastRun): string {
+  const def = workflowById(item.workflowId);
+  const title = def?.title ?? 'Earlier run';
+  const when = formatPastRunWhen(item.finishedAt ?? item.archivedAt);
+  const notes = item.notes.map((note) => {
+    const stepTitle = def?.steps.find((step) => step.id === note.stepId)?.title ?? 'Note';
+    return `${stepTitle}: ${note.note}`;
+  });
+  return [title, when, ...notes].filter((part) => part.length > 0).join(' · ');
+}
+
+function formatPastRunWhen(iso: string | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  try {
+    return date.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  } catch {
+    return '';
+  }
 }
 
 function pickerSubtitle(def: WorkflowDefinition, run: WorkflowRun | undefined): string {

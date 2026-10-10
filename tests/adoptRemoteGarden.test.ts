@@ -674,6 +674,10 @@ describe('adopt remote garden', () => {
     const puts = mockGardenDrive(remote, '"v1"');
     gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"v1"');
     gardenCloudUiForTests.edit(getState().doc);
+    expect(gardenCloudUiForTests.signInStatus()).toMatchObject({
+      inline: 'not saved',
+      text: 'Not saved — tap Save',
+    });
 
     await vi.advanceTimersByTimeAsync(2500);
     expect(puts).toHaveLength(1);
@@ -682,6 +686,8 @@ describe('adopt remote garden', () => {
     expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('complete');
     expect(gardenIsDirty()).toBe(true);
     expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
+    expect(gardenCloudUiForTests.signInStatus()).toMatchObject({ inline: 'Saving…', text: 'Saving…' });
+    expect(getCloudStatus().message).toBe('Saving…');
 
     await vi.advanceTimersByTimeAsync(2500);
     expect(puts).toHaveLength(2);
@@ -689,9 +695,29 @@ describe('adopt remote garden', () => {
     expect(puts[1]?.saveSend).toBe('complete');
     expect(gardenIsDirty()).toBe(false);
     expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
+    expect(gardenCloudUiForTests.signInStatus().text).not.toBe('Saving…');
+    expect(getCloudStatus().message).toMatch(/^Saved /);
 
     await vi.advanceTimersByTimeAsync(8000);
     expect(puts).toHaveLength(2);
+  });
+
+  it('says Not saved again when the garden changes during the Save and send follow-up', () => {
+    const local = namedGarden('On save step');
+    local.workflowProgress = saveSendProgress();
+    gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"v1"');
+    gardenCloudUiForTests.recordCloudSaved();
+    expect(gardenCloudUiForTests.signInStatus()).toMatchObject({ inline: 'Saving…', text: 'Saving…' });
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
+
+    const edited = getState().doc;
+    gardenCloudUiForTests.edit({ ...edited, name: 'Edited while saving' });
+    expect(gardenIsDirty()).toBe(true);
+    expect(gardenCloudUiForTests.signInStatus()).toMatchObject({
+      inline: 'not saved',
+      text: 'Not saved — tap Save',
+    });
+    expect(getCloudStatus().message).not.toBe('Saving…');
   });
 });
 
