@@ -105,4 +105,14 @@ Actions secrets for the hosted app are set (`VITE_MSAL_TENANT_ID=common`). Confi
 
 No client secret is required for Stage 1.
 
+### iOS app redirect
+
+The Capacitor app does not use the SPA redirect. Add platform **iOS / macOS** on this same registration (do not rename it, do not remove the SPA URIs) with bundle ID `com.pjwinstone.gardenplanting`. The redirect must be exactly:
+
+```text
+msauth.com.pjwinstone.gardenplanting://auth
+```
+
+The ordered browser steps are in [IOS_SETUP_NO_MAC.md](IOS_SETUP_NO_MAC.md).
+
 If the coach mentions a SharePoint/OneDrive licence problem, you are still on a work tenant without SPO — switch to the personal MSA and try again.

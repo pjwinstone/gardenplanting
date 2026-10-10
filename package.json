@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:ios": "tsc && VITE_CAPACITOR=1 vite build && cap sync ios",
     "preview": "vite preview",
     "test": "vitest run && npm run test:solver && npm run test:field-circle && npm run test:occ-off-baseline && npm run test:station-baseline",
     "test:solver": "tsc -p tsconfig.solver.json --noEmit && tsx --test tests/phase1-solver.test.ts",
@@ -16,6 +17,7 @@
     "build:marker-sleeves": "tsx scripts/build-marker-sleeves.ts"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@types/node": "^22.15.0",
     "fake-indexeddb": "^6.2.5",
     "puppeteer": "^24.15.0",
@@ -27,6 +29,8 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^4.30.0",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
     "exifr": "^7.1.3"
   }
 }

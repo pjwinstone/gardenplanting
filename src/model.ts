@@ -150,6 +150,53 @@ export interface PhotoClick {
 export type PhotoUploadStatus = 'queued' | 'uploading' | 'verified' | 'failed';
 
 /**
+ * Sidecar from the iOS survey shutter. The original file is still the bytes
+ * uploaded to OneDrive. A survey still does not carry a calibration matrix;
+ * `intrinsicMatrix` stays null unless the file itself included one, and that
+ * matrix is not a prior for a different distortion-correction mode.
+ * The survey shutter sets geometric distortion correction off when the
+ * device supports it, and records that flag. `photoQualityPrioritization`
+ * is `speed` (no Smart HDR / Deep Fusion blend). `requestedWidth` /
+ * `requestedHeight` are the size asked of the shutter (4032×3024, 12 MP,
+ * when the wide camera offers it). `width` / `height` are the delivered
+ * file. Camera.app may shoot 24 MP; fx is calibrated per lens and per
+ * resolution, so a 24 MP frame is not this shutter's calibration.
+ * `gravity` is CoreMotion's device frame (right-handed, +X right, +Y up,
+ * +Z out of the screen). Apple MakerNote AccelerationVector is left-handed
+ * in the opposite direction: negate each axis before comparing the two.
+ */
+export interface NativeCaptureRecord {
+  source: 'shutter' | 'library';
+  deviceType: string;
+  videoZoomFactor: number | null;
+  lensPosition: number | null;
+  focusLocked: boolean;
+  exposureLocked: boolean;
+  geometricDistortionCorrectionSupported: boolean | null;
+  geometricDistortionCorrectionEnabled: boolean | null;
+  /** Content-aware warp. The survey shutter leaves this off. Null on older rows. */
+  contentAwareDistortionCorrectionSupported: boolean | null;
+  contentAwareDistortionCorrectionEnabled: boolean | null;
+  photoQualityPrioritization: string | null;
+  autoRedEyeReductionEnabled: boolean | null;
+  stabilization: string | null;
+  focalLengthMm: number | null;
+  focalLength35mm: number | null;
+  lensModel: string | null;
+  intrinsicMatrix: number[] | null;
+  intrinsicReferenceWidth: number | null;
+  intrinsicReferenceHeight: number | null;
+  motionInterpolated: boolean;
+  gravity: { x: number; y: number; z: number } | null;
+  width: number | null;
+  height: number | null;
+  /** Size requested from the shutter. Null for a library pick. */
+  requestedWidth: number | null;
+  requestedHeight: number | null;
+  orientation: number | null;
+}
+
+/**
  * Pointer to the original camera file in `/Garden Survey/photos/`.
  * Absent on older documents. The thumbnail stays a separate display preview.
  */
@@ -185,6 +232,8 @@ export interface PhotoOriginalFile {
   uploadPermanent?: boolean;
   /** Missing lens data, or capture time outside the station setup. */
   usabilityNote?: string;
+  /** Present when the iOS app took or picked this original. */
+  nativeCapture?: NativeCaptureRecord;
   uploadStatus?: PhotoUploadStatus;
   uploadError?: string;
 }
