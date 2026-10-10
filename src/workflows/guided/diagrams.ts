@@ -74,7 +74,7 @@ function sleeveJoin(): string {
     <text x="276" y="128" ${text}>dowel</text>
     <text x="8" y="156" ${text}>1. Cut just inside CUT HERE.</text>
     <text x="8" y="180" ${text}>2. Fix the tab to the dowel.</text>
-    <text x="8" y="204" ${text}>3. Wrap, stick the left edge down.</text>
+    <text x="8" y="204" ${text}>3. Square on the fold crosses, stick the edge.</text>
     <text x="8" y="228" ${text}>4. Turn the seam away.</text>
     `,
     'Sleeve join. Cut just inside CUT HERE, toward the bands. Fix the blank tab, wrap, stick the edge, turn the seam away.',

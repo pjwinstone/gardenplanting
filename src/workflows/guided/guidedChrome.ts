@@ -14,9 +14,11 @@ import {
   noteWorkflow,
   pausedRun,
   readProgress,
+  restartWorkflow,
   resumeWorkflow,
   reviewWorkflow,
   startWorkflow,
+  stepIsManualOnly,
   tickWorkflow,
   type WorkflowMove,
 } from './engine';
@@ -116,6 +118,7 @@ export function handleWorkflowCommand(
   if (cmd === 'workflow-start') move = startWorkflow(progress, workflowId);
   else if (cmd === 'workflow-resume') move = resumeWorkflow(progress, workflowId);
   else if (cmd === 'workflow-review') move = reviewWorkflow(progress, workflowId);
+  else if (cmd === 'workflow-start-over') move = restartWorkflow(progress, workflowId || progress.activeId || '');
   else if (cmd === 'workflow-next') move = advanceWorkflow(progress);
   else if (cmd === 'workflow-back') move = backWorkflow(progress);
   else if (cmd === 'workflow-done') move = doneWorkflow(progress);
@@ -127,7 +130,7 @@ export function handleWorkflowCommand(
   }
   if (!move) return {};
   notice = move.notice ?? null;
-  if (cmd === 'workflow-start' || cmd === 'workflow-resume' || cmd === 'workflow-review') {
+  if (cmd === 'workflow-start' || cmd === 'workflow-resume' || cmd === 'workflow-review' || cmd === 'workflow-start-over') {
     pickerOpen = false;
     sheetOpen = false;
   }
@@ -206,11 +209,23 @@ function recentlyAuto(state: WorkflowRun['steps'][string] | undefined): boolean 
   return Number.isFinite(at) && Date.now() - at < 1600;
 }
 
+function uploadedStep(step: WorkflowStep): { stationId: string; minPhotos: number } | undefined {
+  if ('on' in step.complete && step.complete.on === 'photo.uploaded') return step.complete;
+  return undefined;
+}
+
 function autoSentence(step: WorkflowStep): string {
-  if ('on' in step.complete && step.complete.on === 'photo.verified') {
-    return 'Ticked from the photo. You did not tap it.';
+  const photo = uploadedStep(step);
+  if (photo) {
+    const noun = photo.minPhotos === 1 ? 'photo' : 'photos';
+    return `${photo.minPhotos} ${noun} saved at ${photo.stationId}.`;
   }
   return 'Ticked from the app. You did not tap it.';
+}
+
+function nextLabel(step: WorkflowStep, last: boolean): string {
+  if (stepIsManualOnly(step) || last) return 'Done';
+  return 'Next';
 }
 
 function sunButton(): HTMLButtonElement {
@@ -246,8 +261,7 @@ function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: Workflow
   const back = button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 });
   const details = button('Details', 'workflow-expand');
   const last = stepIndex(def, run) === def.steps.length - 1;
-  const next = button(last ? 'Done' : 'Next', last ? 'workflow-done' : 'workflow-next', { primary: true });
-  actions.append(back, details, next);
+  actions.append(back, details, button(nextLabel(step, last), 'workflow-next', { primary: true }));
   bar.append(actions);
   return bar;
 }
@@ -271,6 +285,7 @@ function renderFinished(def: WorkflowDefinition, progress: WorkflowProgress): HT
     bar.append(block);
   }
   const actions = el('div', 'workflow-actions');
+  actions.append(button('Start over', 'workflow-start-over', { workflow: def.id }));
   actions.append(button('Done', 'workflow-done', { primary: true }));
   bar.append(actions);
   return bar;
@@ -285,8 +300,15 @@ function renderThumb(def: WorkflowDefinition, run: WorkflowRun, progress: Workfl
       workflow: paused.id,
     });
   }
-  const last = !!run.finishedAt || stepIndex(def, run) === def.steps.length - 1;
-  return button(last ? 'Done' : 'Next', last ? 'workflow-done' : 'workflow-next', {
+  if (run.finishedAt) {
+    return button('Done', 'workflow-done', {
+      className: 'workflow-thumb',
+      testid: 'workflow-thumb',
+    });
+  }
+  const step = currentStep(def, run);
+  const last = stepIndex(def, run) === def.steps.length - 1;
+  return button(nextLabel(step, last), 'workflow-next', {
     className: 'workflow-thumb',
     testid: 'workflow-thumb',
   });
@@ -320,11 +342,11 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
     note.rows = 2;
     sheet.append(note);
   }
-  const manual = 'on' in step.complete && step.complete.on === 'manual';
+  const manual = stepIsManualOnly(step);
   if (!manual) {
-    const photo = 'on' in step.complete && step.complete.on === 'photo.verified' ? step.complete : null;
+    const photo = uploadedStep(step);
     const hint = photo
-      ? `Ticks itself when the ${photo.stationId} photo is verified.`
+      ? `Ticks when ${photo.minPhotos} ${photo.minPhotos === 1 ? 'photo is' : 'photos are'} saved at ${photo.stationId}.`
       : 'Ticks itself when the app sees this step. You can still tick it by hand.';
     sheet.append(el('p', 'workflow-auto', state?.status === 'complete'
       ? (state.completedBy === 'auto' ? autoSentence(step) : 'Ticked by you.')
@@ -337,11 +359,11 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
   const actions = el('div', 'workflow-sheet-actions');
   actions.append(button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 }));
   actions.append(button('Close', 'workflow-collapse'));
-  if (state?.status !== 'complete') {
+  if (!manual && state?.status !== 'complete') {
     actions.append(button('Tick anyway', 'workflow-tick', { step: step.id }));
   }
   const last = stepIndex(def, run) === def.steps.length - 1;
-  actions.append(button(last ? 'Done' : 'Next', last ? 'workflow-done' : 'workflow-next', { primary: true }));
+  actions.append(button(nextLabel(step, last), 'workflow-next', { primary: true }));
   sheet.append(actions);
   return sheet;
 }
@@ -379,12 +401,17 @@ function pickerSubtitle(def: WorkflowDefinition, run: WorkflowRun | undefined): 
   return `${index + 1}/${def.steps.length} · ${step?.title ?? ''}`;
 }
 
-function pickerAction(def: WorkflowDefinition, run: WorkflowRun | undefined): HTMLButtonElement {
+function pickerAction(def: WorkflowDefinition, run: WorkflowRun | undefined): HTMLElement {
   if (def.status !== 'ready') {
     return button('Later', 'workflow-start', { workflow: def.id, disabled: true });
   }
   if (!run) return button('Start', 'workflow-start', { workflow: def.id, primary: true });
-  if (run.finishedAt) return button('Review', 'workflow-review', { workflow: def.id, primary: true });
+  if (run.finishedAt) {
+    const actions = el('div', 'workflow-row-actions');
+    actions.append(button('Review', 'workflow-review', { workflow: def.id, primary: true }));
+    actions.append(button('Start over', 'workflow-start-over', { workflow: def.id }));
+    return actions;
+  }
   return button('Resume', 'workflow-resume', { workflow: def.id, primary: true });
 }
 

@@ -119,12 +119,12 @@ export const circleFieldTest: WorkflowDefinition = {
       detail: [
         'Before any station. One plumbed cane. Front of the phone about 4.000 m from the paper, between 3 m and 5 m.',
         'Tape that, level, write the raw reading. Axis length is the reading plus that sleeve’s R. One still. Name it CAL.',
-        'Shoot in Camera.app at 1×. In + Point, Library at Actual Size. Not the in-app shutter.',
+        'On iOS, use the in-app camera. Same capture path and lens as the station photos. fx is per lens and per resolution.',
       ],
       noteLabel: 'CAL, phone front to paper',
-      doneTitle: 'CAL photo verified',
+      doneTitle: '1 photo saved at CAL',
       doneInstruction: 'One calibration still is in. Stations are next.',
-      complete: { on: 'photo.verified', stationId: 'CAL', minPhotos: 1 },
+      complete: { on: 'photo.uploaded', stationId: 'CAL', minPhotos: 1 },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
@@ -138,9 +138,9 @@ export const circleFieldTest: WorkflowDefinition = {
       ],
       diagram: 'stn01',
       noteLabel: 'STN01 to BAS01 / BAS02',
-      doneTitle: 'STN01 photo verified',
+      doneTitle: '2 photos saved at STN01',
       doneInstruction: 'Turn for CRC06. Keep BAS02. Do not step.',
-      complete: { on: 'photo.verified', stationId: 'STN01', minPhotos: 2 },
+      complete: { on: 'photo.uploaded', stationId: 'STN01', minPhotos: 2 },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
@@ -154,9 +154,9 @@ export const circleFieldTest: WorkflowDefinition = {
         'Do not photograph CRC04 from here.',
       ],
       noteLabel: 'STN02 to BAS01 / BAS02',
-      doneTitle: 'STN02 photo verified',
+      doneTitle: '2 photos saved at STN02',
       doneInstruction: 'CRC05 and CRC04 stay out of this station.',
-      complete: { on: 'photo.verified', stationId: 'STN02', minPhotos: 2 },
+      complete: { on: 'photo.uploaded', stationId: 'STN02', minPhotos: 2 },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
@@ -169,9 +169,9 @@ export const circleFieldTest: WorkflowDefinition = {
         'Photo 2: turn, keep BAS02. Add CRC06, CRC05, CRC04. Do not step.',
       ],
       noteLabel: 'STN03 to BAS01 / BAS02',
-      doneTitle: 'STN03 photo verified',
+      doneTitle: '2 photos saved at STN03',
       doneInstruction: 'Both stills are in. Save the garden next.',
-      complete: { on: 'photo.verified', stationId: 'STN03', minPhotos: 2 },
+      complete: { on: 'photo.uploaded', stationId: 'STN03', minPhotos: 2 },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
@@ -249,7 +249,7 @@ export const printFitMarkers: WorkflowDefinition = {
     {
       id: 'cut',
       title: 'Cut',
-      instruction: 'Just inside CUT HERE, toward the bands. Right edge on the dash, or the sheet.',
+      instruction: 'Left: just inside the dash. Right: on the right-hand dashed line, or the sheet edge.',
       detail: [
         'Laminate or film the flat sheet first, if you use film. Then cut. Bands stay horizontal. TOP stays up.',
         'Cut just inside the CUT HERE dash, between the dash and the start of the bands (about 4.4–5.0 mm from the sheet edge), so the band ink runs right to the cut edge. Inside means toward the bands, not into the margin.',
@@ -266,8 +266,9 @@ export const printFitMarkers: WorkflowDefinition = {
       detail: [
         'Fix the blank tab to the 60 mm dowel before you wrap. Flush staples or flush pins in wood, or glue or thin double-sided tape on a tube. No raised heads under the overlap.',
         'Staples go in the blank part only, at least 4 mm from the fold, never through the bands. The tab reads staple/glue here — overlap under the other edge.',
-        'Wrap snug, printed face out, TOP up. Do not crease the fold. Stick the cut left edge down over the tab.',
-        'Turn that seam away from the stations and away from the camera.',
+        'Wrap snug, printed face out, TOP up. Do not crease the fold. Square the wrap on the 195 mm fold crosses. A 1° spiral costs about 3.3 mm.',
+        'Stick the cut left edge down over the tab with glue or thin double-sided tape.',
+        'Turn that seam away from the stations and the camera. Keep the seam off the middle of the calibration photo.',
       ],
       diagram: 'sleeve-join',
       complete: { on: 'manual' },

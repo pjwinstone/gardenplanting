@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  LANDSCAPE_BAR_MAX_PX,
   gapBetween,
   menuButtonRect,
   rectsIntersect,
@@ -61,5 +63,26 @@ describe('workflow chrome layout', () => {
     const menu = menuButtonRect(393, 852, PHONE);
     expect(menu.w).toBe(44);
     expect(menu.h).toBe(44);
+  });
+
+  it('keeps a landscape phone bar within 110px at 844×390', () => {
+    const barHeight = 104;
+    expect(barHeight).toBeLessThanOrEqual(LANDSCAPE_BAR_MAX_PX);
+    const rects = workflowChromeRects({
+      width: 844,
+      height: 390,
+      insets: { top: 0, right: 0, bottom: 21, left: 47 },
+      barHeight,
+      sheetHeight: 320,
+      thumbWidth: 88,
+    });
+    expect(rects.bar.h).toBeLessThanOrEqual(LANDSCAPE_BAR_MAX_PX);
+    expect(rectsIntersect(rects.bar, rects.menu)).toBe(false);
+    expect(gapBetween(rects.bar, rects.menu)).toBeGreaterThanOrEqual(12);
+    const css = readFileSync(new URL('../src/workflows/guided/guidedChrome.css', import.meta.url), 'utf8');
+    expect(css).toContain('max-height: 420px');
+    expect(css).toContain('orientation: landscape');
+    expect(css).toContain('text-overflow: ellipsis');
+    expect(css).toContain('white-space: nowrap');
   });
 });

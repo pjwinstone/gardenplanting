@@ -109,9 +109,9 @@ One still, before any station. About 4 m, phone front to paper.
 
 - Before any station. One plumbed cane. Front of the phone about 4.000 m from the paper, between 3 m and 5 m.
 - Tape that, level, write the raw reading. Axis length is the reading plus that sleeve’s R. One still. Name it CAL.
-- Shoot in Camera.app at 1×. In + Point, Library at Actual Size. Not the in-app shutter.
+- On iOS, use the in-app camera. Same capture path and lens as the station photos. fx is per lens and per resolution.
 
-Completes when: photo.verified CAL, 1 photo.
+Completes when: photo.uploaded CAL, 1 photo.
 
 Opens: Mode ADD_POINT.
 
@@ -125,7 +125,7 @@ Landscape, 1×. Both ends, and CRC01 to CRC05.
 - Photo 1: both baseline ends, and CRC01, CRC02, CRC03, CRC04, CRC05. CRC06 does not fit.
 - Photo 2: turn, keep BAS02, add CRC06. Do not step. 1×, landscape, lens over the middle of the pole, then the bubble.
 
-Completes when: photo.verified STN01, 2 photos.
+Completes when: photo.uploaded STN01, 2 photos.
 
 Opens: Mode ADD_POINT.
 
@@ -142,7 +142,7 @@ Outside the circle. Do not take CRC05. Do not photograph CRC04.
 - Photo 2: turn, keep BAS02. Take CRC02, CRC01, CRC06, CRC03. Do not take CRC05. It sits behind CRC03.
 - Do not photograph CRC04 from here.
 
-Completes when: photo.verified STN02, 2 photos.
+Completes when: photo.uploaded STN02, 2 photos.
 
 Opens: Mode ADD_POINT.
 
@@ -156,7 +156,7 @@ Required. Two stations are not a finished test.
 - Photo 1: both baseline ends, and CRC01, CRC02, CRC03.
 - Photo 2: turn, keep BAS02. Add CRC06, CRC05, CRC04. Do not step.
 
-Completes when: photo.verified STN03, 2 photos.
+Completes when: photo.uploaded STN03, 2 photos.
 
 Opens: Mode ADD_POINT.
 
@@ -230,7 +230,7 @@ Opens: —.
 
 ### 5. Cut
 
-Just inside CUT HERE, toward the bands. Right edge on the dash, or the sheet.
+Left: just inside the dash. Right: on the right-hand dashed line, or the sheet edge.
 
 - Laminate or film the flat sheet first, if you use film. Then cut. Bands stay horizontal. TOP stays up.
 - Cut just inside the CUT HERE dash, between the dash and the start of the bands (about 4.4–5.0 mm from the sheet edge), so the band ink runs right to the cut edge. Inside means toward the bands, not into the margin.
@@ -247,8 +247,9 @@ Fix the tab, wrap, stick the left edge down, seam away.
 
 - Fix the blank tab to the 60 mm dowel before you wrap. Flush staples or flush pins in wood, or glue or thin double-sided tape on a tube. No raised heads under the overlap.
 - Staples go in the blank part only, at least 4 mm from the fold, never through the bands. The tab reads staple/glue here — overlap under the other edge.
-- Wrap snug, printed face out, TOP up. Do not crease the fold. Stick the cut left edge down over the tab.
-- Turn that seam away from the stations and away from the camera.
+- Wrap snug, printed face out, TOP up. Do not crease the fold. Square the wrap on the 195 mm fold crosses. A 1° spiral costs about 3.3 mm.
+- Stick the cut left edge down over the tab with glue or thin double-sided tape.
+- Turn that seam away from the stations and the camera. Keep the seam off the middle of the calibration photo.
 
 Completes when: Tick by hand.
 

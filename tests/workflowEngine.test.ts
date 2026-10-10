@@ -5,7 +5,7 @@ import {
   advanceWorkflow,
   applyWorkflowEvent,
   backWorkflow,
-  countVerifiedUsablePhotos,
+  countUploadedPhotosForStep,
   doneWorkflow,
   emptyProgress,
   nameMatchesStation,
@@ -13,11 +13,12 @@ import {
   readProgress,
   reconcileRun,
   reduceRun,
+  restartWorkflow,
   resumeWorkflow,
   startWorkflow,
   tickWorkflow,
   withWorkflowEvent,
-  workflowAfterVerifiedPhoto,
+  workflowAfterUploadedPhoto,
 } from '../src/workflows/guided/engine';
 import type { WorkflowDefinition, WorkflowEvent, WorkflowRun } from '../src/workflows/guided/types';
 
@@ -28,7 +29,14 @@ function started(id: 'circle-field-test' | 'print-fit-markers' = 'circle-field-t
   return startWorkflow(emptyProgress(), id, NOW).progress;
 }
 
-function photo(id: string, pointId: string, status: 'verified' | 'failed', note?: string): Photo {
+function photo(
+  id: string,
+  pointId: string,
+  status: 'verified' | 'failed',
+  note?: string,
+  capturedAt = '2026-06-01T12:01:00.000Z',
+  receivedAt = '2026-06-01T12:01:02.000Z',
+): Photo {
   return {
     id,
     setupId: 'setup-1',
@@ -36,6 +44,7 @@ function photo(id: string, pointId: string, status: 'verified' | 'failed', note?
     width: 100,
     height: 80,
     clicks: [],
+    exifDateTimeOriginal: capturedAt,
     originalFile: {
       fileName: `${id}.jpg`,
       size: 10,
@@ -43,6 +52,8 @@ function photo(id: string, pointId: string, status: 'verified' | 'failed', note?
       contentType: 'image/jpeg',
       uploadStatus: status,
       usabilityNote: note,
+      capturedAt,
+      receivedAt,
     },
   };
 }
@@ -79,11 +90,12 @@ describe('guided workflow engine', () => {
     const step = ticked.progress.runs['circle-field-test']?.steps.stn01;
     expect(step).toMatchObject({ status: 'complete', completedBy: 'manual' });
     const again = applyWorkflowEvent(ticked.progress, {
-      type: 'photo.verified',
+      type: 'photo.uploaded',
       stationId: 'STN01',
       pointLabel: 'STN01 1',
       objectName: 'STN01',
       photoCount: 2,
+      photoIds: ['a', 'b'],
     }, LATER);
     expect(again.runs['circle-field-test']?.steps.stn01?.completedBy).toBe('auto');
   });
@@ -95,17 +107,71 @@ describe('guided workflow engine', () => {
 
     const one = stationDoc([photo('a', 'P01', 'verified'), photo('b', 'P01', 'verified', 'Not usable for focal length.')]);
     let doc: GardenDocument = { ...one, workflowProgress: started() };
-    expect(countVerifiedUsablePhotos(doc, 'STN01')).toBe(1);
-    doc = workflowAfterVerifiedPhoto(doc, 'a', NOW);
+    const run = doc.workflowProgress?.runs['circle-field-test'];
+    expect(run && countUploadedPhotosForStep(doc, 'STN01', run, 'stn01').count).toBe(1);
+    doc = workflowAfterUploadedPhoto(doc, 'a', NOW);
     expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('pending');
 
-    const two = stationDoc([photo('a', 'P01', 'verified'), photo('b', 'P01', 'verified')]);
+    const two = stationDoc([
+      photo('a', 'P01', 'verified'),
+      photo('b', 'P01', 'verified', undefined, '2026-06-01T12:02:00.000Z', '2026-06-01T12:02:02.000Z'),
+    ]);
     doc = { ...two, workflowProgress: doc.workflowProgress };
-    doc = workflowAfterVerifiedPhoto(doc, 'b', LATER);
+    doc = workflowAfterUploadedPhoto(doc, 'b', LATER);
     expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01).toMatchObject({
       status: 'complete',
       completedBy: 'auto',
     });
+  });
+
+  it('does not tick a station from photos captured or uploaded before this run', () => {
+    const progress = started();
+    expect(progress.runs['circle-field-test']?.startedAt).toBe(NOW);
+    const staleA = photo('old-a', 'P01', 'verified', undefined, '2026-05-01T08:00:00.000Z', '2026-05-01T08:00:02.000Z');
+    const staleB = photo('old-b', 'P01', 'verified', undefined, '2026-05-01T08:01:00.000Z', '2026-05-01T08:01:02.000Z');
+    let doc: GardenDocument = { ...stationDoc([staleA, staleB]), workflowProgress: progress };
+    doc = workflowAfterUploadedPhoto(doc, 'old-b', NOW);
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('pending');
+
+    const missingTime = photo('bare', 'P01', 'verified');
+    delete missingTime.originalFile?.capturedAt;
+    delete missingTime.originalFile?.receivedAt;
+    delete missingTime.exifDateTimeOriginal;
+    const earlyReceive = photo('early', 'P01', 'verified', undefined, '2026-06-01T12:03:00.000Z', '2026-05-30T08:00:00.000Z');
+    doc = { ...stationDoc([staleA, staleB, missingTime, earlyReceive]), workflowProgress: doc.workflowProgress };
+    doc = workflowAfterUploadedPhoto(doc, 'early', LATER);
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('pending');
+
+    const freshA = photo('new-a', 'P01', 'verified', undefined, '2026-06-01T12:01:00.000Z', '2026-06-01T12:01:02.000Z');
+    doc = { ...stationDoc([staleA, staleB, freshA]), workflowProgress: doc.workflowProgress };
+    doc = workflowAfterUploadedPhoto(doc, 'new-a', LATER);
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('pending');
+
+    const freshB = photo('new-b', 'P01', 'verified', undefined, '2026-06-01T12:04:00.000Z', '2026-06-01T12:04:02.000Z');
+    doc = { ...stationDoc([staleA, staleB, freshA, freshB]), workflowProgress: doc.workflowProgress };
+    doc = workflowAfterUploadedPhoto(doc, 'new-b', LATER);
+    const step = doc.workflowProgress?.runs['circle-field-test']?.steps.stn01;
+    expect(step).toMatchObject({ status: 'complete', completedBy: 'auto' });
+    expect(step?.consumedPhotoIds).toEqual(['new-a', 'new-b']);
+  });
+
+  it('pressing Next through every Print & fit step finishes the run', () => {
+    let progress = startWorkflow(emptyProgress(), 'print-fit-markers', NOW).progress;
+    for (let i = 0; i < printFitMarkers.steps.length; i += 1) {
+      progress = advanceWorkflow(progress, NOW).progress;
+    }
+    const run = progress.runs['print-fit-markers'];
+    expect(run?.finishedAt).toBe(NOW);
+    expect(progress.activeId).toBe('print-fit-markers');
+    for (const step of printFitMarkers.steps) {
+      expect(run?.steps[step.id]).toMatchObject({ status: 'complete', completedBy: 'manual' });
+    }
+    const again = restartWorkflow(progress, 'print-fit-markers', LATER);
+    expect(again.changed).toBe(true);
+    expect(again.progress.runs['print-fit-markers']?.finishedAt).toBeUndefined();
+    expect(again.progress.runs['print-fit-markers']?.startedAt).toBe(LATER);
+    expect(again.progress.runs['print-fit-markers']?.steps.assign?.status).toBe('pending');
+    expect(again.progress.activeId).toBe('print-fit-markers');
   });
 
   it('needs both baseline pulls in the note and a tape save with zero offsets', () => {
@@ -208,6 +274,7 @@ describe('guided workflow engine', () => {
       workflowId: 'circle-field-test',
       revision: 1,
       currentStepId: id,
+      startedAt: NOW,
       updatedAt: NOW,
       steps: { [id]: { status: 'pending', completedBy: null } },
     });
@@ -239,5 +306,20 @@ describe('guided workflow engine', () => {
       NOW,
     );
     expect(marked.steps.marks?.status).toBe('complete');
+    const detected = reduceRun(
+      def('detected', { on: 'markers.detected', stationId: 'STN01', minPhotos: 2 }),
+      run('detected'),
+      {
+        type: 'markers.detected',
+        stationId: 'STN01',
+        pointLabel: 'STN01 1',
+        objectName: 'STN01',
+        markerIds: ['BAS01', 'BAS02'],
+        photoIds: ['p1', 'p2'],
+      },
+      NOW,
+    );
+    expect(detected.steps.detected?.status).toBe('complete');
+    expect(detected.steps.detected?.consumedPhotoIds).toEqual(['p1', 'p2']);
   });
 });

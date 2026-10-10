@@ -7,6 +7,7 @@ import { gardenSaveIsOwed } from '../src/cloudSignIn';
 import { setGraphTokenClientForTests } from '../src/msalAuth';
 import { emptyDocument, type GardenDocument, type Photo } from '../src/model';
 import { gardenCloudUiForTests, getState, photosOnPoint } from '../src/ui';
+import { advanceWorkflow, emptyProgress, startWorkflow } from '../src/workflows/guided/engine';
 
 const authFlag = vi.hoisted(() => ({ signedIn: false }));
 
@@ -613,6 +614,48 @@ describe('adopt remote garden', () => {
     expect(getCloudStatus().message).toBe(
       'This browser changed while OneDrive was being adopted. Nothing was replaced. Tap Save to retry.',
     );
+  });
+
+  it('records cloud.saved during adopt without bumping the revision or scheduling another upload', async () => {
+    let progress = startWorkflow(emptyProgress(), 'circle-field-test', '2026-06-01T12:00:00.000Z').progress;
+    for (let i = 0; i < 11; i += 1) {
+      progress = advanceWorkflow(progress, '2026-06-01T12:00:00.000Z').progress;
+    }
+    expect(progress.runs['circle-field-test']?.currentStepId).toBe('save-send');
+    const local = namedGarden('On save step');
+    local.workflowProgress = progress;
+    local.updatedAt = '2026-06-01T12:00:00.000Z';
+    gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"local"');
+    const revision = gardenRevision();
+    expect(gardenIsDirty()).toBe(false);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
+
+    gardenCloudUiForTests.recordCloudSaved();
+    expect(gardenRevision()).toBe(revision);
+    expect(gardenIsDirty()).toBe(false);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
+    expect(getState().doc.updatedAt).toBe('2026-06-01T12:00:00.000Z');
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.completedBy).toBe('auto');
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetches).toBe(0);
+
+    const remote = namedGarden('OneDrive copy');
+    remote.createdAt = '2020-01-01T00:00:00.000Z';
+    remote.updatedAt = '2026-10-03T11:00:00.000Z';
+    const replaced = gardenCloudUiForTests.adopt(
+      remote,
+      'garden-v9.json',
+      '"v9"',
+      [],
+      undefined,
+      revision,
+    );
+    expect(replaced).toBe(true);
+    expect(getState().doc.name).toBe('OneDrive copy');
+    expect(gardenRevision()).toBe(revision);
+    expect(gardenIsDirty()).toBe(false);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
   });
 });
 

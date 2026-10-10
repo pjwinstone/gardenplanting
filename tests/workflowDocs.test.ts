@@ -10,10 +10,18 @@ describe('workflow markdown', () => {
     expect(generated).toContain('12 steps');
     expect(generated).toContain('7 steps');
     expect(generated).toContain('CUT HERE');
+    expect(generated).toContain('Left: just inside the dash. Right: on the right-hand dashed line, or the sheet edge.');
     expect(generated).toContain('just inside the CUT HERE dash');
     expect(generated).toContain('4.4–5.0 mm');
     expect(generated).toContain('Flush staples');
+    expect(generated).toContain('195 mm fold crosses');
+    expect(generated).toContain('3.3 mm');
+    expect(generated).toContain('thin double-sided tape');
+    expect(generated).toContain('off the middle of the calibration photo');
+    expect(generated).toContain('in-app camera');
+    expect(generated).not.toContain('Camera.app');
     expect(generated).not.toContain('exactly on the dashed line');
+    expect(generated).toContain('photo.uploaded STN01');
     expect(generated).toContain('STN01');
     expect(generated).toContain('STN03');
     expect(generated).toContain('Coming soon');

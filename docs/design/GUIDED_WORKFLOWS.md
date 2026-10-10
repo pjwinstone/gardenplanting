@@ -66,11 +66,11 @@ The picture is step 9 of the circle test: “STN01 — left”, instruction “L
 
 Same header, plus the diagram and the step’s detail lines, taken from the field sheet. The sheet grows with its content and stops at least 12px above the menu button. It does not dim the plan. The plan shows in the side margins and below the sheet.
 
-The STN01 sheet draws the station: left of the baseline, peg and circle on the right, 8.00 m / 8.00 m. Detail lines are the two photos from the sheet, and the pole check (lens over the middle, then bubble). A line says the step ticks itself when the STN01 photo is verified. **Tick anyway** is there for a failed upload. **Back** and **Next** sit on the foot of the sheet.
+The STN01 sheet draws the station: left of the baseline, peg and circle on the right, 8.00 m / 8.00 m. Detail lines are the two photos from the sheet, and the pole check (lens over the middle, then bubble). A line says the step ticks when 2 photos are saved at STN01. That means the OneDrive upload checked out. It does not mean markers were detected. **Tick anyway** is there for an auto step you want to override. A manual-only step has no Tick anyway: **Done** ticks it and moves on. **Back** sits on the foot of the sheet.
 
 ### Auto-complete
 
-When a typed app event matches the step, the step ticks without a tap. The frame in the picture is mid-stroke: the ring is part-drawn, the check has turned the corner and started up. The title becomes “STN01 photo verified”. The instruction becomes the next physical act: “Turn for CRC06. Keep BAS02. Do not step.” A mono line says “Ticked from the photo. You did not tap it.”
+When a typed app event matches the step, the step ticks without a tap. The frame in the picture is mid-stroke: the ring is part-drawn, the check has turned the corner and started up. The title becomes “2 photos saved at STN01”. The instruction becomes the next physical act: “Turn for CRC06. Keep BAS02. Do not step.” A mono line says “2 photos saved at STN01.” Only photos captured and uploaded after this run started count. `markers.detected` is a typed hook for a later detector. Nothing emits it yet.
 
 If the system reduce-motion setting is on, the tick snaps. No stroke animation. A light haptic plays in the Capacitor shell, and not when reduce-motion is on.
 
@@ -200,7 +200,8 @@ interface WorkflowStep {
 type WorkflowTrigger =
   | { on: 'manual' }
   | { on: 'baseline.saved'; endA: string; endB: string; kind: 'tape' | 'laser' }
-  | { on: 'photo.verified'; pointLabel: string; minPhotos: number }
+  | { on: 'photo.uploaded'; stationId: string; minPhotos: number }
+  | { on: 'markers.detected'; stationId: string; minPhotos: number }
   | { on: 'photo.marksConfirmed'; pointLabel: string; marks: string[] }
   | { on: 'item.created'; name: string; geometry: 'circle' | 'square' | 'triangle' | 'irregular_polygon' }
   | { on: 'cloud.saved' }
@@ -214,7 +215,7 @@ type WorkflowLink =
   | { to: 'marker-pdf'; file: string };
 ```
 
-`photo.verified` matches today’s upload word. A still with “Not usable for focal length” does not count. `minPhotos: 2` is the yaw pair (do not step). `baseline.saved` is **Save baseline** with those ends and tape, offsets left at 0. The trigger checks the offsets. A non-zero offset does not complete the circle step.
+`photo.uploaded` is the OneDrive upload checking out. It is not marker detection. A still with “Not usable for focal length” does not count, and neither does a photo captured or received before the run started. `minPhotos: 2` is the yaw pair (do not step). `baseline.saved` is **Save baseline** with those ends and tape, offsets left at 0. The trigger checks the offsets. A non-zero offset does not complete the circle step. On a manual-only step, **Done** ticks it and advances. **Tick anyway** stays on auto steps.
 
 Events are emitted by the existing save, photo, and sign-in paths. The workflow module does not own the camera.
 
@@ -261,10 +262,10 @@ Twelve steps. Wording is the approved sheet, [FIELD_CHECKLIST_CIRCLE.md](../FIEL
 | 5 | Tape the baseline both ways | Manual note of both pulls, and `baseline.saved` tape BAS01–BAS02 | Menu → Baseline |
 | 6 | Laser CHK-BASE | Manual. Not typed into the app | — |
 | 7 | Plumb and height | Manual, one tick per cane | — |
-| 8 | Calibration CAL | `photo.verified` label CAL, 1 photo | + Point, name CAL |
-| 9 | STN01 — left, 8.00 / 8.00 | `photo.verified` STN01, 2 photos | + Point, name STN01 |
-| 10 | STN02 — right, 6.50 / 9.00 | `photo.verified` STN02, 2 photos | + Point, name STN02 |
-| 11 | STN03 — right, 10.50 / 10.50 | `photo.verified` STN03, 2 photos | + Point, name STN03 |
+| 8 | Calibration CAL | `photo.uploaded` CAL, 1 photo. On iOS, the in-app camera, same path and lens as the stations. | + Point, name CAL |
+| 9 | STN01 — left, 8.00 / 8.00 | `photo.uploaded` STN01, 2 photos | + Point, name STN01 |
+| 10 | STN02 — right, 6.50 / 9.00 | `photo.uploaded` STN02, 2 photos | + Point, name STN02 |
+| 11 | STN03 — right, 10.50 / 10.50 | `photo.uploaded` STN03, 2 photos | + Point, name STN03 |
 | 12 | Save and send | `cloud.saved` | Menu → Sign in |
 
 Detail lines, in order:
@@ -294,15 +295,15 @@ Seven steps, from [PRINT_MARKERS.md](../PRINT_MARKERS.md). All manual. The app c
 | 2 | Print at actual size | A4 portrait, 210×297 mm. Actual size / 100%. No fit-to-page, no shrink, no scaling, no borderless, no two-up. Highest quality. Black only. Colour management off. Link: `docs/markers/all-sleeves.pdf` and the eight single pages. |
 | 3 | Check the rulers | The 100 mm bar must be 100 mm within ±0.5 mm. The 50 mm bar is on the blank tab. The sheet also has 250 mm down the tab and 180 mm along the bottom legend. A miss means the driver scaled the page. Reprint. Do not use that sheet. The four black bars at TOP are the sync. Together they are 52 mm. |
 | 4 | Paper and film | Matte. Laser or pigment on matte polypropylene or polyester. If paper: matte, 120–160 gsm, not dye. Matte film over toner only. After any film, measure the 100 mm bar again. Gloss blinds the reader. Keep the sheets dry until the glue has set. |
-| 5 | Cut | Laminate first if you use film. Cut just inside the CUT HERE dash, between the dash and the bands (about 4.4–5.0 mm), so the band ink runs to the cut edge. Inside is toward the bands. The dash ink ends near 4.35 mm and the bands start near 4.50 mm; cutting on the dash leaves a white sliver. Cut the right edge on its dashed line, or the sheet edge if the dashes did not print. Cut 5 mm off the top and the bottom. Do not crease the fold. |
-| 6 | Join the sleeve | Fix the blank tab to the 60 mm dowel first, with flush staples, flush pins, glue, or tape. Staples only in the blank, at least 4 mm from the fold, never through the bands. Wrap snug, printed face out, TOP up, without creasing the fold. Stick the cut left edge down over the tab. Turn the seam away from the stations and the camera. Diagram: `sleeve-join`. |
+| 5 | Cut | Laminate first if you use film. Summary: Left: just inside the dash. Right: on the right-hand dashed line, or the sheet edge. Cut just inside the CUT HERE dash, between the dash and the bands (about 4.4–5.0 mm), so the band ink runs to the cut edge. Inside is toward the bands. The dash ink ends near 4.35 mm and the bands start near 4.50 mm; cutting on the dash leaves a white sliver. Cut 5 mm off the top and the bottom. Do not crease the fold. |
+| 6 | Join the sleeve | Fix the blank tab to the 60 mm dowel first, with flush staples, flush pins, glue, or tape. Staples only in the blank, at least 4 mm from the fold, never through the bands. Wrap snug, printed face out, TOP up, without creasing the fold. Square the wrap on the 195 mm fold crosses. A 1° spiral costs about 3.3 mm. Stick the cut left edge down over the tab with glue or thin double-sided tape. Turn the seam away from the stations and the camera, and keep it off the middle of the calibration photo. Diagram: `sleeve-join`. |
 | 7 | Measure R, height, and plumb | After the glue is dry, and after any film. Three heights. Paper strip or cloth tape, not a steel tape. R = C / 2π, to 0.1 mm. One R per sleeve. Height to the middle of the paper. 0.5 m is the target. Write the height you measure. Bubble in two directions, about 1°. App offsets stay 0. |
 
 ## Persistence
 
-Approved: an optional `workflowProgress` field on the garden document, same pattern as `photosManifest`. Older readers ignore it. It is small, no photo bytes. A tick goes through the existing save path: it marks the garden dirty and the save queue uploads it. The garden’s own conflict copy is the conflict copy for the ticks. Do not merge ticks in a second file.
+Approved: an optional `workflowProgress` field on the garden document, same pattern as `photosManifest`. Older readers ignore it. It is small, no photo bytes. A surveyor tick goes through the existing save path: it marks the garden dirty and the save queue uploads it. The garden’s own conflict copy is the conflict copy for the ticks. Do not merge ticks in a second file. The `cloud.saved` tick is the exception: it is recorded on the local document and does not bump the revision, dirty the garden, or schedule a second upload.
 
-A local mirror, `localStorage` key `garden-survey:workflow-progress`, is also written on every tick. It is not copied over a garden that already has the field, so a newer OneDrive copy is not overwritten on boot. Sunlight is a separate pref (`garden-survey:workflow-sunlight`) and does not dirty the survey.
+A local mirror, `localStorage` key `garden-survey:workflow-progress`, is written on every tick, with the garden’s `createdAt`. It is read only when the document has no `workflowProgress` and the mirror belongs to that same garden. A field already on the document wins, so a newer OneDrive copy is not overwritten. Sunlight is a separate pref (`garden-survey:workflow-sunlight`) and does not dirty the survey. A finished run can be started over, which clears that run’s ticks and begins again at step 1.
 
 The step `note` holds the write-in numbers until the model has real boxes for sleeve R, height, plumb, the laser check, and the station tapes. Those boxes are not part of this proposal.
 
@@ -316,7 +317,7 @@ The shell is not in the repo yet. This build adds no Capacitor plugin. Insets ar
 - Haptic on auto-tick. Off when reduce-motion is set.
 - `window.print()` is unreliable in WKWebView. The marker print step uses the share sheet, or the PDF, until a print plugin exists.
 - Sign-in needs a custom-scheme redirect in Entra as well as the GitHub Pages SPA redirect. Progress sync uses the same account. This proposal does not redesign auth.
-- The in-app shutter still drops lens data on some phones. Auto-complete stays on `photo.verified`, which already rejects a still with no focal length. Library at Actual Size remains the circle-test path.
+- On iOS the calibration still uses the in-app camera, the same capture path and lens as the station photos. fx is per lens and per resolution. Auto-complete stays on `photo.uploaded`, which rejects a still with no focal length.
 - Resume on `appStateChange`. A kill mid-step reopens `currentStepId`.
 
 ## Implementation plan
@@ -342,7 +343,7 @@ The house traverse and iOS setup get their own definition PRs when those sheets 
 Paul approved the six open questions as follows.
 
 1. The thumb **Next** stays. It repeats the bar’s Next, and it hides while the sheet is open.
-2. Progress is the optional `workflowProgress` field on the garden document. A local mirror (`garden-survey:workflow-progress`) is written on every tick as well. The mirror is not merged over a garden that already came from OneDrive.
+2. Progress is the optional `workflowProgress` field on the garden document. A local mirror (`garden-survey:workflow-progress`) is written on every tick and read only as a fallback when the document has no workflow field and the `createdAt` matches. A field already on the document is left alone. `cloud.saved` does not dirty the garden or bump the revision.
 3. A hand tick completes an auto step and is labelled manual. When the real event arrives later, `completedBy` becomes `auto`.
 4. The PDFs stay until a generated sheet is the one that prints. `docs/generated/WORKFLOWS.md` is the reference, checked in CI.
 5. Step sentences live on the workflow. `coach.ts` stays the session-mode coach.

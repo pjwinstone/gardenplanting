@@ -42,6 +42,9 @@ export interface ChromeRects {
   dialogTop: number;
 }
 
+/** Collapsed bar budget on a short landscape phone (844×390). The stylesheet stays at or under this. */
+export const LANDSCAPE_BAR_MAX_PX = 110;
+
 const MENU_REM = 2.75;
 const MENU_EDGE_REM = 0.65;
 const GAP = 12;

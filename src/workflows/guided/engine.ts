@@ -51,6 +51,15 @@ function norm(value: string | undefined): string {
   return (value ?? '').trim().toUpperCase();
 }
 
+function stationNamed(
+  event: { stationId: string; pointLabel: string; objectName: string },
+  stationId: string,
+): boolean {
+  return nameMatchesStation(event.stationId, stationId)
+    || nameMatchesStation(event.pointLabel, stationId)
+    || nameMatchesStation(event.objectName, stationId);
+}
+
 function endsMatch(
   event: { endA: string; endB: string; endAId?: string; endBId?: string },
   endA: string,
@@ -71,11 +80,13 @@ function eventMatches(trigger: Exclude<WorkflowTrigger, { all: WorkflowTrigger[]
     if (trigger.offsetBMm !== undefined && event.offsetBMm !== trigger.offsetBMm) return false;
     return true;
   }
-  if (trigger.on === 'photo.verified' && event.type === 'photo.verified') {
+  if (trigger.on === 'photo.uploaded' && event.type === 'photo.uploaded') {
     if (event.photoCount < trigger.minPhotos) return false;
-    return nameMatchesStation(event.stationId, trigger.stationId)
-      || nameMatchesStation(event.pointLabel, trigger.stationId)
-      || nameMatchesStation(event.objectName, trigger.stationId);
+    return stationNamed(event, trigger.stationId);
+  }
+  if (trigger.on === 'markers.detected' && event.type === 'markers.detected') {
+    if (event.markerIds.length < trigger.minPhotos) return false;
+    return stationNamed(event, trigger.stationId);
   }
   if (trigger.on === 'photo.marksConfirmed' && event.type === 'photo.marksConfirmed') {
     const named = nameMatchesStation(event.stationId, trigger.stationId)
@@ -202,6 +213,7 @@ export function reconcileRun(def: WorkflowDefinition, run: WorkflowRun): Workflo
     ...run,
     workflowId: def.id,
     revision: def.revision,
+    startedAt: run.startedAt || run.updatedAt,
     currentStepId: currentOk ? run.currentStepId : (def.steps[0]?.id ?? run.currentStepId),
     steps,
     parkedStepIds: parkedStepIds.length ? parkedStepIds : undefined,
@@ -215,6 +227,7 @@ function freshRun(def: WorkflowDefinition, now: string): WorkflowRun {
     workflowId: def.id,
     revision: def.revision,
     currentStepId: def.steps[0].id,
+    startedAt: now,
     updatedAt: now,
     steps,
   };
@@ -239,26 +252,51 @@ function progressJson(progress: WorkflowProgress): string {
   return JSON.stringify(progress);
 }
 
-export function writeWorkflowMirror(progress: WorkflowProgress): void {
+interface WorkflowMirrorRecord {
+  gardenCreatedAt: string;
+  progress: WorkflowProgress;
+}
+
+export function writeWorkflowMirror(progress: WorkflowProgress, gardenCreatedAt = ''): void {
   try {
-    localStorage.setItem(WORKFLOW_MIRROR_KEY, JSON.stringify(progress));
+    const record: WorkflowMirrorRecord = { gardenCreatedAt, progress };
+    localStorage.setItem(WORKFLOW_MIRROR_KEY, JSON.stringify(record));
   } catch {
     /* private mode, or no localStorage in this runtime */
   }
 }
 
-export function readWorkflowMirror(): WorkflowProgress | null {
+export function readWorkflowMirror(gardenCreatedAt?: string): WorkflowProgress | null {
   try {
     const raw = localStorage.getItem(WORKFLOW_MIRROR_KEY);
     if (!raw) return null;
-    return readProgress({ workflowProgress: JSON.parse(raw) as WorkflowProgress });
+    const parsed = JSON.parse(raw) as Partial<WorkflowMirrorRecord> & WorkflowProgress;
+    const progress = parsed.progress?.version === 1 ? parsed.progress : parsed.version === 1 ? parsed : undefined;
+    if (!progress) return null;
+    if (gardenCreatedAt !== undefined) {
+      if (!parsed.progress || parsed.gardenCreatedAt !== gardenCreatedAt) return null;
+    }
+    return readProgress({ workflowProgress: progress });
   } catch {
     return null;
   }
 }
 
+/**
+ * Use the mirror only when this garden has no workflow field and the mirror
+ * was written for the same createdAt. A field that is already on the document
+ * wins, including a newer OneDrive copy.
+ */
+export function hydrateWorkflowProgress(doc: GardenDocument): GardenDocument {
+  if (doc.workflowProgress) return doc;
+  const mirrored = readWorkflowMirror(doc.createdAt);
+  if (!mirrored) return doc;
+  if (!mirrored.activeId && Object.keys(mirrored.runs).length === 0) return doc;
+  return { ...doc, workflowProgress: mirrored };
+}
+
 export function commitWorkflow(doc: GardenDocument, progress: WorkflowProgress): GardenDocument {
-  writeWorkflowMirror(progress);
+  writeWorkflowMirror(progress, doc.createdAt);
   const empty = !progress.activeId && Object.keys(progress.runs).length === 0;
   if (empty) {
     if (!doc.workflowProgress) return doc;
@@ -294,6 +332,23 @@ export function applyWorkflowEvent(progress: WorkflowProgress, event: WorkflowEv
   };
 }
 
+function triggerStation(trigger: WorkflowTrigger): string | undefined {
+  if ('all' in trigger) {
+    for (const child of trigger.all) {
+      const station = triggerStation(child);
+      if (station) return station;
+    }
+    return undefined;
+  }
+  if (trigger.on === 'photo.uploaded' || trigger.on === 'markers.detected') return trigger.stationId;
+  return undefined;
+}
+
+function eventPhotoIds(event: WorkflowEvent): string[] | undefined {
+  if (event.type === 'photo.uploaded' || event.type === 'markers.detected') return event.photoIds;
+  return undefined;
+}
+
 /** Apply one event to a run. Tests use this with a one-step definition. */
 export function reduceRun(def: WorkflowDefinition, run: WorkflowRun, event: WorkflowEvent, now = new Date().toISOString()): WorkflowRun {
   const steps = { ...run.steps };
@@ -302,7 +357,15 @@ export function reduceRun(def: WorkflowDefinition, run: WorkflowRun, event: Work
     // An early autosave must not tick "Save and send" before the surveyor is on it.
     if (event.type === 'cloud.saved' && step.id !== run.currentStepId) continue;
     const state = steps[step.id] ?? pending();
-    const reduced = reduceStep(step, state, event, now);
+    let reduced = reduceStep(step, state, event, now);
+    const ids = eventPhotoIds(event);
+    const station = triggerStation(step.complete);
+    if (ids && station && (event.type === 'photo.uploaded' || event.type === 'markers.detected') && nameMatchesStation(event.stationId, station)) {
+      const nextIds = ids.length ? [...ids] : undefined;
+      const prev = (reduced.consumedPhotoIds ?? []).join('|');
+      const next = (nextIds ?? []).join('|');
+      if (prev !== next) reduced = { ...reduced, consumedPhotoIds: nextIds };
+    }
     if (reduced !== state) {
       steps[step.id] = reduced;
       changed = true;
@@ -355,6 +418,20 @@ export function resumeWorkflow(progress: WorkflowProgress, id: string, now = new
   return { progress: next, changed };
 }
 
+export function restartWorkflow(progress: WorkflowProgress, id: string, now = new Date().toISOString()): WorkflowMove {
+  const ready = readyDef(id);
+  if ('error' in ready) return { progress, notice: ready.error, changed: false };
+  const existing = progress.runs[ready.def.id];
+  if (!existing?.finishedAt) return { progress, notice: `${ready.def.title} is not finished.`, changed: false };
+  const run = freshRun(ready.def, now);
+  const next: WorkflowProgress = {
+    version: 1,
+    activeId: ready.def.id,
+    runs: { ...progress.runs, [ready.def.id]: run },
+  };
+  return { progress: next, link: ready.def.steps[0]?.link, changed: true };
+}
+
 export function reviewWorkflow(progress: WorkflowProgress, id: string): WorkflowMove {
   const ready = readyDef(id);
   if ('error' in ready) return { progress, notice: ready.error, changed: false };
@@ -386,17 +463,32 @@ export function openStepNotice(def: WorkflowDefinition, run: WorkflowRun): strin
   return `${open.length} steps are still open.`;
 }
 
-export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toISOString()): WorkflowMove {
+export function stepIsManualOnly(step: WorkflowStep): boolean {
+  return 'on' in step.complete && step.complete.on === 'manual';
+}
+
+function tickManualCurrent(progress: WorkflowProgress, now: string): WorkflowProgress {
   const pair = activePair(progress);
-  if (!pair) return { progress, notice: 'Start a workflow first.', changed: false };
-  if (pair.run.finishedAt) return { progress, notice: `${pair.def.title} is already finished.`, changed: false };
+  if (!pair || pair.run.finishedAt) return progress;
+  const step = pair.def.steps.find((item) => item.id === pair.run.currentStepId);
+  if (!step || !stepIsManualOnly(step)) return progress;
+  if (pair.run.steps[step.id]?.status === 'complete') return progress;
+  return tickWorkflow(progress, step.id, pair.run.steps[step.id]?.note, now).progress;
+}
+
+export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toISOString()): WorkflowMove {
+  const initial = activePair(progress);
+  if (!initial) return { progress, notice: 'Start a workflow first.', changed: false };
+  if (initial.run.finishedAt) return { progress, notice: `${initial.def.title} is already finished.`, changed: false };
+  const ticked = tickManualCurrent(progress, now);
+  const pair = activePair(ticked) ?? initial;
   const index = pair.def.steps.findIndex((step) => step.id === pair.run.currentStepId);
   const at = index < 0 ? 0 : index;
-  if (at >= pair.def.steps.length - 1) return doneWorkflow(progress, now);
+  if (at >= pair.def.steps.length - 1) return doneWorkflow(ticked, now);
   const nextStep = pair.def.steps[at + 1];
   const run: WorkflowRun = { ...pair.run, currentStepId: nextStep.id, updatedAt: now };
   return {
-    progress: { ...progress, runs: { ...progress.runs, [pair.def.id]: run } },
+    progress: { ...ticked, runs: { ...ticked.runs, [pair.def.id]: run } },
     link: nextStep.link,
     changed: true,
   };
@@ -422,12 +514,25 @@ export function doneWorkflow(progress: WorkflowProgress, now = new Date().toISOS
     if (!progress.activeId) return { progress, changed: false };
     return { progress: { ...progress, activeId: undefined }, changed: true };
   }
-  if (openSteps(pair.def, pair.run).length > 0) {
-    return { progress, notice: openStepNotice(pair.def, pair.run), changed: false };
+  const index = pair.def.steps.findIndex((step) => step.id === pair.run.currentStepId);
+  const step = pair.def.steps[index < 0 ? 0 : index];
+  const open = openSteps(pair.def, pair.run);
+  const last = index >= pair.def.steps.length - 1;
+  const onlyThis = !!step && open.length === 1 && open[0].id === step.id;
+  const ticked = step && stepIsManualOnly(step) && (last || onlyThis)
+    ? tickManualCurrent(progress, now)
+    : progress;
+  const nextPair = activePair(ticked) ?? pair;
+  if (openSteps(nextPair.def, nextPair.run).length > 0) {
+    return {
+      progress: ticked,
+      notice: openStepNotice(nextPair.def, nextPair.run),
+      changed: progressJson(progress) !== progressJson(ticked),
+    };
   }
-  const run: WorkflowRun = { ...pair.run, finishedAt: now, updatedAt: now };
+  const run: WorkflowRun = { ...nextPair.run, finishedAt: now, updatedAt: now };
   return {
-    progress: { ...progress, runs: { ...progress.runs, [pair.def.id]: run } },
+    progress: { ...ticked, runs: { ...ticked.runs, [nextPair.def.id]: run } },
     changed: true,
   };
 }
@@ -488,13 +593,43 @@ function photoOnStation(doc: GardenDocument, photo: Photo, stationId: string): b
   return points.some((point) => (point.photoIds ?? []).includes(photo.id));
 }
 
-export function countVerifiedUsablePhotos(doc: GardenDocument, stationId: string): number {
-  return doc.photos.filter((photo) => {
+function photoTimeMs(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/**
+ * Photos that can tick a station step in this run.
+ * Verified means the OneDrive upload checked out. There is no marker detector.
+ * A photo counts only when it was captured and received at or after the run
+ * started, and no other step in the run has already consumed its id.
+ * A missing capture or receive time does not count.
+ */
+export function countUploadedPhotosForStep(
+  doc: GardenDocument,
+  stationId: string,
+  run: WorkflowRun,
+  stepId: string,
+): { count: number; photoIds: string[] } {
+  const start = photoTimeMs(run.startedAt);
+  if (start === undefined) return { count: 0, photoIds: [] };
+  const taken = new Set<string>();
+  for (const [id, state] of Object.entries(run.steps)) {
+    if (id === stepId) continue;
+    for (const photoId of state.consumedPhotoIds ?? []) taken.add(photoId);
+  }
+  const photoIds = doc.photos.filter((photo) => {
+    if (taken.has(photo.id)) return false;
     if (!photoOnStation(doc, photo, stationId)) return false;
     if (photo.originalFile?.uploadStatus !== 'verified') return false;
     if ((photo.originalFile.usabilityNote ?? '').includes('Not usable')) return false;
-    return true;
-  }).length;
+    const captured = photoTimeMs(photo.originalFile?.capturedAt) ?? photoTimeMs(photo.exifDateTimeOriginal);
+    const received = photoTimeMs(photo.originalFile?.receivedAt);
+    if (captured === undefined || received === undefined) return false;
+    return captured >= start && received >= start;
+  }).map((photo) => photo.id);
+  return { count: photoIds.length, photoIds };
 }
 
 function stationIdsOnPhoto(doc: GardenDocument, photo: Photo): string[] {
@@ -507,7 +642,7 @@ function stationIdsOnPhoto(doc: GardenDocument, photo: Photo): string[] {
       trigger.all.forEach(walk);
       return;
     }
-    if (trigger.on === 'photo.verified' && photoOnStation(doc, photo, trigger.stationId)) {
+    if (trigger.on === 'photo.uploaded' && photoOnStation(doc, photo, trigger.stationId)) {
       found.add(trigger.stationId);
     }
   };
@@ -515,8 +650,8 @@ function stationIdsOnPhoto(doc: GardenDocument, photo: Photo): string[] {
   return [...found];
 }
 
-/** Fold a verified, usable still into the active workflow. Same doc if nothing changes. */
-export function workflowAfterVerifiedPhoto(doc: GardenDocument, photoId: string, now = new Date().toISOString()): GardenDocument {
+/** Fold an uploaded, usable still into the active workflow. Same doc if nothing changes. */
+export function workflowAfterUploadedPhoto(doc: GardenDocument, photoId: string, now = new Date().toISOString()): GardenDocument {
   const photo = doc.photos.find((item) => item.id === photoId);
   if (!photo || photo.originalFile?.uploadStatus !== 'verified') return doc;
   if ((photo.originalFile.usabilityNote ?? '').includes('Not usable')) return doc;
@@ -524,13 +659,26 @@ export function workflowAfterVerifiedPhoto(doc: GardenDocument, photoId: string,
     ?? doc.points.find((item) => (item.photoIds ?? []).includes(photo.id));
   const object = point ? doc.objects.find((item) => item.id === point.objectId) : undefined;
   let next = doc;
-  for (const stationId of stationIdsOnPhoto(doc, photo)) {
+  for (const stationId of stationIdsOnPhoto(next, photo)) {
+    const progress = readProgress(next);
+    const activeId = progress.activeId;
+    const def = activeId ? workflowById(activeId) : undefined;
+    const raw = activeId ? progress.runs[activeId] : undefined;
+    if (!def || !raw) continue;
+    const run = reconcileRun(def, raw);
+    const step = def.steps.find((item) => {
+      const station = triggerStation(item.complete);
+      return !!station && nameMatchesStation(stationId, station);
+    });
+    if (!step) continue;
+    const counted = countUploadedPhotosForStep(next, stationId, run, step.id);
     next = withWorkflowEvent(next, {
-      type: 'photo.verified',
+      type: 'photo.uploaded',
       stationId,
       pointLabel: point?.label ?? '',
       objectName: object?.name ?? '',
-      photoCount: countVerifiedUsablePhotos(next, stationId),
+      photoCount: counted.count,
+      photoIds: counted.photoIds,
     }, now);
   }
   return next;

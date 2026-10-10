@@ -10,8 +10,10 @@ function triggerText(trigger: WorkflowTrigger): string {
       return 'Tick by hand';
     case 'baseline.saved':
       return `baseline.saved ${trigger.kind} ${trigger.endA}–${trigger.endB}, offsets ${trigger.offsetAMm ?? 'any'}/${trigger.offsetBMm ?? 'any'} mm`;
-    case 'photo.verified':
-      return `photo.verified ${trigger.stationId}, ${trigger.minPhotos} photo${trigger.minPhotos === 1 ? '' : 's'}`;
+    case 'photo.uploaded':
+      return `photo.uploaded ${trigger.stationId}, ${trigger.minPhotos} photo${trigger.minPhotos === 1 ? '' : 's'}`;
+    case 'markers.detected':
+      return `markers.detected ${trigger.stationId}, ${trigger.minPhotos} photo${trigger.minPhotos === 1 ? '' : 's'}`;
     case 'photo.marksConfirmed':
       return `photo.marksConfirmed ${trigger.stationId} (${trigger.marks.join(', ')})`;
     case 'item.created':

@@ -80,7 +80,7 @@ import {
   renderGuidedChrome,
   workflowNoteChange,
 } from './workflows/guided/guidedChrome';
-import { withWorkflowEvent, workflowAfterVerifiedPhoto } from './workflows/guided/engine';
+import { hydrateWorkflowProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
   appendPhotoToPoint,
@@ -777,7 +777,7 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
     photos,
     photosManifest: state.doc.photosManifest ?? photosManifestLink(),
   };
-  setDoc(update.status === 'verified' ? workflowAfterVerifiedPhoto(withPhotos, update.photoId) : withPhotos, null);
+  setDoc(update.status === 'verified' ? workflowAfterUploadedPhoto(withPhotos, update.photoId) : withPhotos, null);
   if (update.status === 'queued') {
     setCloudMessage(`Photo ${update.fileName} queued for OneDrive.`);
   } else if (update.status === 'uploading') {
@@ -1013,7 +1013,7 @@ function markCurrentBuildSeen(): void {
 }
 
 let state: UiState = {
-  doc: loadCachedGarden() ?? createEmptyGarden(),
+  doc: hydrateWorkflowProgress(loadCachedGarden() ?? createEmptyGarden()),
   view: 'survey',
   refuseMessage: null,
   showStage2Checklist: false,
@@ -1381,6 +1381,22 @@ function setDoc(doc: GardenDocument, refuse: string | null = null): void {
   setState({ doc, refuseMessage: refuse });
 }
 
+/**
+ * Record a workflow tick that must not look like a garden edit.
+ * Does not bump updatedAt, the save revision, or the dirty flag, and does not
+ * schedule another OneDrive upload.
+ */
+function recordWorkflowQuiet(doc: GardenDocument): void {
+  state = { ...state, doc };
+  const saved = persistGardenLocal(doc);
+  if (!saved.ok) {
+    logError(`Could not cache the workflow tick in this browser (${saved.error}).`, {
+      source: 'persist-quota',
+    });
+  }
+  for (const fn of [...listeners]) fn();
+}
+
 function scheduleCloudBackup(doc: GardenDocument): void {
   if (!isSignedIn()) return;
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
@@ -1446,7 +1462,7 @@ function adoptRemoteGarden(
   clearGardenSaveOwed();
   setGardenCloudFileName(fileName);
   notifyCloudPrefsChanged();
-  setState({ doc, refuseMessage: null }, { fromRemote: true });
+  setState({ doc: hydrateWorkflowProgress(doc), refuseMessage: null }, { fromRemote: true });
   offerReattachLocalPhotos(localOnlyPhotos, preservedAs, localPoints);
   return true;
 }
@@ -1573,6 +1589,10 @@ export const gardenCloudUiForTests = {
   },
   saveNow(): Promise<void> {
     return onOneDriveSave();
+  },
+  recordCloudSaved(): void {
+    const ticked = withWorkflowEvent(state.doc, { type: 'cloud.saved' });
+    if (ticked !== state.doc) recordWorkflowQuiet(ticked);
   },
   loadNow(fileName?: string): Promise<void> {
     return onOneDriveLoad(fileName);
@@ -1834,7 +1854,7 @@ async function executeGardenSave(job: PendingSave): Promise<void> {
       setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
     }
     const ticked = withWorkflowEvent(state.doc, { type: 'cloud.saved' });
-    if (ticked !== state.doc) setDoc(ticked, null);
+    if (ticked !== state.doc) recordWorkflowQuiet(ticked);
     return;
   }
   if (result.ok && !result.wrote) {

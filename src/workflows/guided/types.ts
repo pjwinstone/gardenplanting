@@ -31,7 +31,12 @@ export type WorkflowTrigger =
       offsetAMm?: number;
       offsetBMm?: number;
     }
-  | { on: 'photo.verified'; stationId: string; minPhotos: number }
+  | { on: 'photo.uploaded'; stationId: string; minPhotos: number }
+  /**
+   * Reserved for a future in-app detector. Nothing emits this yet.
+   * `photo.uploaded` only means the OneDrive upload checked out.
+   */
+  | { on: 'markers.detected'; stationId: string; minPhotos: number }
   | { on: 'photo.marksConfirmed'; stationId: string; marks: string[] }
   | { on: 'item.created'; name: string; geometry: GeometryType }
   | { on: 'tape.entered'; endA?: string; endB?: string }
@@ -54,12 +59,22 @@ export type WorkflowEvent =
       lengthM: number;
     }
   | {
-      type: 'photo.verified';
+      type: 'photo.uploaded';
       stationId: string;
       pointLabel: string;
       objectName: string;
-      /** Verified, usable photos on that station. */
+      /** Usable photos captured and uploaded after this run started. */
       photoCount: number;
+      /** Ids included in photoCount. The step stores these so a later step cannot reuse them. */
+      photoIds: string[];
+    }
+  | {
+      type: 'markers.detected';
+      stationId: string;
+      pointLabel: string;
+      objectName: string;
+      markerIds: string[];
+      photoIds: string[];
     }
   | {
       type: 'photo.marksConfirmed';
@@ -114,12 +129,16 @@ export interface StepState {
   note?: string;
   /** Parts of an `all` trigger that have already matched. */
   seen?: string[];
+  /** Photo ids this step already counted. Not reused by another step in the run. */
+  consumedPhotoIds?: string[];
 }
 
 export interface WorkflowRun {
   workflowId: WorkflowId;
   revision: number;
   currentStepId: string;
+  /** When this run began. Photos captured or received earlier do not tick a station step. */
+  startedAt: string;
   updatedAt: string;
   finishedAt?: string;
   /** Step ids from an older revision. One line in the sheet, not a solver field. */

@@ -7,6 +7,7 @@ import {
   WORKFLOW_MIRROR_KEY,
   commitWorkflow,
   emptyProgress,
+  hydrateWorkflowProgress,
   readProgress,
   readWorkflowMirror,
   startWorkflow,
@@ -69,6 +70,18 @@ describe('workflow progress on the garden document', () => {
     const older = normalizeDocument(emptyDocument('Before workflows'));
     expect(older.workflowProgress).toBeUndefined();
     expect(readProgress(older).activeId).toBeUndefined();
+    expect(hydrateWorkflowProgress(older).workflowProgress).toBeUndefined();
     expect(readWorkflowMirror()?.activeId).toBe('circle-field-test');
+    expect(readWorkflowMirror(older.createdAt)).toBeNull();
+
+    const sameGarden = emptyDocument('Same garden');
+    sameGarden.createdAt = doc.createdAt;
+    const hydrated = hydrateWorkflowProgress(sameGarden);
+    expect(hydrated.workflowProgress?.activeId).toBe('circle-field-test');
+
+    const present = emptyDocument('Already has progress');
+    present.createdAt = doc.createdAt;
+    present.workflowProgress = emptyProgress();
+    expect(hydrateWorkflowProgress(present)).toBe(present);
   });
 });
