@@ -103,6 +103,8 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
     private var applyingLock = false
     private var busy = false
     private var configuredZoom: CGFloat = 1
+    private var pendingExt = "jpg"
+    private var pendingMime = "image/jpeg"
 
     private let hint = UILabel()
     private let shutter = UIButton(type: .custom)
@@ -202,16 +204,24 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
                 }
                 self.session.addInput(input)
                 self.session.addOutput(self.photoOutput)
-                self.photoOutput.maxPhotoQualityPrioritization = .balanced
+                // `.speed` keeps Smart HDR / Deep Fusion from blending the still.
+                // The settings used at capture must not ask for a higher quality than this.
+                self.photoOutput.maxPhotoQualityPrioritization = .speed
                 if #available(iOS 16.0, *) {
                     if let dims = self.preferredPhotoDimensions(on: device) {
                         self.photoOutput.maxPhotoDimensions = dims
                     }
                 }
+                if self.photoOutput.isContentAwareDistortionCorrectionSupported {
+                    self.photoOutput.isContentAwareDistortionCorrectionEnabled = false
+                }
                 try device.lockForConfiguration()
                 let zoom = min(max(1, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
                 device.videoZoomFactor = zoom
                 self.configuredZoom = zoom
+                if device.isGeometricDistortionCorrectionSupported {
+                    device.isGeometricDistortionCorrectionEnabled = false
+                }
                 if device.isFocusModeSupported(.continuousAutoFocus) {
                     device.focusMode = .continuousAutoFocus
                 }
@@ -258,12 +268,42 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
 
     private func updatePreviewOrientation() {
         guard let connection = previewLayer.connection else { return }
-        if #available(iOS 17.0, *) {
-            if connection.isVideoRotationAngleSupported(90) {
-                connection.videoRotationAngle = 90
+        if #available(iOS 17.0, *), let device {
+            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
+            let angle = coordinator.videoRotationAngleForHorizonLevelPreview
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
             }
         } else if connection.isVideoOrientationSupported {
-            connection.videoOrientation = .portrait
+            connection.videoOrientation = fallbackVideoOrientation()
+        }
+    }
+
+    /// EXIF orientation follows the phone, not a hardcoded portrait preview.
+    private func applyPhotoConnectionRotation() {
+        guard let connection = photoOutput.connection(with: .video) else { return }
+        if #available(iOS 17.0, *), let device {
+            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
+            let angle = coordinator.videoRotationAngleForHorizonLevelCapture
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+        } else if connection.isVideoOrientationSupported {
+            connection.videoOrientation = fallbackVideoOrientation()
+        }
+    }
+
+    /// UIDevice landscape left/right are swapped relative to AVCaptureVideoOrientation.
+    private func fallbackVideoOrientation() -> AVCaptureVideoOrientation {
+        switch UIDevice.current.orientation {
+        case .landscapeLeft:
+            return .landscapeRight
+        case .landscapeRight:
+            return .landscapeLeft
+        case .portraitUpsideDown:
+            return .portraitUpsideDown
+        default:
+            return .portrait
         }
     }
 
@@ -355,10 +395,19 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
         let settings: AVCapturePhotoSettings
         if photoOutput.availablePhotoCodecTypes.contains(.jpeg) {
             settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
+            pendingExt = "jpg"
+            pendingMime = "image/jpeg"
+        } else if photoOutput.availablePhotoCodecTypes.contains(.hevc) {
+            settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+            pendingExt = "heic"
+            pendingMime = "image/heic"
         } else {
             settings = AVCapturePhotoSettings()
+            pendingExt = "jpg"
+            pendingMime = "image/jpeg"
         }
-        settings.photoQualityPrioritization = .balanced
+        settings.photoQualityPrioritization = .speed
+        settings.isAutoRedEyeReductionEnabled = false
         if photoOutput.supportedFlashModes.contains(.off) {
             settings.flashMode = .off
         }
@@ -368,6 +417,7 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
                 settings.maxPhotoDimensions = dims
             }
         }
+        applyPhotoConnectionRotation()
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
@@ -381,23 +431,31 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
             return
         }
         do {
-            let url = try write(data, ext: "jpg")
+            let url = try write(data, ext: pendingExt)
             let exif = imageFacts(at: url)
             let motionSample = motionBuffer.sample(at: hostSeconds(for: photo))
             let matrix = intrinsicMatrix(of: photo)
             var payload: [String: Any] = [
                 "path": url.path,
                 "fileName": url.lastPathComponent,
-                "mimeType": "image/jpeg",
+                "mimeType": pendingMime,
                 "byteSize": data.count,
                 "source": "shutter",
                 "deviceType": AVCaptureDevice.DeviceType.builtInWideAngleCamera.rawValue,
                 "videoZoomFactor": Double(configuredZoom),
                 "focusLocked": focusLocked,
                 "exposureLocked": exposureLocked,
-                "photoQualityPrioritization": "balanced",
+                "photoQualityPrioritization": "speed",
+                "autoRedEyeReductionEnabled": false,
                 "motionInterpolated": motionSample?.interpolated ?? false,
             ]
+            if #available(iOS 16.0, *) {
+                let dims = photoOutput.maxPhotoDimensions
+                if dims.width > 0 && dims.height > 0 {
+                    payload["requestedWidth"] = Int(dims.width)
+                    payload["requestedHeight"] = Int(dims.height)
+                }
+            }
             if let lockedLensPosition {
                 payload["lensPosition"] = Double(lockedLensPosition)
             }
@@ -405,6 +463,8 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
                 payload["geometricDistortionCorrectionSupported"] = device.isGeometricDistortionCorrectionSupported
                 payload["geometricDistortionCorrectionEnabled"] = device.isGeometricDistortionCorrectionEnabled
             }
+            payload["contentAwareDistortionCorrectionSupported"] = output.isContentAwareDistortionCorrectionSupported
+            payload["contentAwareDistortionCorrectionEnabled"] = output.isContentAwareDistortionCorrectionEnabled
             if let connection = output.connection(with: .video) {
                 payload["stabilization"] = stabilizationName(connection.activeVideoStabilizationMode)
             }
@@ -541,12 +601,14 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
     }
 
     private func hostSeconds(for photo: AVCapturePhoto) -> TimeInterval? {
-        guard #available(iOS 15.4, *) else { return nil }
-        guard let clock = session.synchronizationClock else { return nil }
-        let host = CMSyncConvertTime(photo.timestamp, from: clock, to: CMClockGetHostTimeClock())
-        guard host.isValid else { return nil }
-        let seconds = CMTimeGetSeconds(host)
-        return seconds.isFinite ? seconds : nil
+        if #available(iOS 15.4, *) {
+            guard let clock = session.synchronizationClock else { return nil }
+            let host = CMSyncConvertTime(photo.timestamp, from: clock, to: CMClockGetHostTimeClock())
+            guard host.isValid else { return nil }
+            let seconds = CMTimeGetSeconds(host)
+            return seconds.isFinite ? seconds : nil
+        }
+        return nil
     }
 
     private func stabilizationName(_ mode: AVCaptureVideoStabilizationMode) -> String {

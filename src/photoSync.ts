@@ -174,6 +174,7 @@ export async function rememberOriginalPhoto(
     pixels?: OriginalPhotoDraft['pixels'];
     sessionStartedAt?: string;
     sessionEndedAt?: string;
+    nativeCapture?: NativeCaptureRecord;
   },
   queue: PhotoQueue = getAppPhotoQueue(),
 ): Promise<OriginalPhotoDraft> {
@@ -193,6 +194,7 @@ export async function rememberOriginalPhoto(
     sha256: draft.sha256,
     calibrationKey: draft.calibrationKey,
     makerNote: draft.makerNote,
+    nativeCapture: meta.nativeCapture,
     pixels: draft.pixels,
     usabilityNote: draft.usabilityNote,
     quickXorHash: draft.quickXorHash,

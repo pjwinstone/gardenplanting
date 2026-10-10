@@ -3,14 +3,12 @@ name: TestFlight
 # Signing secrets are available to workflows in this repository. They are not
 # available to pull requests from forks, and a pull request opened inside this
 # repository would still receive them. This workflow therefore does not run on
-# pull_request. Dispatch it by hand, or let a push to main upload when the
-# four secrets below are set. If any secret is missing the job exits green
-# and says so.
+# pull_request, and it does not run on a push to main. Dispatch it by hand
+# from main. The job is skipped on any other ref. If any secret is missing
+# the job exits green and says so.
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
@@ -21,6 +19,7 @@ concurrency:
 
 jobs:
   testflight:
+    if: github.ref == 'refs/heads/main'
     runs-on: macos-latest
     timeout-minutes: 60
     permissions:
@@ -58,12 +57,21 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Read the app version
+        if: steps.gate.outputs.present == 'true'
+        id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Marketing version $version, build ${GITHUB_RUN_NUMBER}."
+
       - name: Install and build the web app
         if: steps.gate.outputs.present == 'true'
         env:
           VITE_MSAL_CLIENT_ID: ${{ secrets.VITE_MSAL_CLIENT_ID }}
           VITE_MSAL_TENANT_ID: ${{ secrets.VITE_MSAL_TENANT_ID }}
-          VITE_APP_VERSION: 0.7.25
+          VITE_APP_VERSION: ${{ steps.version.outputs.version }}
           VITE_APP_BUILD: ${{ github.sha }}
         run: |
           npm ci
@@ -87,6 +95,7 @@ jobs:
           KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -129,6 +138,7 @@ jobs:
             -authenticationKeyIssuerID "$ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
             CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}" \
             archive
           xcodebuild \
@@ -141,4 +151,7 @@ jobs:
             -authenticationKeyID "$KEY_ID" \
             -authenticationKeyIssuerID "$ISSUER_ID"
           echo "Upload requested. TestFlight can take several minutes to show the build."
-          rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+      - name: Delete the API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/AuthKey.p8"

@@ -53,7 +53,10 @@ export function captureRecord(sidecar: NativeCaptureSidecar): NativeCaptureRecor
     exposureLocked: sidecar.exposureLocked,
     geometricDistortionCorrectionSupported: sidecar.geometricDistortionCorrectionSupported,
     geometricDistortionCorrectionEnabled: sidecar.geometricDistortionCorrectionEnabled,
+    contentAwareDistortionCorrectionSupported: sidecar.contentAwareDistortionCorrectionSupported,
+    contentAwareDistortionCorrectionEnabled: sidecar.contentAwareDistortionCorrectionEnabled,
     photoQualityPrioritization: sidecar.photoQualityPrioritization,
+    autoRedEyeReductionEnabled: sidecar.autoRedEyeReductionEnabled,
     stabilization: sidecar.stabilization,
     focalLengthMm: sidecar.focalLengthMm,
     focalLength35mm: sidecar.focalLength35mm,
@@ -65,6 +68,8 @@ export function captureRecord(sidecar: NativeCaptureSidecar): NativeCaptureRecor
     gravity: sidecar.gravity,
     width: sidecar.width,
     height: sidecar.height,
+    requestedWidth: sidecar.requestedWidth,
+    requestedHeight: sidecar.requestedHeight,
     orientation: sidecar.orientation,
   };
 }
@@ -205,7 +210,10 @@ export function sidecarFromPlugin(raw: Record<string, unknown>): NativeCameraRes
     exposureLocked: bool(raw.exposureLocked),
     geometricDistortionCorrectionSupported: nullableBool(raw.geometricDistortionCorrectionSupported),
     geometricDistortionCorrectionEnabled: nullableBool(raw.geometricDistortionCorrectionEnabled),
+    contentAwareDistortionCorrectionSupported: nullableBool(raw.contentAwareDistortionCorrectionSupported),
+    contentAwareDistortionCorrectionEnabled: nullableBool(raw.contentAwareDistortionCorrectionEnabled),
     photoQualityPrioritization: str(raw.photoQualityPrioritization),
+    autoRedEyeReductionEnabled: nullableBool(raw.autoRedEyeReductionEnabled),
     stabilization: str(raw.stabilization),
     focalLengthMm: num(raw.focalLengthMm),
     focalLength35mm: num(raw.focalLength35mm),
@@ -217,6 +225,8 @@ export function sidecarFromPlugin(raw: Record<string, unknown>): NativeCameraRes
     gravity: gravity(raw),
     width: num(raw.width),
     height: num(raw.height),
+    requestedWidth: num(raw.requestedWidth),
+    requestedHeight: num(raw.requestedHeight),
     orientation: num(raw.orientation),
   };
 }

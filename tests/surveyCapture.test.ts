@@ -24,8 +24,11 @@ function shutterResult(): NativeCaptureSidecar {
     focusLocked: true,
     exposureLocked: true,
     geometricDistortionCorrectionSupported: true,
-    geometricDistortionCorrectionEnabled: true,
-    photoQualityPrioritization: 'balanced',
+    geometricDistortionCorrectionEnabled: false,
+    contentAwareDistortionCorrectionSupported: true,
+    contentAwareDistortionCorrectionEnabled: false,
+    photoQualityPrioritization: 'speed',
+    autoRedEyeReductionEnabled: false,
     stabilization: 'off',
     focalLengthMm: 6.9,
     focalLength35mm: 26,
@@ -37,6 +40,8 @@ function shutterResult(): NativeCaptureSidecar {
     gravity: { x: 0.01, y: -0.98, z: -0.02 },
     width: 4032,
     height: 3024,
+    requestedWidth: 4032,
+    requestedHeight: 3024,
     orientation: 6,
   };
 }
@@ -81,7 +86,12 @@ describe('survey capture', () => {
     expect(choice.sidecar.focalLengthMm).toBe(6.9);
     expect(choice.sidecar.intrinsicMatrix).toBeNull();
     expect(choice.sidecar.focusLocked).toBe(true);
-    expect(choice.sidecar.geometricDistortionCorrectionEnabled).toBe(true);
+    expect(choice.sidecar.geometricDistortionCorrectionEnabled).toBe(false);
+    expect(choice.sidecar.contentAwareDistortionCorrectionEnabled).toBe(false);
+    expect(choice.sidecar.photoQualityPrioritization).toBe('speed');
+    expect(choice.sidecar.autoRedEyeReductionEnabled).toBe(false);
+    expect(choice.sidecar.requestedWidth).toBe(4032);
+    expect(choice.sidecar.requestedHeight).toBe(3024);
     expect(choice.sidecar.gravity).toEqual({ x: 0.01, y: -0.98, z: -0.02 });
   });
 
@@ -126,7 +136,12 @@ describe('survey capture', () => {
       exposureLocked: true,
       geometricDistortionCorrectionSupported: false,
       geometricDistortionCorrectionEnabled: false,
-      photoQualityPrioritization: 'balanced',
+      contentAwareDistortionCorrectionSupported: false,
+      contentAwareDistortionCorrectionEnabled: false,
+      photoQualityPrioritization: 'speed',
+      autoRedEyeReductionEnabled: false,
+      requestedWidth: 4032,
+      requestedHeight: 3024,
       focalLengthMm: 5.7,
       focalLength35mm: 24,
       lensModel: 'back camera',
@@ -145,6 +160,8 @@ describe('survey capture', () => {
       expect(parsed.intrinsicMatrix).toHaveLength(9);
       expect(parsed.intrinsicReferenceWidth).toBe(4032);
       expect(parsed.gravity).toEqual({ x: 0, y: -1, z: 0 });
+      expect(parsed.requestedWidth).toBe(4032);
+      expect(parsed.autoRedEyeReductionEnabled).toBe(false);
     }
     const noMatrix = sidecarFromPlugin({
       path: '/tmp/GardenCamera/GP-3.jpg',
@@ -154,6 +171,8 @@ describe('survey capture', () => {
       expect(noMatrix.intrinsicMatrix).toBeNull();
       expect(noMatrix.lensPosition).toBeNull();
       expect(noMatrix.focalLengthMm).toBeNull();
+      expect(noMatrix.requestedWidth).toBeNull();
+      expect(noMatrix.autoRedEyeReductionEnabled).toBeNull();
     }
   });
 
@@ -187,5 +206,19 @@ describe('iOS identity', () => {
     expect(plist).toContain('Garden Planting');
     expect(auth).toContain(IOS_ENTRA_REDIRECT_URI);
     expect(project).toContain(`PRODUCT_BUNDLE_IDENTIFIER = ${IOS_BUNDLE_ID};`);
+    const camera = readFileSync('ios/App/App/GardenCameraPlugin.swift', 'utf8');
+    expect(camera).toContain('videoRotationAngleForHorizonLevelCapture');
+    expect(camera).toContain('photoQualityPrioritization = .speed');
+    expect(camera).toContain('isAutoRedEyeReductionEnabled = false');
+    expect(camera).toContain('isGeometricDistortionCorrectionEnabled = false');
+    expect(camera).toContain('image/heic');
+    expect(auth).toContain('refreshInFlight');
+    expect(auth).toContain('refreshWaiters');
+    const flight = readFileSync('.github/workflows/testflight.yml', 'utf8');
+    expect(flight).toContain("github.ref == 'refs/heads/main'");
+    expect(flight).toContain('if: always()');
+    expect(flight).toContain("require('./package.json').version");
+    expect(flight).toContain('GITHUB_RUN_NUMBER');
+    expect(flight).not.toMatch(/^\s*push:\s*$/m);
   });
 });

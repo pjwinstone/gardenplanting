@@ -24,9 +24,12 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     private let presenter = AuthPresenter()
+    private let tokenQueue = DispatchQueue(label: "garden.auth.refresh")
     private var session: ASWebAuthenticationSession?
     private var accessToken: String?
     private var accessExpiry: Date?
+    private var refreshInFlight = false
+    private var refreshWaiters: [(RefreshOutcome) -> Void] = []
 
     @objc func status(_ call: CAPPluginCall) {
         guard let stored = KeychainSession.load() else {
@@ -76,7 +79,7 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             return
         }
-        refresh(stored: stored, clientId: clientId, tenant: tenant, scopes: scopes) { [weak self] outcome in
+        enqueueRefresh(stored: stored, clientId: clientId, tenant: tenant, scopes: scopes) { [weak self] outcome in
             switch outcome {
             case .token(let token, let session):
                 self?.remember(token: token, session: session)
@@ -208,6 +211,31 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.resolve(["interactionRequired": true, "error": message])
             case .failed(let message):
                 call.reject(message)
+            }
+        }
+    }
+
+    /// Concurrent acquireToken calls share one refresh. Each waiter gets the same outcome.
+    private func enqueueRefresh(
+        stored: StoredSession,
+        clientId: String,
+        tenant: String,
+        scopes: String,
+        done: @escaping (RefreshOutcome) -> Void
+    ) {
+        tokenQueue.async {
+            self.refreshWaiters.append(done)
+            guard !self.refreshInFlight else { return }
+            self.refreshInFlight = true
+            self.refresh(stored: stored, clientId: clientId, tenant: tenant, scopes: scopes) { outcome in
+                self.tokenQueue.async {
+                    let waiters = self.refreshWaiters
+                    self.refreshWaiters.removeAll()
+                    self.refreshInFlight = false
+                    for waiter in waiters {
+                        waiter(outcome)
+                    }
+                }
             }
         }
     }

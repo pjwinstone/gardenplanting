@@ -685,6 +685,7 @@ async function queueCapturedOriginal(file: File, pixels?: PreviewPixelMap): Prom
       pixels,
       sessionStartedAt: setup?.startedAt,
       sessionEndedAt: setup?.endedAt,
+      nativeCapture: nativeCaptureRecordFor(file),
     });
     applyPhotoUploadStatus(statusFromDraft(photoId, draft, file));
     kickPhotoUploads();

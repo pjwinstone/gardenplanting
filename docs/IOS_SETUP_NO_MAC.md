@@ -76,7 +76,9 @@ Repo → **Settings** → Secrets and variables → **Actions** → Repository s
 
 Paste the `.p8` as the secret value. A multi-line secret is allowed. Do not base64 it. Do not commit the file.
 
-The TestFlight workflow (`.github/workflows/testflight.yml`) runs on **Run workflow** and on a push to `main`. It does not run on pull requests. GitHub withholds secrets from a pull request that comes from a fork, but a pull request inside this repo would still receive them, which is why signing stays off `pull_request`.
+The TestFlight workflow (`.github/workflows/testflight.yml`) runs only when you choose **Run workflow**, and only if that run is on `main` (`github.ref == 'refs/heads/main'`). A push to `main` does not upload. It does not run on pull requests. GitHub withholds secrets from a pull request that comes from a fork, but a pull request inside this repo would still receive them, which is why signing stays off `pull_request`.
+
+The marketing version (`CFBundleShortVersionString` / `VITE_APP_VERSION`) is the `version` field in `package.json`. The build number (`CFBundleVersion`) is `github.run_number`. Neither is hard-coded in the workflow. The `.p8` is written only for the archive step and deleted in a later step that runs even when the archive fails (`if: always()`).
 
 Signing uses `xcodebuild -allowProvisioningUpdates` with `-authenticationKeyPath`, `-authenticationKeyID`, and `-authenticationKeyIssuerID`. That is cloud signing ([WWDC21 session 10204](https://developer.apple.com/videos/play/wwdc2021/10204/)). It is not `fastlane match`. Apple holds the distribution key. The export uses method `app-store-connect` and destination `upload`, so the same key sends the build to TestFlight. `altool` is not used.
 
@@ -153,6 +155,29 @@ openssl req -nodes -newkey rsa:2048 \
 
 1. Open TestFlight on the iPhone and install Garden Planting.
 2. If the build says **Missing Compliance**, open App Store Connect → TestFlight → the build → Provide Export Compliance Information. The project sets `ITSAppUsesNonExemptEncryption` to false, because the only encryption is HTTPS ([Xcode’s key](https://help.apple.com/xcode/mac/current/en.lproj/dev0dc15d044.html), [beta compliance](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-export-compliance-information-for-beta-builds/)). One browser answer clears a build the plist did not cover.
-3. Each later upload uses a higher build number (`CFBundleVersion`). The workflow sets `CURRENT_PROJECT_VERSION` from `github.run_number` ([CFBundleVersion](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion)).
+3. Each later upload uses a higher build number (`CFBundleVersion`). The workflow sets `CURRENT_PROJECT_VERSION` from `github.run_number` ([CFBundleVersion](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleversion)). The version you see in TestFlight is `package.json` `version` (`MARKETING_VERSION`), not a number typed into the workflow.
 
-The survey shutter is the wide back camera at 1×, JPEG from `fileDataRepresentation()` (not the Safari re-encode), with tap-to-lock focus and exposure. A calibration matrix is not part of that still. Focal length is read from the file when the file has it. Sign-in uses the redirect in step 5.
+## Survey shutter
+
+The in-app shutter is the wide back camera at 1×. It writes JPEG from `fileDataRepresentation()`. If the camera does not offer JPEG it writes HEVC and labels that file `.heic` / `image/heic`. It does not save HEVC bytes under a `.jpg` name. Tap-to-lock sets focus and exposure. Before the shutter fires, the photo connection’s rotation comes from `AVCaptureDevice.RotationCoordinator` (`videoRotationAngleForHorizonLevelCapture`), so the EXIF orientation follows how the phone was held.
+
+Processing is pinned so one phone’s stills stay comparable:
+
+- `photoQualityPrioritization` is `speed` on the output and on the capture settings. That skips the Smart HDR / Deep Fusion blend.
+- Auto red-eye reduction is off.
+- Geometric distortion correction is set **off** when the device supports it. Content-aware distortion correction is also left **off**. The photo record stores whether each was supported and whether it was enabled. The same sidecar is copied onto the OneDrive `photos/manifest.json` row.
+- The shutter asks for 4032×3024 (12 MP) when the active format offers it, and records that requested size next to the delivered width and height.
+
+A calibration matrix is not part of this still. Focal length and lens model are read from the file when the file has them. **fx is calibrated per lens and per resolution.** This shutter is 12 MP. The iPhone Camera app may shoot 24 MP of the same lens, and that frame is a different calibration. A checkerboard used to find `fx` has to be shot with this shutter, on the same lens, at this resolution.
+
+Sign-in uses the redirect in step 5. Token refresh is one in-flight request: overlapping uploads share it.
+
+## Device smoke test
+
+Do this on the TestFlight install, at a real station (the add-point you are standing on).
+
+1. **Sign-in round trip.** Sign in with Microsoft. The system browser should open and return to the app. Sign out. Sign in again. The second sign-in should land back in the app with your account shown.
+2. **Capture at the station.** Add a point and take the photo with the in-app shutter. Do not use the iPhone Camera app, and do not pick the file from the library. The original should upload to `/Garden Survey/photos/`.
+3. **EXIF on the uploaded original.** Orientation matches how you held the phone. `FocalLength` and `LensModel` are present. The pixel size is the 12 MP shutter frame (4032×3024 when the wide camera offers it), not a 24 MP Camera.app frame.
+4. **Gravity sign.** The sidecar `gravity` is CoreMotion’s device frame: +X to the right, +Y up, +Z out of the screen. Hold the phone upright and expect about `(0, −1, 0)`. Apple MakerNote `AccelerationVector` (ExifTool tag `0x0008`) points the opposite way. Negate each axis before you compare the two. Do not treat a match without that flip as success.
+5. **Processing record.** On the photo, `nativeCapture.geometricDistortionCorrectionEnabled` is `false` and `photoQualityPrioritization` is `speed`. The same fields are on the `photos/manifest.json` row. `requestedWidth` / `requestedHeight` are the size the shutter asked for.
