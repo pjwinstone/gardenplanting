@@ -115,8 +115,9 @@ export const circleFieldTest: WorkflowDefinition = {
     {
       id: 'cal',
       title: 'Calibration CAL',
-      instruction: 'One still, before any station. About 4 m, phone front to paper.',
+      instruction: 'Start this run first. Then one still, about 4 m, phone front to paper.',
       detail: [
+        'Start this run before you take the calibration photo. A shot from earlier does not count.',
         'Before any station. One plumbed cane. Front of the phone about 4.000 m from the paper, between 3 m and 5 m.',
         'Tape that, level, write the raw reading. Axis length is the reading plus that sleeve’s R. One still. Name it CAL.',
         'On iOS, use the in-app camera. Same capture path and lens as the station photos. fx is per lens and per resolution.',

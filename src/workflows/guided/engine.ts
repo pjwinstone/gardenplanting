@@ -3,6 +3,7 @@
  * The garden document is updated by the caller through the existing save path.
  */
 
+import { getGardenCloudFileName, onedrivePathFor } from '../../cloudConfig';
 import type { GardenDocument, Photo } from '../../model';
 import { workflowById } from './definitions';
 import type {
@@ -11,6 +12,7 @@ import type {
   WorkflowEvent,
   WorkflowId,
   WorkflowLink,
+  WorkflowPastRun,
   WorkflowProgress,
   WorkflowRun,
   WorkflowStep,
@@ -245,7 +247,33 @@ export function readProgress(doc: { workflowProgress?: WorkflowProgress } | unde
     version: 1,
     activeId: isWorkflowId(raw.activeId) ? raw.activeId : undefined,
     runs,
+    pastRuns: readPastRuns(raw.pastRuns),
   };
+}
+
+function readPastRuns(raw: unknown): WorkflowPastRun[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list: WorkflowPastRun[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as WorkflowPastRun;
+    if (!isWorkflowId(row.workflowId) || typeof row.startedAt !== 'string') continue;
+    const notes = Array.isArray(row.notes)
+      ? row.notes.flatMap((note) => {
+        if (!note || typeof note.stepId !== 'string' || typeof note.note !== 'string') return [];
+        const text = note.note.trim();
+        return text ? [{ stepId: note.stepId, note: text }] : [];
+      })
+      : [];
+    list.push({
+      workflowId: row.workflowId,
+      startedAt: row.startedAt,
+      finishedAt: typeof row.finishedAt === 'string' ? row.finishedAt : undefined,
+      archivedAt: typeof row.archivedAt === 'string' ? row.archivedAt : row.startedAt,
+      notes,
+    });
+  }
+  return list.length ? list : undefined;
 }
 
 function progressJson(progress: WorkflowProgress): string {
@@ -254,19 +282,29 @@ function progressJson(progress: WorkflowProgress): string {
 
 interface WorkflowMirrorRecord {
   gardenCreatedAt: string;
+  /** OneDrive path of the garden file, for example `Garden Survey/garden-v1.json`. */
+  gardenFile: string;
   progress: WorkflowProgress;
 }
 
-export function writeWorkflowMirror(progress: WorkflowProgress, gardenCreatedAt = ''): void {
+export function gardenFileKey(): string {
   try {
-    const record: WorkflowMirrorRecord = { gardenCreatedAt, progress };
+    return onedrivePathFor(getGardenCloudFileName());
+  } catch {
+    return '';
+  }
+}
+
+export function writeWorkflowMirror(progress: WorkflowProgress, gardenCreatedAt = '', gardenFile = gardenFileKey()): void {
+  try {
+    const record: WorkflowMirrorRecord = { gardenCreatedAt, gardenFile, progress };
     localStorage.setItem(WORKFLOW_MIRROR_KEY, JSON.stringify(record));
   } catch {
     /* private mode, or no localStorage in this runtime */
   }
 }
 
-export function readWorkflowMirror(gardenCreatedAt?: string): WorkflowProgress | null {
+export function readWorkflowMirror(gardenCreatedAt?: string, gardenFile?: string): WorkflowProgress | null {
   try {
     const raw = localStorage.getItem(WORKFLOW_MIRROR_KEY);
     if (!raw) return null;
@@ -275,6 +313,7 @@ export function readWorkflowMirror(gardenCreatedAt?: string): WorkflowProgress |
     if (!progress) return null;
     if (gardenCreatedAt !== undefined) {
       if (!parsed.progress || parsed.gardenCreatedAt !== gardenCreatedAt) return null;
+      if (gardenFile !== undefined && parsed.gardenFile !== gardenFile) return null;
     }
     return readProgress({ workflowProgress: progress });
   } catch {
@@ -289,15 +328,15 @@ export function readWorkflowMirror(gardenCreatedAt?: string): WorkflowProgress |
  */
 export function hydrateWorkflowProgress(doc: GardenDocument): GardenDocument {
   if (doc.workflowProgress) return doc;
-  const mirrored = readWorkflowMirror(doc.createdAt);
+  const mirrored = readWorkflowMirror(doc.createdAt, gardenFileKey());
   if (!mirrored) return doc;
-  if (!mirrored.activeId && Object.keys(mirrored.runs).length === 0) return doc;
+  if (!mirrored.activeId && Object.keys(mirrored.runs).length === 0 && !(mirrored.pastRuns?.length)) return doc;
   return { ...doc, workflowProgress: mirrored };
 }
 
 export function commitWorkflow(doc: GardenDocument, progress: WorkflowProgress): GardenDocument {
   writeWorkflowMirror(progress, doc.createdAt);
-  const empty = !progress.activeId && Object.keys(progress.runs).length === 0;
+  const empty = !progress.activeId && Object.keys(progress.runs).length === 0 && !(progress.pastRuns?.length);
   if (empty) {
     if (!doc.workflowProgress) return doc;
     const next = { ...doc };
@@ -418,6 +457,20 @@ export function resumeWorkflow(progress: WorkflowProgress, id: string, now = new
   return { progress: next, changed };
 }
 
+function archivedRun(run: WorkflowRun, now: string): WorkflowPastRun {
+  const notes = Object.entries(run.steps).flatMap(([stepId, state]) => {
+    const note = state.note?.trim();
+    return note ? [{ stepId, note }] : [];
+  });
+  return {
+    workflowId: run.workflowId,
+    startedAt: run.startedAt || run.updatedAt,
+    finishedAt: run.finishedAt,
+    archivedAt: now,
+    notes,
+  };
+}
+
 export function restartWorkflow(progress: WorkflowProgress, id: string, now = new Date().toISOString()): WorkflowMove {
   const ready = readyDef(id);
   if ('error' in ready) return { progress, notice: ready.error, changed: false };
@@ -428,6 +481,7 @@ export function restartWorkflow(progress: WorkflowProgress, id: string, now = ne
     version: 1,
     activeId: ready.def.id,
     runs: { ...progress.runs, [ready.def.id]: run },
+    pastRuns: [...(progress.pastRuns ?? []), archivedRun(existing, now)],
   };
   return { progress: next, link: ready.def.steps[0]?.link, changed: true };
 }

@@ -23,7 +23,7 @@ import {
   type WorkflowMove,
 } from './engine';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
-import type { WorkflowDefinition, WorkflowLink, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
+import type { WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
 
 const SUN_KEY = 'garden-survey:workflow-sunlight';
 
@@ -118,7 +118,11 @@ export function handleWorkflowCommand(
   if (cmd === 'workflow-start') move = startWorkflow(progress, workflowId);
   else if (cmd === 'workflow-resume') move = resumeWorkflow(progress, workflowId);
   else if (cmd === 'workflow-review') move = reviewWorkflow(progress, workflowId);
-  else if (cmd === 'workflow-start-over') move = restartWorkflow(progress, workflowId || progress.activeId || '');
+  else if (cmd === 'workflow-start-over') {
+    const agreed = window.confirm('Start over? Notes from this run, such as sleeve R, heights, and CHK-BASE, stay under Past runs.');
+    if (!agreed) return {};
+    move = restartWorkflow(progress, workflowId || progress.activeId || '');
+  }
   else if (cmd === 'workflow-next') move = advanceWorkflow(progress);
   else if (cmd === 'workflow-back') move = backWorkflow(progress);
   else if (cmd === 'workflow-done') move = doneWorkflow(progress);
@@ -387,9 +391,20 @@ function renderPicker(progress: WorkflowProgress): HTMLElement {
     row.append(pickerAction(def, run));
     picker.append(row);
   }
+  const past = progress.pastRuns ?? [];
+  if (past.length) {
+    picker.append(el('h3', 'workflow-past-title', 'Past runs'));
+    for (const item of past) picker.append(el('p', 'workflow-detail', pastRunLine(item)));
+  }
   const close = button('Close', 'workflow-close-picker', { className: 'workflow-btn workflow-primary workflow-picker-close' });
   picker.append(close);
   return picker;
+}
+
+function pastRunLine(item: WorkflowPastRun): string {
+  const when = item.finishedAt ?? item.archivedAt;
+  const notes = item.notes.map((note) => `${note.stepId}: ${note.note}`);
+  return [item.workflowId, when, ...notes].join(' · ');
 }
 
 function pickerSubtitle(def: WorkflowDefinition, run: WorkflowRun | undefined): string {

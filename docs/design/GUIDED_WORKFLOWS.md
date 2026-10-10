@@ -262,7 +262,7 @@ Twelve steps. Wording is the approved sheet, [FIELD_CHECKLIST_CIRCLE.md](../FIEL
 | 5 | Tape the baseline both ways | Manual note of both pulls, and `baseline.saved` tape BAS01–BAS02 | Menu → Baseline |
 | 6 | Laser CHK-BASE | Manual. Not typed into the app | — |
 | 7 | Plumb and height | Manual, one tick per cane | — |
-| 8 | Calibration CAL | `photo.uploaded` CAL, 1 photo. On iOS, the in-app camera, same path and lens as the stations. | + Point, name CAL |
+| 8 | Calibration CAL | `photo.uploaded` CAL, 1 photo. Start the run first; an earlier shot does not count. On iOS, the in-app camera, same path and lens as the stations. | + Point, name CAL |
 | 9 | STN01 — left, 8.00 / 8.00 | `photo.uploaded` STN01, 2 photos | + Point, name STN01 |
 | 10 | STN02 — right, 6.50 / 9.00 | `photo.uploaded` STN02, 2 photos | + Point, name STN02 |
 | 11 | STN03 — right, 10.50 / 10.50 | `photo.uploaded` STN03, 2 photos | + Point, name STN03 |
@@ -301,9 +301,9 @@ Seven steps, from [PRINT_MARKERS.md](../PRINT_MARKERS.md). All manual. The app c
 
 ## Persistence
 
-Approved: an optional `workflowProgress` field on the garden document, same pattern as `photosManifest`. Older readers ignore it. It is small, no photo bytes. A surveyor tick goes through the existing save path: it marks the garden dirty and the save queue uploads it. The garden’s own conflict copy is the conflict copy for the ticks. Do not merge ticks in a second file. The `cloud.saved` tick is the exception: it is recorded on the local document and does not bump the revision, dirty the garden, or schedule a second upload.
+Approved: an optional `workflowProgress` field on the garden document, same pattern as `photosManifest`. Older readers ignore it. It is small, no photo bytes. A surveyor tick goes through the existing save path: it marks the garden dirty and the save queue uploads it. The garden’s own conflict copy is the conflict copy for the ticks. Do not merge ticks in a second file. The `cloud.saved` tick is a normal edit. It dirties the garden, bumps the revision, and queues one follow-up save against the eTag just stored. Once that step is already complete, another `cloud.saved` changes nothing, so the follow-up does not queue a further save. A reload before that follow-up is dirty, so sign-in does not silently adopt the OneDrive copy that still has the step open.
 
-A local mirror, `localStorage` key `garden-survey:workflow-progress`, is written on every tick, with the garden’s `createdAt`. It is read only when the document has no `workflowProgress` and the mirror belongs to that same garden. A field already on the document wins, so a newer OneDrive copy is not overwritten. Sunlight is a separate pref (`garden-survey:workflow-sunlight`) and does not dirty the survey. A finished run can be started over, which clears that run’s ticks and begins again at step 1.
+A local mirror, `localStorage` key `garden-survey:workflow-progress`, is written on every tick, with the garden’s `createdAt` and its OneDrive path. It is read only when the document has no `workflowProgress` and both of those match. A field already on the document wins, so a newer OneDrive copy is not overwritten. Sunlight is a separate pref (`garden-survey:workflow-sunlight`) and does not dirty the survey. Start over asks first, then keeps that run’s notes (sleeve R, heights, CHK-BASE) on `pastRuns` and begins again at step 1.
 
 The step `note` holds the write-in numbers until the model has real boxes for sleeve R, height, plumb, the laser check, and the station tapes. Those boxes are not part of this proposal.
 
@@ -343,7 +343,7 @@ The house traverse and iOS setup get their own definition PRs when those sheets 
 Paul approved the six open questions as follows.
 
 1. The thumb **Next** stays. It repeats the bar’s Next, and it hides while the sheet is open.
-2. Progress is the optional `workflowProgress` field on the garden document. A local mirror (`garden-survey:workflow-progress`) is written on every tick and read only as a fallback when the document has no workflow field and the `createdAt` matches. A field already on the document is left alone. `cloud.saved` does not dirty the garden or bump the revision.
+2. Progress is the optional `workflowProgress` field on the garden document. A local mirror (`garden-survey:workflow-progress`) is written on every tick and read only as a fallback when the document has no workflow field and both `createdAt` and the OneDrive path match. A field already on the document is left alone. `cloud.saved` dirties the garden and queues one follow-up save.
 3. A hand tick completes an auto step and is labelled manual. When the real event arrives later, `completedBy` becomes `auto`.
 4. The PDFs stay until a generated sheet is the one that prints. `docs/generated/WORKFLOWS.md` is the reference, checked in CI.
 5. Step sentences live on the workflow. `coach.ts` stays the session-mode coach.

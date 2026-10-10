@@ -1382,19 +1382,14 @@ function setDoc(doc: GardenDocument, refuse: string | null = null): void {
 }
 
 /**
- * Record a workflow tick that must not look like a garden edit.
- * Does not bump updatedAt, the save revision, or the dirty flag, and does not
- * schedule another OneDrive upload.
+ * The cloud.saved tick is a normal edit: dirty, a new revision, and one queued
+ * save. The follow-up upload uses the eTag just stored, so it does not conflict
+ * with the save that produced the event. Once the step is already complete the
+ * event is a no-op, so that follow-up does not queue another save.
  */
-function recordWorkflowQuiet(doc: GardenDocument): void {
-  state = { ...state, doc };
-  const saved = persistGardenLocal(doc);
-  if (!saved.ok) {
-    logError(`Could not cache the workflow tick in this browser (${saved.error}).`, {
-      source: 'persist-quota',
-    });
-  }
-  for (const fn of [...listeners]) fn();
+function recordCloudSavedTick(): void {
+  const ticked = withWorkflowEvent(state.doc, { type: 'cloud.saved' });
+  if (ticked !== state.doc) setDoc(ticked, null);
 }
 
 function scheduleCloudBackup(doc: GardenDocument): void {
@@ -1591,8 +1586,7 @@ export const gardenCloudUiForTests = {
     return onOneDriveSave();
   },
   recordCloudSaved(): void {
-    const ticked = withWorkflowEvent(state.doc, { type: 'cloud.saved' });
-    if (ticked !== state.doc) recordWorkflowQuiet(ticked);
+    recordCloudSavedTick();
   },
   loadNow(fileName?: string): Promise<void> {
     return onOneDriveLoad(fileName);
@@ -1853,8 +1847,7 @@ async function executeGardenSave(job: PendingSave): Promise<void> {
     } else {
       setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
     }
-    const ticked = withWorkflowEvent(state.doc, { type: 'cloud.saved' });
-    if (ticked !== state.doc) recordWorkflowQuiet(ticked);
+    recordCloudSavedTick();
     return;
   }
   if (result.ok && !result.wrote) {

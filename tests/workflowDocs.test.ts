@@ -19,6 +19,8 @@ describe('workflow markdown', () => {
     expect(generated).toContain('thin double-sided tape');
     expect(generated).toContain('off the middle of the calibration photo');
     expect(generated).toContain('in-app camera');
+    expect(generated).toContain('Start this run before you take the calibration photo');
+    expect(generated).toContain('A shot from earlier does not count');
     expect(generated).not.toContain('Camera.app');
     expect(generated).not.toContain('exactly on the dashed line');
     expect(generated).toContain('photo.uploaded STN01');

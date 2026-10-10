@@ -150,8 +150,19 @@ export interface WorkflowRun {
  * Optional field on the garden document. Older readers ignore it.
  * Local ticks and the OneDrive save share this object.
  */
+/** A finished run kept for its notes when the surveyor starts over. */
+export interface WorkflowPastRun {
+  workflowId: WorkflowId;
+  startedAt: string;
+  finishedAt?: string;
+  archivedAt: string;
+  notes: { stepId: string; note: string }[];
+}
+
 export interface WorkflowProgress {
   version: 1;
   activeId?: WorkflowId;
   runs: Partial<Record<WorkflowId, WorkflowRun>>;
+  /** Earlier runs of any workflow. Sleeve R, heights, and CHK-BASE stay here. */
+  pastRuns?: WorkflowPastRun[];
 }

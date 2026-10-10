@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyDocument, normalizeDocument, type GardenDocument, type Photo } from '../src/model';
 import { circleFieldTest, printFitMarkers } from '../src/workflows/guided/definitions';
 import {
@@ -20,6 +20,7 @@ import {
   withWorkflowEvent,
   workflowAfterUploadedPhoto,
 } from '../src/workflows/guided/engine';
+import { handleWorkflowCommand } from '../src/workflows/guided/guidedChrome';
 import type { WorkflowDefinition, WorkflowEvent, WorkflowRun } from '../src/workflows/guided/types';
 
 const NOW = '2026-06-01T12:00:00.000Z';
@@ -74,6 +75,10 @@ function stationDoc(photos: Photo[]): GardenDocument {
 }
 
 describe('guided workflow engine', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', { confirm: () => false });
+  });
+
   it('ports the circle sheet and the marker sheet, and leaves the other two for later', () => {
     expect(circleFieldTest.steps).toHaveLength(12);
     expect(printFitMarkers.steps).toHaveLength(7);
@@ -172,6 +177,31 @@ describe('guided workflow engine', () => {
     expect(again.progress.runs['print-fit-markers']?.startedAt).toBe(LATER);
     expect(again.progress.runs['print-fit-markers']?.steps.assign?.status).toBe('pending');
     expect(again.progress.activeId).toBe('print-fit-markers');
+    expect(again.progress.pastRuns).toHaveLength(1);
+  });
+
+  it('archives sleeve and CHK-BASE notes when a finished run starts over', () => {
+    let progress = started();
+    progress = noteWorkflow(progress, 'laser-check', 'CHK-BASE 8.001', NOW).progress;
+    progress = noteWorkflow(progress, 'plumb', 'sleeve R 30.2 mm, height 0.5 m', NOW).progress;
+    for (const step of circleFieldTest.steps) {
+      progress = tickWorkflow(progress, step.id, undefined, NOW).progress;
+    }
+    progress = doneWorkflow(progress, LATER).progress;
+    const again = restartWorkflow(progress, 'circle-field-test', '2026-06-01T12:10:00.000Z');
+    expect(again.progress.pastRuns?.[0]?.notes).toEqual([
+      { stepId: 'laser-check', note: 'CHK-BASE 8.001' },
+      { stepId: 'plumb', note: 'sleeve R 30.2 mm, height 0.5 m' },
+    ]);
+    expect(again.progress.runs['circle-field-test']?.steps['laser-check']?.note).toBeUndefined();
+    expect(again.progress.runs['circle-field-test']?.steps.plumb?.status).toBe('pending');
+
+    const doc = emptyDocument('Noted');
+    doc.workflowProgress = progress;
+    const declined = handleWorkflowCommand('workflow-start-over', doc, {
+      getAttribute: (name: string) => (name === 'data-workflow' ? 'circle-field-test' : null),
+    });
+    expect(declined.doc).toBeUndefined();
   });
 
   it('needs both baseline pulls in the note and a tape save with zero offsets', () => {

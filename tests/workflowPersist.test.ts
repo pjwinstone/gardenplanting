@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setGardenCloudFileName } from '../src/cloudConfig';
 import { gardenIsDirty } from '../src/gardenCloudSave';
 import { emptyDocument, normalizeDocument, type GardenDocument } from '../src/model';
 import { gardenCloudUiForTests, getState } from '../src/ui';
@@ -7,6 +8,7 @@ import {
   WORKFLOW_MIRROR_KEY,
   commitWorkflow,
   emptyProgress,
+  gardenFileKey,
   hydrateWorkflowProgress,
   readProgress,
   readWorkflowMirror,
@@ -78,6 +80,12 @@ describe('workflow progress on the garden document', () => {
     sameGarden.createdAt = doc.createdAt;
     const hydrated = hydrateWorkflowProgress(sameGarden);
     expect(hydrated.workflowProgress?.activeId).toBe('circle-field-test');
+    expect(localStorage.getItem(WORKFLOW_MIRROR_KEY)).toContain(gardenFileKey());
+
+    setGardenCloudFileName('garden-v9.json');
+    expect(hydrateWorkflowProgress(sameGarden).workflowProgress).toBeUndefined();
+    setGardenCloudFileName('garden-v1.json');
+    expect(hydrateWorkflowProgress(sameGarden).workflowProgress?.activeId).toBe('circle-field-test');
 
     const present = emptyDocument('Already has progress');
     present.createdAt = doc.createdAt;

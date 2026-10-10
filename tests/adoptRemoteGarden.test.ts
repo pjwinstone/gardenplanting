@@ -616,48 +616,138 @@ describe('adopt remote garden', () => {
     );
   });
 
-  it('records cloud.saved during adopt without bumping the revision or scheduling another upload', async () => {
-    let progress = startWorkflow(emptyProgress(), 'circle-field-test', '2026-06-01T12:00:00.000Z').progress;
-    for (let i = 0; i < 11; i += 1) {
-      progress = advanceWorkflow(progress, '2026-06-01T12:00:00.000Z').progress;
-    }
-    expect(progress.runs['circle-field-test']?.currentStepId).toBe('save-send');
+  it('keeps a cloud.saved tick on reload instead of adopting the pre-tick OneDrive file', async () => {
+    const pending = saveSendProgress();
     const local = namedGarden('On save step');
-    local.workflowProgress = progress;
+    local.workflowProgress = pending;
     local.updatedAt = '2026-06-01T12:00:00.000Z';
-    gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"local"');
+    const remote = namedGarden('On save step');
+    remote.createdAt = local.createdAt;
+    remote.updatedAt = local.updatedAt;
+    remote.workflowProgress = pending;
+    const puts = mockGardenDrive(remote, '"v1"');
+    gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"v1"');
     const revision = gardenRevision();
-    expect(gardenIsDirty()).toBe(false);
-    expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
+    let asked = false;
+    vi.stubGlobal('window', {
+      confirm: () => {
+        asked = true;
+        return false;
+      },
+      alert: () => {},
+    });
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (
+          _name: string,
+          optionsOrCallback: { signal?: AbortSignal } | (() => Promise<unknown>),
+          maybeCallback?: () => Promise<unknown>,
+        ) => {
+          const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+          return callback?.();
+        },
+      },
+    });
 
     gardenCloudUiForTests.recordCloudSaved();
-    expect(gardenRevision()).toBe(revision);
-    expect(gardenIsDirty()).toBe(false);
-    expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
-    expect(getState().doc.updatedAt).toBe('2026-06-01T12:00:00.000Z');
+    expect(gardenRevision()).toBe(revision + 1);
+    expect(gardenIsDirty()).toBe(true);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('complete');
+
+    await gardenCloudUiForTests.afterSignIn();
+
+    expect(asked).toBe(true);
+    expect(puts).toEqual([]);
     expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.completedBy).toBe('auto');
+    expect(gardenIsDirty()).toBe(true);
+  });
 
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(fetches).toBe(0);
+  it('uploads the cloud.saved tick once against the fresh eTag and does not loop', async () => {
+    const local = namedGarden('On save step');
+    local.workflowProgress = saveSendProgress();
+    local.updatedAt = '2026-06-01T12:00:00.000Z';
+    const remote = namedGarden('On save step');
+    remote.createdAt = local.createdAt;
+    remote.updatedAt = local.updatedAt;
+    remote.workflowProgress = saveSendProgress();
+    const puts = mockGardenDrive(remote, '"v1"');
+    gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"v1"');
+    gardenCloudUiForTests.edit(getState().doc);
 
-    const remote = namedGarden('OneDrive copy');
-    remote.createdAt = '2020-01-01T00:00:00.000Z';
-    remote.updatedAt = '2026-10-03T11:00:00.000Z';
-    const replaced = gardenCloudUiForTests.adopt(
-      remote,
-      'garden-v9.json',
-      '"v9"',
-      [],
-      undefined,
-      revision,
-    );
-    expect(replaced).toBe(true);
-    expect(getState().doc.name).toBe('OneDrive copy');
-    expect(gardenRevision()).toBe(revision);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.ifMatch).toBe('"v1"');
+    expect(puts[0]?.saveSend).not.toBe('complete');
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('complete');
+    expect(gardenIsDirty()).toBe(true);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(puts).toHaveLength(2);
+    expect(puts[1]?.ifMatch).toBe('"v2"');
+    expect(puts[1]?.saveSend).toBe('complete');
     expect(gardenIsDirty()).toBe(false);
     expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(puts).toHaveLength(2);
   });
 });
+
+function saveSendProgress() {
+  let progress = startWorkflow(emptyProgress(), 'circle-field-test', '2026-06-01T12:00:00.000Z').progress;
+  for (let i = 0; i < 11; i += 1) {
+    progress = advanceWorkflow(progress, '2026-06-01T12:00:00.000Z').progress;
+  }
+  return progress;
+}
+
+function mockGardenDrive(remote: GardenDocument, initialETag: string): Array<{ ifMatch: string | null; saveSend: string | undefined }> {
+  let remoteEtag = initialETag;
+  let remoteDoc = remote;
+  const puts: Array<{ ifMatch: string | null; saveSend: string | undefined }> = [];
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const method = init?.method ?? 'GET';
+    if (method === 'POST') return new Response('', { status: 409 });
+    if (method === 'GET' && url.includes('$select=')) {
+      return new Response(
+        JSON.stringify({
+          eTag: remoteEtag,
+          lastModifiedDateTime: remoteDoc.updatedAt,
+          '@microsoft.graph.downloadUrl': 'https://download.example/garden',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.startsWith('https://download.example/garden')) {
+      return new Response(JSON.stringify(remoteDoc), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (method === 'PUT' && url.includes('garden')) {
+      const doc = JSON.parse(String(init?.body)) as GardenDocument;
+      const headers = new Headers(init?.headers);
+      puts.push({
+        ifMatch: headers.get('If-Match'),
+        saveSend: doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status,
+      });
+      remoteDoc = doc;
+      remoteEtag = `"v${puts.length + 1}"`;
+      return new Response(JSON.stringify({ eTag: remoteEtag }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', etag: remoteEtag },
+      });
+    }
+    return new Response(JSON.stringify({ error: { message: 'missing' } }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  return puts;
+}
 
 function pointPhoto(id: string, addPointId: string, thumbnailDataUrl?: string): Photo {
   return { ...uploadingPhoto(id), addPointId, thumbnailDataUrl };

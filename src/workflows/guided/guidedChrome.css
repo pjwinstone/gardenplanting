@@ -235,11 +235,16 @@
   justify-content: flex-end;
 }
 
-.workflow-row h3 {
+.workflow-row h3,
+.workflow-past-title {
   margin: 0;
   font-family: Fraunces, Georgia, serif;
   font-size: 20px;
   font-weight: 700;
+}
+
+.workflow-past-title {
+  margin-top: 12px;
 }
 
 .workflow-row p {
