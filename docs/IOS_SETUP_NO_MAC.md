@@ -61,11 +61,16 @@ Admin is the role to use because cloud signing creates profiles and may create a
 
 Keep the `.p8` only until the next step. Then delete the download. GitHub holds the copy.
 
-## 4. Add the four GitHub secrets
+## 4. Create the `testflight` environment and add the four secrets there
 
-**Needed before** you dispatch the TestFlight workflow and expect an upload. Until they exist, that workflow still runs and exits successfully with: “Skipping TestFlight upload. One or more signing secrets are absent.”
+**Needed before** you dispatch the TestFlight workflow and expect an upload. Until the secrets exist, that workflow still runs and exits successfully with: “Skipping TestFlight upload. One or more signing secrets are absent.”
 
-Repo → **Settings** → Secrets and variables → **Actions** → Repository secrets. Names must match exactly. [How secrets work](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions).
+These are **environment** secrets, not repository secrets. Do not add them under Settings → Secrets and variables → Actions → Repository secrets.
+
+Repo → **Settings** → **Environments** → **New environment**. Name it `testflight`. [GitHub environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment).
+
+- Deployment branches: **Selected branches**, and allow **`main` only**
+- Environment secrets, names exact:
 
 | Secret name | Value |
 |---|---|
@@ -76,7 +81,7 @@ Repo → **Settings** → Secrets and variables → **Actions** → Repository s
 
 Paste the `.p8` as the secret value. A multi-line secret is allowed. Do not base64 it. Do not commit the file.
 
-The TestFlight workflow (`.github/workflows/testflight.yml`) runs only when you choose **Run workflow**, and only if that run is on `main` (`github.ref == 'refs/heads/main'`). A push to `main` does not upload. It does not run on pull requests. GitHub withholds secrets from a pull request that comes from a fork, but a pull request inside this repo would still receive them, which is why signing stays off `pull_request`.
+The TestFlight workflow (`.github/workflows/testflight.yml`) uses `environment: testflight`. It runs only when you choose **Run workflow**, and only if that run is on `main` (`github.ref == 'refs/heads/main'`). The environment’s branch rule is the same limit. A push to `main` does not upload. It does not run on pull requests. GitHub withholds secrets from a pull request that comes from a fork, but a pull request inside this repo would still receive repository secrets, which is why the signing secrets are not repository secrets and the workflow stays off `pull_request`.
 
 The marketing version (`CFBundleShortVersionString` / `VITE_APP_VERSION`) is the `version` field in `package.json`. The build number (`CFBundleVersion`) is `github.run_number`. Neither is hard-coded in the workflow. The `.p8` is written only for the archive step and deleted in a later step that runs even when the archive fails (`if: always()`).
 
@@ -174,10 +179,11 @@ Sign-in uses the redirect in step 5. Token refresh is one in-flight request: ove
 
 ## Device smoke test
 
-Do this on the TestFlight install, at a real station (the add-point you are standing on).
+Do this on the **TestFlight** install, at a real station (the add-point you are standing on). Use the in-app shutter. Do not use the iPhone Camera app, and do not pick the file from the library.
 
-1. **Sign-in round trip.** Sign in with Microsoft. The system browser should open and return to the app. Sign out. Sign in again. The second sign-in should land back in the app with your account shown.
-2. **Capture at the station.** Add a point and take the photo with the in-app shutter. Do not use the iPhone Camera app, and do not pick the file from the library. The original should upload to `/Garden Survey/photos/`.
-3. **EXIF on the uploaded original.** Orientation matches how you held the phone. `FocalLength` and `LensModel` are present. The pixel size is the 12 MP shutter frame (4032×3024 when the wide camera offers it), not a 24 MP Camera.app frame.
-4. **Gravity sign.** The sidecar `gravity` is CoreMotion’s device frame: +X to the right, +Y up, +Z out of the screen. Hold the phone upright and expect about `(0, −1, 0)`. Apple MakerNote `AccelerationVector` (ExifTool tag `0x0008`) points the opposite way. Negate each axis before you compare the two. Do not treat a match without that flip as success.
-5. **Processing record.** On the photo, `nativeCapture.geometricDistortionCorrectionEnabled` is `false` and `photoQualityPrioritization` is `speed`. The same fields are on the `photos/manifest.json` row. `requestedWidth` / `requestedHeight` are the size the shutter asked for.
+1. **TestFlight sign-in round trip.** Sign in with Microsoft. The system browser should open and return to the app. Sign out. Sign in again. The second sign-in should land back in the app with your account shown. A second tap while the browser is already open should join that sign-in, not show an error that sign-in is already open.
+2. **Capture at the station.** Add a point and take the photo. The original should upload to `/Garden Survey/photos/`. The shutter must not crash.
+3. **EXIF orientation in all four holds.** From that same station, take four stills: portrait, portrait upside down, landscape with the home indicator on the left, and landscape with it on the right. On each uploaded original, EXIF Orientation matches that hold. `FocalLength` and `LensModel` are present on each.
+4. **A real 4032×3024 capture.** At least one of those stills is 4032×3024. That is the 12 MP shutter frame, not a 24 MP Camera.app frame. `requestedWidth` / `requestedHeight` on the photo match that size when the wide camera offered it.
+5. **Distortion correction off.** In the photo metadata (`nativeCapture` on the garden photo, and the same fields on the `photos/manifest.json` row), `geometricDistortionCorrectionEnabled` is `false` and `contentAwareDistortionCorrectionEnabled` is `false`. `photoQualityPrioritization` is `speed`.
+6. **Gravity sign against the maker-note tilt.** The sidecar `gravity` is CoreMotion’s device frame: +X to the right, +Y up, +Z out of the screen. Hold the phone upright and expect about `(0, −1, 0)`. Apple MakerNote `AccelerationVector` (ExifTool tag `0x0008`) points the opposite way. Negate each maker-note axis, then compare with `gravity`. They should agree after that flip. A raw match, without the negation, is the wrong sign.
