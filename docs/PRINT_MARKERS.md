@@ -56,8 +56,9 @@ Each sleeve is **one A4 sheet**. Nothing is split across pages, so there is only
 
 | Part | Width | Where it sits |
 |---|---|---|
-| Coded bands | **189.8 mm** | x = 5.2 mm to 195.0 mm. This is 2π × 30.2 mm, the expected outer circumference. |
-| Blank tab | **15.0 mm** | x = 195.0 mm to the right-hand sheet edge at 210 mm. No band ink. |
+| Coded bands, to the fold | **189.8 mm** | x = 5.2 mm to 195.0 mm. This is 2π × 30.2 mm, the expected outer circumference. |
+| Underlap bleed | **3.0 mm** | x = 195.0 mm to 198.0 mm. The same bands, continued. |
+| Blank tab | **12.0 mm** | x = 198.0 mm to the sheet edge at 210 mm. No band ink. |
 | Coded + tab | **204.8 mm** | Wider than a typical printable width. |
 | Page | **210 mm** | A4 portrait. |
 
@@ -73,21 +74,21 @@ The page is 210 × 297 mm. Finished height is still **H = 287 mm**.
 - Cut **5 mm** off the top and **5 mm** off the bottom, on the horizontal lines.
 - Do **not** cut the left edge, and do **not** cut the fold line. The fold is the seam, where the bands end.
 
-The alignment crosses sit on the fold and on the cut edge. The cut-edge crosses are in the same margin as the dashes, so they may not print. The fold crosses do. The name and the code are in the legends, outside the black-and-white code. The tab carries only the grey staple line, the rulers, and the 50 mm bar.
+The alignment crosses sit on the fold and on the cut edge. The cut-edge crosses are in the same margin as the dashes, so they may not print. Small seam ticks at about **6.5 mm**, in the quiet strips only, do print. Use those, and the fold crosses. The name and the code are in the legends, outside the black-and-white code. Past x = 198 mm the tab carries the grey staple line, the rulers, and the 50 mm bar.
 
 ## Wrap
 
-Dowel **60 mm**. A 63 mm pipe is larger than this code: its outside would be about 199 mm around, and the blank tab has no bands to cover the gap.
+Dowel **60 mm**. A 63 mm pipe is larger than this code: its outside would be about 199 mm around, and the 3 mm bleed cannot cover that gap.
 
 Bands stay **horizontal**. They become rings. The **TOP** arrow points to the top of the stick. The four black sync bars are at that end. **BOTTOM** is the black stop.
 
 1. Printed face outward.
 2. Cut on the dashed line (or the sheet edge, if the dashes are missing).
-3. Wrap the sheet snug. Tuck the blank tab **under** the other edge so the bands meet: a band edge against a band edge, with no white stripe and no code hidden on the tab. The words on the tab read **staple/glue here — overlap under the other edge**. If the cut-edge crosses printed, put both of them — top and bottom — onto the crosses at the fold. A **1°** spiral misaligns the bands by about **3.3 mm**, so keep the TOP arrow square to the dowel.
-4. Staple through the **tab only**. Never through the bands. Or glue the tab down. A loose sleeve is not a bearing: the silhouette would follow the paper, not the dowel.
+3. Wrap the sheet snug. The **left** edge lies on top of the tab. That edge is the visible seam. The 3 mm of bands past the fold hide under it, so up to 3 mm of oversize still shows band ink, not white. The words on the blank part of the tab read **staple/glue here — overlap under the other edge**. If the cut-edge crosses printed, put both of them — top and bottom — onto the crosses at the fold. Otherwise line up the seam ticks near the left edge. A **1°** spiral misaligns the bands by about **3.3 mm**, so keep the TOP arrow square to the dowel.
+4. Staple at least **4 mm** from the fold, in the blank part of the tab (past the 3 mm bleed). Never through the bands, and never through that bleed. Or glue the tab down. A loose sleeve is not a bearing: the silhouette would follow the paper, not the dowel.
 5. Press the seam flat. It is a vertical join, not a ridge. A ridge splits the silhouette. Turn that seam **away from the stations and away from the camera**.
 
-A white gap opens at the seam if the finished outside circumference is longer than the coded width, **189.8 mm**. That length is the expected outside of this dowel (D = 60.4 mm, R = 30.2 mm). Film, thicker stock, or a larger dowel opens a gap, because the tab is blank and cannot cover extra paper. The step at the tab moves the centreline by only **0.1–0.2 mm**.
+A white gap opens at the seam only if the finished outside circumference is longer than about **192.8 mm** (the 189.8 mm fold plus the 3.0 mm bleed). That is an outside diameter of about **61.4 mm** (192.8 / π), a dowel of about **61.0 mm** with 0.2 mm stock. The design size, D = 60.4 mm and R = 30.2 mm, sits 3 mm inside that limit. Each extra 0.1 mm of thickness, film included, adds about 0.6 mm to the circumference, so the bleed covers about **0.5 mm** of extra thickness before a gap shows. The step at the tab moves the centreline by only **0.1–0.2 mm**.
 
 The circle stations stand on both sides of the baseline. The seam still cannot face away from all of them at once. Keep it off the middle of the calibration photo.
 

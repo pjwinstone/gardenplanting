@@ -9,13 +9,13 @@
  *   0–5 mm bottom trim, 5–20 bottom legend, 20–28 quiet,
  *   28–275 code (19 × 13 mm), 275–283 quiet, 283–292 top legend,
  *   292–297 top trim.
- * One sleeve is one A4 page. The coded width is the expected outer
- * circumference, 2π × 30.2 mm, so the bands meet edge to edge on a
- * 60 mm dowel with 0.2 mm stock. A 15 mm blank tab sits to the right
- * of that boundary. No band ink on the tab. The 250 mm ruler and the
- * 50 mm bar sit in the tab, clear of the bands; the ruler crosses the
- * tab's share of the quiet-zone heights. The quiet strips of the code
- * itself stay empty.
+ * One sleeve is one A4 page. The fold is the expected outer
+ * circumference, 2π × 30.2 mm, from the left edge of the bands. The
+ * same bands continue 3 mm past the fold (underlap bleed) so a slightly
+ * larger sleeve still shows ink. The remaining 12 mm of the 15 mm tab
+ * is blank. The 250 mm ruler and the 50 mm bar sit in that blank part.
+ * Quiet strips of the code stay empty, apart from the seam ticks near
+ * the left edge.
  *
  * Coded width + tab is about 204.8 mm. A typical printer's printable
  * width on A4 is about 200–202 mm (4–5 mm margins), so the outer
@@ -200,11 +200,16 @@ export const EXPECTED_R_MM = 30.2;
 export const CODED_WIDTH_MM = 2 * Math.PI * EXPECTED_R_MM;
 export const TAB_MM = 15;
 export const PAGE_WIDTH_MM = 210;
-/** Fold / seam. Bands end here. The blank tab is to the right. */
+/** Fold. Coded width is measured to here, not to the end of the ink. */
 export const CODE_RIGHT_MM = PAGE_WIDTH_MM - TAB_MM;
 export const CODE_LEFT_MM = CODE_RIGHT_MM - CODED_WIDTH_MM;
+/** Same bands, continued onto the tab. Blank paper starts after this. */
+export const BLEED_MM = 3;
+export const BLANK_START_MM = CODE_RIGHT_MM + BLEED_MM;
 /** Dashed cut, just inside the sheet edge so the stroke is on the page. */
 export const CUT_X_MM = PAGE_WIDTH_MM - 0.4;
+/** Prints. The cut-edge crosses sit in the unprintable margin. */
+export const SEAM_TICK_X_MM = 6.5;
 
 export function sleeveContent(sleeve: { point: string; id: string }) {
   const bits = sleeveBits(sleeve.id);
@@ -227,7 +232,7 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
     const top = CODE_TOP - i * MODULE;
     const bottom = CODE_TOP - j * MODULE;
     parts.push(`% RUN ${i} ${j}`);
-    parts.push(rect(CODE_LEFT_MM, bottom, CODED_WIDTH_MM, top - bottom));
+    parts.push(rect(CODE_LEFT_MM, bottom, CODED_WIDTH_MM + BLEED_MM, top - bottom));
     parts.push('f');
     i = j;
   }
@@ -237,7 +242,7 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push(rect(22, 10.5, 100, 1.4));
   parts.push('f');
   parts.push('% SCALE50');
-  parts.push(rect(199.2, 118, 0.7, 50));
+  parts.push(rect(200.6, 118, 0.6, 50));
   parts.push('f');
 
   parts.push('0.8 w');
@@ -265,11 +270,17 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push(cross(CUT_X_MM, 287.6, 1.2));
   parts.push(cross(CUT_X_MM, 12.2, 1.2));
   parts.push(cross(186, 287.6, 1.6));
+  // Quiet zones only. A tick on a band would be another module.
+  parts.push('% SEAMTICK');
+  parts.push(seg(SEAM_TICK_X_MM, 21.2, SEAM_TICK_X_MM, 26.8));
+  parts.push(seg(SEAM_TICK_X_MM - 1, 24, SEAM_TICK_X_MM + 1, 24));
+  parts.push(seg(SEAM_TICK_X_MM, 276.2, SEAM_TICK_X_MM, 281.8));
+  parts.push(seg(SEAM_TICK_X_MM - 1, 279, SEAM_TICK_X_MM + 1, 279));
   parts.push(arrowUp(64, 284.4, 290.6));
   parts.push(arrowDown(9.6, 7.2, 17.2));
 
   parts.push('0.9 w');
-  parts.push(vRuler(196.8, 23, 250));
+  parts.push(vRuler(198.8, 23, 250));
   parts.push(hRuler(22, 7.2, 180));
   parts.push(seg(22, 10.5, 22, 13.4));
   parts.push(seg(122, 10.5, 122, 13.4));
@@ -291,8 +302,8 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push(
     textUp(204.2, 32, 6.5, 'staple/glue here -- overlap under the other edge'),
   );
-  parts.push(textUp(203.4, 176, 6, '50 mm'));
-  parts.push(textUp(203.4, 214, 6, '250 mm'));
+  parts.push(textUp(204.4, 176, 6, '50 mm'));
+  parts.push(textUp(204.4, 214, 6, '250 mm'));
   parts.push('0 0 0 rg');
 
   return `${parts.join('\n')}\n`;

@@ -24,7 +24,7 @@ A4 portrait is **210 mm** wide and **297 mm** tall. The short side goes around t
 
 Printers leave an unprintable border of about **3–5 mm**. The code starts just past 5 mm, so that border does not eat the bands. The blank tab runs to the sheet edge. A 4–5 mm margin can miss the dashed cut line. The paper is still there: cut the sheet edge. Trim the 5 mm border off the top and the bottom. It is not part of the finished height.
 
-**Around the stick.** The coded bands are one expected outer circumference, and they stop at a fold. A **15 mm** blank tab sits outside that fold. Tuck the tab under the other edge and staple or glue through the tab only, so a band edge meets a band edge. The tab is not a copy of the pattern, and it is not a strip along the bottom.
+**Around the stick.** The fold is one expected outer circumference from the left edge of the bands. The same bands continue **3 mm** past the fold, then **12 mm** of the tab is blank. Tuck the tab under the left edge. That edge is the visible seam. Staple at least **4 mm** from the fold, in the blank part. Up to 3 mm of oversize shows the bleed instead of a white gap. The tab is not a strip along the bottom.
 
 `coded width = 2π × 30.2 = 189.8 mm`
 
@@ -48,9 +48,9 @@ There is no glue on those ends. The tab is the side seam. The band layout below 
 |---|---|---|---|---|
 | **60 mm dowel** | **188.5 mm** | **189.8 mm** | **15 mm** | **60.4 mm** (0.2 mm sheet) |
 | 60.3 mm tube | 189.4 mm | 189.8 mm, so the bands are slightly short | 15 mm | 60.7 mm; store its own `R` |
-| 63 mm pipe | 197.9 mm | 189.8 mm, about 9 mm short | 15 mm blank, no bands to fill the gap | does not meet |
+| 63 mm pipe | 197.9 mm | 189.8 mm, bleed ends near 192.8 mm | 3 mm bleed, then blank | does not meet |
 
-A **63 mm** pipe does not get this sheet. Its outside is about 199 mm around, longer than the 189.8 mm code, and the blank tab has no bands to cover the gap. Wrap the 60 mm dowel. The expected `R` in the rest of this note is that dowel.
+A **63 mm** pipe does not get this sheet. Its outside is about 199 mm around, and the 3 mm bleed stops at about 192.8 mm. Wrap the 60 mm dowel. The expected `R` in the rest of this note is that dowel.
 
 Glue the paper down. A loose tube, or a sleeve you can shift on the stick, is not a published bearing: the centreline would follow the paper, not the dowel. Do not wrap this full sheet around a thinner cane. Cut a shorter code (`2π × R` for that stick) plus the same 15 mm blank tab.
 
@@ -128,7 +128,7 @@ Vertical budget, on the **finished** sleeve. The module is **13 mm**, not 14 mm,
 
 The A4 sheet is 297 mm tall. Trim 5 mm off the top and 5 mm off the bottom before the sleeve is rolled. Those offcuts are the unprintable border. They are not part of `H`, and neither of them is the joining tab. The tab is the side seam in section 2: 15 mm of blank paper outside the bands.
 
-The 8 mm quiet strips are white and empty. Text and crosses sit beyond them. The bands end at the fold. The tab to the right of that fold is blank of band ink, marked for staple or glue, and tucks under the other edge.
+The 8 mm quiet strips are white and empty, except for the seam ticks near the left edge. Text and crosses sit beyond them. The bands run to 3 mm past the fold. The rest of the tab is blank, marked for staple or glue, and tucks under the left edge.
 
 **Which 12-bit words.** Two constructions both refuse a run longer than 3, and both have minimum distance 4. Distance 4 means one, two or three flipped bands cannot become another issued ID. Neither construction corrects a bit.
 
@@ -254,13 +254,13 @@ With the elevation model, the rim model, a plumbed rod, the checkerboard prior a
 
 One A4 portrait page, black and white, **actual size**. The printer must not scale to fit.
 
-Finished sleeve: **H = 287 mm** tall, wrapped tight on a **60 mm** dowel. Expected **D = 60.4 mm**, **R = 30.2 mm**. The coded width is that outer circumference, **189.8 mm**, plus a **15 mm** blank tab. The sheet starts at 297 × 210 mm. Trim 5 mm off the top and the bottom. Cut the tab on its dashed outer edge. Each sleeve is one page.
+Finished sleeve: **H = 287 mm** tall, wrapped tight on a **60 mm** dowel. Expected **D = 60.4 mm**, **R = 30.2 mm**. The fold is that outer circumference, **189.8 mm**, then **3 mm** of the same bands and **12 mm** of blank tab. The sheet starts at 297 × 210 mm. Trim 5 mm off the top and the bottom. Cut the tab on its dashed outer edge. Each sleeve is one page. A white gap opens only above about **192.8 mm** outside.
 
 ```
-        189.8 mm coded bands                         15 mm blank tab
+        189.8 mm to the fold          3 mm bleed, then 12 mm blank
         ┌───────────────────────────────────────────┬──────────────────┐
  trim   │ A1 · 222              corner cross   9 mm │ staple/glue here │
- 5 mm   │ (empty quiet)                         8 mm │ (no band ink)    │
+ 5 mm   │ (quiet; seam tick)                    8 mm │ (blank after 3)  │
  off    │ ████████████████████████████████     52 mm │                  │
  top    │                                      13 mm │ 250 mm ruler and │
  and    │   … 12 payload bands, runs of at most 3 …  │ 50 mm bar live   │
@@ -270,8 +270,8 @@ Finished sleeve: **H = 287 mm** tall, wrapped tight on a **60 mm** dowel. Expect
         └───────────────────────────────────────────┴──────────────────┘
 ```
 
-- Bands run around the dowel and stop at the fold. The tab is blank, marked “staple/glue here — overlap under the other edge”. Tuck it under the other edge so the visible seam is a band edge meeting a band edge. Staple through the tab only, or glue it. There is no joining strip on the top or the bottom.
-- The **8 mm** quiet zones of the code are empty. The name and the corner cross sit outside them. The decoder ignores text beyond the stop: 8 mm is only about 0.6 of a band (section 5).
+- Bands run around the dowel. They continue 3 mm past the fold, and the rest of the tab is blank, marked “staple/glue here — overlap under the other edge”. The left edge lies on top of the tab and is the visible seam. Staple at least 4 mm from the fold, in the blank part, or glue it. There is no joining strip on the top or the bottom.
+- The **8 mm** quiet zones of the code are empty apart from the seam ticks near the left edge. The name and the corner cross sit outside them. The decoder ignores text beyond the stop: 8 mm is only about 0.6 of a band (section 5).
 - **Rulers, checked with a steel rule before the sheet is rolled.** A **250 mm** ruler along the height, in the blank tab, measured before the tab is tucked. It fits the 287 mm finished height. It does not fit across the 210 mm sheet, so the wrap-direction ruler is **180 mm**, in the bottom legend, clear of the bands. Letter paper with fit-to-page scales A4 to about **94%**, which turns 250 mm into 235 mm and 180 mm into 169 mm. Either miss means the sheet was scaled. Do not use it. The four-black sync must measure **52 mm**.
 - Store the measured `H`, `D` and `R` on that sleeve. Expected 287 mm, 60.4 mm and 30.2 mm are the design for a 0.2 mm sheet, not the observation. The laser offset is the stored `R`.
 - Human text is the point name and the issued code, printed twice, outside the quiet zones. Names avoid O and I. The decoder does not read that text.

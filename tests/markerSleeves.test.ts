@@ -5,11 +5,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CIRCLE_SLEEVES,
+  BLEED_MM,
+  BLANK_START_MM,
   CODE_LEFT_MM,
   CODE_RIGHT_MM,
   CODED_WIDTH_MM,
   CUT_X_MM,
   EXPECTED_R_MM,
+  SEAM_TICK_X_MM,
   TAB_MM,
   issuedWords,
   renderAllSleevesPdf,
@@ -126,17 +129,34 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
   expect(Math.abs(sync!.h - pt(52))).toBeLessThan(0.05);
   expect(Math.abs(sync!.y + sync!.h - codeTop)).toBeLessThan(0.05);
   for (const rect of wide) {
-    expect(Math.abs(rect.w - pt(CODED_WIDTH_MM))).toBeLessThanOrEqual(pt(0.1));
+    expect(Math.abs(rect.w - pt(CODED_WIDTH_MM + BLEED_MM))).toBeLessThanOrEqual(pt(0.1));
     expect(Math.abs(rect.x - pt(CODE_LEFT_MM))).toBeLessThanOrEqual(pt(0.1));
-    expect(Math.abs(rect.x + rect.w - pt(CODE_RIGHT_MM))).toBeLessThanOrEqual(pt(0.1));
+    expect(Math.abs(rect.x + rect.w - pt(BLANK_START_MM))).toBeLessThanOrEqual(pt(0.1));
     const modules = rect.h / pt(13);
     expect(Math.abs(modules - Math.round(modules))).toBeLessThan(0.02);
   }
   expect(Math.abs(CODED_WIDTH_MM - 2 * Math.PI * EXPECTED_R_MM)).toBeLessThanOrEqual(0.1);
   expect(Math.abs(CODE_RIGHT_MM - CODE_LEFT_MM - CODED_WIDTH_MM)).toBeLessThanOrEqual(0.1);
+  expect(BLEED_MM).toBe(3);
+  expect(BLANK_START_MM).toBe(198);
   expect(TAB_MM).toBe(15);
+  const codeTopMm = 275;
+  for (let i = 0; i < 19; i++) {
+    const cy = pt(codeTopMm - (i + 0.5) * 13);
+    const covers = (xMm: number) =>
+      wide.some(
+        (rect) =>
+          pt(xMm) >= rect.x - 0.2 &&
+          pt(xMm) <= rect.x + rect.w + 0.2 &&
+          cy >= rect.y - 0.2 &&
+          cy <= rect.y + rect.h + 0.2,
+      );
+    expect(covers(CODE_LEFT_MM + 1.5)).toBe(covers(CODE_RIGHT_MM + 1.5));
+    expect(covers(CODE_RIGHT_MM - 0.2)).toBe(covers(CODE_RIGHT_MM + 0.2));
+    expect(covers(BLANK_START_MM + 0.4)).toBe(false);
+  }
   const tabInk = rects.filter(
-    (rect) => rect.x + rect.w > pt(CODE_RIGHT_MM) + pt(0.05) && rect.h > pt(10) && rect.w > pt(20),
+    (rect) => rect.x + rect.w > pt(BLANK_START_MM) + pt(0.05) && rect.h > pt(10) && rect.w > pt(20),
   );
   expect(tabInk).toEqual([]);
 
@@ -165,6 +185,17 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
     expect(overlaps(pt(20), pt(28))).toBe(false);
     expect(overlaps(pt(28), pt(275))).toBe(false);
     expect(overlaps(pt(275), pt(283))).toBe(false);
+  }
+  const ticks = linesOf(stream).filter(
+    (line) => Math.abs(line.x1 - pt(SEAM_TICK_X_MM)) < 0.05 && Math.abs(line.x2 - pt(SEAM_TICK_X_MM)) < 0.05,
+  );
+  expect(ticks.length).toBeGreaterThanOrEqual(2);
+  for (const line of ticks) {
+    const y0 = Math.min(line.y1, line.y2);
+    const y1 = Math.max(line.y1, line.y2);
+    const inQuiet = (y0 >= pt(20) - 0.2 && y1 <= pt(28) + 0.2) || (y0 >= pt(275) - 0.2 && y1 <= pt(283) + 0.2);
+    expect(inQuiet).toBe(true);
+    expect(y1 > pt(28) + 0.2 && y0 < pt(275) - 0.2).toBe(false);
   }
   const ruler180 = linesOf(stream).find(
     (line) => Math.abs(line.y1 - line.y2) < 0.02 && Math.abs(Math.abs(line.x2 - line.x1) - pt(180)) < 0.05,
@@ -292,16 +323,20 @@ function assertRenderedSleeves(prefix: string, pdf: string, sleeves: typeof CIRC
     const quietX = mmX(page, CODE_RIGHT_MM - 0.3);
     expect(isBlack(page, quietX, mmY(page, 18))).toBe(false);
     expect(isBlack(page, quietX, mmY(page, 273))).toBe(false);
-    const tabX = mmX(page, CODE_RIGHT_MM + 0.6);
     for (let i = 0; i < 19; i++) {
-      const y = mmY(page, 5 + 9 + 8 + (i + 0.5) * 13);
-      expect(isBlack(page, tabX, y)).toBe(false);
+      const yMm = 5 + 9 + 8 + (i + 0.5) * 13;
+      const y = mmY(page, yMm);
+      expect(isBlack(page, mmX(page, BLANK_START_MM + 0.4), y)).toBe(false);
+      expect(isBlack(page, mmX(page, CODE_LEFT_MM + 1.5), y)).toBe(
+        isBlack(page, mmX(page, CODE_RIGHT_MM + 1.5), y),
+      );
     }
     const syncY = mmY(page, 5 + 9 + 8 + 26);
     const bandMm = (blackRunNear(page, 5 + 9 + 8 + 26, (CODE_LEFT_MM + CODE_RIGHT_MM) / 2) / page.width) * 210;
-    expect(Math.abs(bandMm - CODED_WIDTH_MM)).toBeLessThanOrEqual(0.1);
+    expect(Math.abs(bandMm - (CODED_WIDTH_MM + BLEED_MM))).toBeLessThanOrEqual(0.1);
     expect(isBlack(page, mmX(page, CODE_LEFT_MM + 0.15), syncY)).toBe(true);
     expect(isBlack(page, mmX(page, CODE_RIGHT_MM - 0.15), syncY)).toBe(true);
+    expect(isBlack(page, mmX(page, CODE_RIGHT_MM + 1.5), syncY)).toBe(true);
     expect(isBlack(page, mmX(page, CODE_LEFT_MM - 0.4), syncY)).toBe(false);
   });
 }
