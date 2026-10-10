@@ -55,6 +55,13 @@ export interface SolverDistanceInput {
   bPerM?: number;
   instrument?: 'tape' | 'laser' | 'rod';
   withheld?: boolean;
+  /**
+   * Traverse step. `solveIncremental` keeps distances whose step is absent
+   * or at most the step being solved.
+   */
+  step?: number;
+  /** Leg and cross-tie tapes are the ties an incremental step reports. */
+  role?: 'leg' | 'cross' | 'station' | 'repeat';
 }
 
 export interface SolverAngleInput {
@@ -134,6 +141,22 @@ export interface SolverPhotoInput {
   cameraSetupId?: string;
   /** Hold yaw (radians). The station position may still be free. */
   yawHeldRad?: number;
+  /**
+   * Traverse step. `solveIncremental` keeps photos whose step is absent or
+   * at most the step being solved.
+   */
+  step?: number;
+  /**
+   * Closing re-occupation of a station. With `cameraCentring: 'setup'` and
+   * no `cameraSetupId`, this photo does not share the opening occupation's
+   * offset. Omitted: a photo id containing `-close-` is the closing occupation.
+   */
+  closing?: boolean;
+  /**
+   * Traverse photo. Leg-station rays are included in that step's tie
+   * redundancy and MDB. Occupy and closing photos are not.
+   */
+  role?: 'occupy' | 'leg' | 'close';
 }
 
 export interface SolverDatumInput {
@@ -198,6 +221,14 @@ export interface SolveInput {
    * same-cost mirror is what the adjustment starts from. Default off.
    */
   reflectSeed?: boolean;
+  /**
+   * How a photo carries pole lean. `ray` (default) keeps a centring term on
+   * each ray unless `cameraSetupId` names an offset. `setup` is the traverse
+   * default: one 2D offset per station occupation, prior `sigmaCentringM` or
+   * 8 mm, and no per-ray centring. Photos without `cameraSetupId` are grouped
+   * by station and by whether the photo is the closing occupation.
+   */
+  cameraCentring?: 'ray' | 'setup';
 }
 
 export interface SolvePoint {
@@ -259,6 +290,16 @@ export interface SolveFocal {
   scale: number;
   /** A-priori 1σ of s. Null when the normal matrix was not inverted. */
   sigma: number | null;
+  /**
+   * `sigma × σ̂₀` when a high variance factor scaled the covariances.
+   * This is not a phone calibration. Null when the solve was not held.
+   */
+  sigmaHeld: number | null;
+  /**
+   * False when the variance test held the solve. Do not save `scale` or
+   * `sigmaHeld` as a calibration of the phone.
+   */
+  calibratable: boolean;
 }
 
 export interface SolveObservation {
@@ -331,7 +372,13 @@ export interface SolveResult {
   datum: { originId: string; axisPointId: string; gardenSign: 1 | -1 };
 }
 
-export type SolveWarningCode = 'lens-unknown' | 'centring-sigma' | 'setup-station' | 'seeding-cap';
+export type SolveWarningCode =
+  | 'lens-unknown'
+  | 'centring-sigma'
+  | 'setup-station'
+  | 'seeding-cap'
+  | 'fx-prior'
+  | 'fx-held';
 
 export interface SolveWarning {
   code: SolveWarningCode;
