@@ -401,6 +401,40 @@ test('open cross-ties and shared fx: last mark 70 mm', () => {
   assert.ok(Math.abs(major - 70) < 1.5, `C4 ${major.toFixed(2)} mm`);
 });
 
+test('open-chain C3 is checked when rays choose between tape candidates', () => {
+  const { input, truth } = load('loop4ct-open.json');
+  const base = traverse(input, true);
+  const clean = solve(base);
+  const c3 = clean.points.find((p) => p.id === 'C3');
+  assert.equal(c3?.status, 'checked');
+  assert.equal(c3?.method, 'distances');
+  assert.equal(c3?.branchChoice, undefined);
+  assert.notEqual(c3?.stationClassBlock, 'branch');
+  assert.equal(c3?.earlyWarning, 'shallow-rays');
+  // TODO: S2 is unset on this noise-free open chain, as it was at fbf5b7e.
+  // The resection lands on the true station but the circle is dangerous
+  // (ratio about 0.02) and the 95% semi-major is 207 mm, over the 200 mm
+  // station class, so the coordinate is withheld. Not a seeding miss.
+  const rng = mulberry32(20261010);
+  const N = 200;
+  let checked = 0;
+  let c3Checked = 0;
+  for (let i = 0; i < N; i++) {
+    const trial = solve(perturb(base, truth, rng));
+    assert.equal(trial.converged, true, `draw ${i}`);
+    const mark = trial.points.find((p) => p.id === 'C3');
+    assert.equal(mark?.branchChoice, undefined, `draw ${i}`);
+    assert.notEqual(mark?.stationClassBlock, 'branch', `draw ${i}`);
+    if (mark?.status === 'checked') c3Checked += 1;
+    else assert.equal(trial.varianceTest, 'high', `draw ${i} C3 ${mark?.status}`);
+    checked += trial.points.filter((p) => p.status === 'checked').length;
+  }
+  // fbf5b7e counted 1,135 checked marks. The branch flag had dropped that to 960.
+  assert.equal(c3Checked, 190);
+  assert.ok(checked >= 1135, `checked ${checked}`);
+  assert.equal(checked, 1530);
+});
+
 test('closure report: along/across/azimuth sigmas, and χ² is not the raw misclosure', () => {
   const { input } = load('loop4ct-dup.json');
   const result = solve(traverse(input, true));

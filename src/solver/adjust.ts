@@ -516,21 +516,44 @@ function solveOnce(input: SolveInput): SolveResult {
     const rayOk = hit != null && !hit.behind && cross >= 1;
     if (taped) {
       if (!rayOk || !hit) continue;
-      let best = s.candidates![0];
-      let bestD = Math.hypot(best.x - hit.point.x, best.y - hit.point.y);
-      for (const candidate of s.candidates!.slice(1)) {
-        const d = Math.hypot(candidate.x - hit.point.x, candidate.y - hit.point.y);
+      const candidates = s.candidates!;
+      let best = 0;
+      let bestD = Infinity;
+      let secondD = Infinity;
+      for (let i = 0; i < candidates.length; i++) {
+        const d = Math.hypot(candidates[i].x - hit.point.x, candidates[i].y - hit.point.y);
         if (d < bestD) {
-          best = candidate;
+          secondD = bestD;
           bestD = d;
+          best = i;
+        } else if (d < secondD) {
+          secondD = d;
         }
       }
-      s.x = best.x;
-      s.y = best.y;
-      s.method = s.candidates!.length > 1 ? 'branch' : 'distances';
-      s.branchChoice = s.candidates!.length > 1;
+      const other = candidates.length === 1 ? best : best === 0 ? 1 : 0;
+      const sep = Math.hypot(candidates[best].x - candidates[other].x, candidates[best].y - candidates[other].y);
+      // Bearings side a both-tapes station without a user branch flag. A ray
+      // does the same when the hit sits with one tape intersection. A hit
+      // near the bisector does not choose, and the pair stays unresolved.
+      // Half the separation is that margin: the mirror is several times
+      // farther, the way SIDE_MATCH_RAD rejects the other station side.
+      const clear = candidates.length === 1 || secondD - bestD >= 0.5 * sep;
+      if (!clear) {
+        s.x = undefined;
+        s.y = undefined;
+        s.method = undefined;
+        s.branchChoice = undefined;
+        s.unsetCode = 'two-candidates';
+        if (cross < RAY_CROSS_WARN_DEG) s.earlyWarning = 'shallow-rays';
+        continue;
+      }
+      s.x = candidates[best].x;
+      s.y = candidates[best].y;
+      s.method = 'distances';
+      s.branchChoice = undefined;
       s.sidedByGardenSign = false;
       s.unsetCode = undefined;
+      s.candidates = undefined;
       if (cross < RAY_CROSS_WARN_DEG) s.earlyWarning = 'shallow-rays';
       continue;
     }
