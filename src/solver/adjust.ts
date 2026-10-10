@@ -402,19 +402,24 @@ function solveOnce(input: SolveInput): SolveResult {
         return { x: p.x, y: p.y, bearing: b.bearing };
       });
       const resect = resectFromMarks(aimed);
-      if (!resect.start) {
+      if (resect.start) {
+        s.x = resect.start.position.x;
+        s.y = resect.start.position.y;
+        s.method = 'resection';
+        s.dangerRatio = resect.start.danger.ratio;
+        s.dangerKind = resect.start.danger.kind;
+        if (resect.start.danger.warn) s.earlyWarning = 'danger';
+        s.unsetCode = undefined;
+        classifyControl(s, knownMarks, xyOf);
+        continue;
+      }
+      // A danger circle with one tape still has an arc. Flat-angle and a
+      // miss do not, and a resection with no tape stays unset.
+      const dangerWithTape = resect.failure === 'danger' && tapes.length === 1 && !bothEnds;
+      if (!dangerWithTape) {
         s.unsetCode = resect.failure === 'flat-angle' ? 'flat-angle' : 'danger';
         continue;
       }
-      s.x = resect.start.position.x;
-      s.y = resect.start.position.y;
-      s.method = 'resection';
-      s.dangerRatio = resect.start.danger.ratio;
-      s.dangerKind = resect.start.danger.kind;
-      if (resect.start.danger.warn) s.earlyWarning = 'danger';
-      s.unsetCode = undefined;
-      classifyControl(s, knownMarks, xyOf);
-      continue;
     }
 
     if (bestCount >= 2 && best && tapes.length === 1 && !bothEnds) {
@@ -502,6 +507,33 @@ function solveOnce(input: SolveInput): SolveResult {
     const cross = (crossingAngle(az1, az2) * 180) / Math.PI;
     const hit = intersectRays(xyOf(s1)!, az1, xyOf(s2)!, az2);
     const s = ensure(id);
+    // A two-tape (or arc-and-tape) pair is already the candidate list. A
+    // near-parallel crossing can sit a metre off the good intersection, and
+    // writing that over the candidates sends the next resection metres away.
+    // The ray only chooses which candidate. A missing, parallel, or
+    // behind-camera ray leaves the list alone.
+    const taped = s.candidates != null && s.candidates.length > 0;
+    const rayOk = hit != null && !hit.behind && cross >= 1;
+    if (taped) {
+      if (!rayOk || !hit) continue;
+      let best = s.candidates![0];
+      let bestD = Math.hypot(best.x - hit.point.x, best.y - hit.point.y);
+      for (const candidate of s.candidates!.slice(1)) {
+        const d = Math.hypot(candidate.x - hit.point.x, candidate.y - hit.point.y);
+        if (d < bestD) {
+          best = candidate;
+          bestD = d;
+        }
+      }
+      s.x = best.x;
+      s.y = best.y;
+      s.method = s.candidates!.length > 1 ? 'branch' : 'distances';
+      s.branchChoice = s.candidates!.length > 1;
+      s.sidedByGardenSign = false;
+      s.unsetCode = undefined;
+      if (cross < RAY_CROSS_WARN_DEG) s.earlyWarning = 'shallow-rays';
+      continue;
+    }
     if (!hit || cross < 1) {
       s.unsetCode = 'parallel-rays';
       continue;
@@ -1333,14 +1365,19 @@ function fxGroupKey(photo: SolverPhotoInput): string {
 /**
  * Occupation id for the 2D camera offset. A named `cameraSetupId` always
  * counts. `cameraCentring: 'setup'` also groups a photo that has none, by
- * station and by the closing occupation. The same raw id at two stations
- * still becomes two parameters.
+ * station and by the closing occupation (`closing` or `role: 'close'`).
+ * A photo id that contains `-close-` is not that field. The same raw id
+ * at two stations still becomes two parameters.
  */
+/** Closing occupation is a field. A `-close-` photo id is not one. */
+function isClosingOccupation(photo: SolverPhotoInput): boolean {
+  return photo.closing === true || photo.role === 'close';
+}
+
 function setupIdFor(photo: SolverPhotoInput, input: SolveInput): string | null {
   if (photo.cameraSetupId) return photo.cameraSetupId;
   if (input.cameraCentring !== 'setup') return null;
-  const closing = photo.closing === true || (photo.closing == null && photo.id.includes('-close-'));
-  return closing ? 'close' : 'open';
+  return isClosingOccupation(photo) ? 'close' : 'open';
 }
 
 /** Parameter id for one station's camera offset. The raw setup id is not global. */
@@ -1385,6 +1422,20 @@ function collectWarnings(input: SolveInput, seedingCapped: boolean): SolveWarnin
     }
   }
   if (input.cameraCentring === 'setup') {
+    const unmarked = (input.photos ?? []).filter(
+      (photo) =>
+        !photo.cameraSetupId &&
+        photo.id.includes('-close-') &&
+        !isClosingOccupation(photo),
+    );
+    if (unmarked.length > 0) {
+      warnings.push({
+        code: 'closing-unmarked',
+        photoIds: unmarked.map((photo) => photo.id),
+        message:
+          'A photo id contains -close- but closing is not set. Under setup centring that photo keeps the opening offset. Set closing or role close for the closing occupation.',
+      });
+    }
     const implicitBad = new Map<string, string[]>();
     for (const photo of input.photos ?? []) {
       if (photo.cameraSetupId) continue;

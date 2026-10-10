@@ -76,7 +76,7 @@ function randn(rng: () => number): number {
 }
 
 function setupGroup(photo: SolverPhotoInput): string {
-  const closing = photo.closing === true || (photo.closing == null && photo.id.includes('-close-'));
+  const closing = photo.closing === true || photo.role === 'close';
   return `${photo.stationId}|${closing ? 'close' : 'open'}`;
 }
 
@@ -325,7 +325,7 @@ test('loop4ct.json stays 15.3 × 2.8 mm when centring stays per ray', () => {
   assert.ok(Math.abs(ell.minor - 2.8) < 0.15, `minor ${ell.minor.toFixed(2)}`);
 });
 
-test('closed cross-ties and shared fx: far mark 6.3 mm, ties MDB ≤ 21 mm', () => {
+test('closed cross-ties and shared fx: far mark 6.3 mm, tape MDB ≤ 21.3 mm', () => {
   const { input, truth } = load('loop4ct-steps.json');
   const result = solve(traverse(input, true));
   assert.equal(result.converged, true);
@@ -347,15 +347,29 @@ test('closed cross-ties and shared fx: far mark 6.3 mm, ties MDB ≤ 21 mm', () 
     assert.ok(p?.x != null && p.y != null, id);
     assert.ok(Math.hypot(p.x - t.x, p.y - t.y) * 1000 <= 1, id);
   }
-  const ties = (input.distances ?? []).filter((d) => d.role === 'leg' || d.role === 'cross');
-  assert.ok(ties.length > 0);
-  for (const tie of ties) {
+  const legs = (input.distances ?? []).filter((d) => d.role === 'leg');
+  const crosses = (input.distances ?? []).filter((d) => d.role === 'cross');
+  assert.ok(legs.length > 0 && crosses.length > 0);
+  for (const tie of [...legs, ...crosses]) {
     const obs = result.observations.find((o) => o.id === tie.id);
     assert.ok(obs?.used, tie.id);
-    assert.ok(obs.redundancy >= 0.14, `${tie.id} r ${obs.redundancy.toFixed(3)}`);
     const mdbMm = obs.mdb == null ? null : obs.mdb * 1000;
-    // The design table rounds 21.25 mm to 21. The analytic cross-tie maximum is 21.25 mm.
+    // Exact maximum is 21.246 mm on C1–H4. The design table rounds that to 21.
     assert.ok(mdbMm != null && mdbMm <= 21.3, `${tie.id} MDB ${mdbMm?.toFixed(2)}`);
+  }
+  for (const tie of crosses) {
+    const obs = result.observations.find((o) => o.id === tie.id);
+    assert.ok(obs && obs.redundancy >= 0.34, `${tie.id} r ${obs?.redundancy.toFixed(3)}`);
+  }
+  const legPhotos = (input.photos ?? []).filter((p) => p.role === 'leg');
+  assert.ok(legPhotos.length > 0);
+  for (const photo of legPhotos) {
+    for (const click of photo.clicks) {
+      const id = `${photo.id}:${click.pointId}`;
+      const obs = result.observations.find((o) => o.id === id);
+      assert.ok(obs?.used, id);
+      assert.ok(obs.redundancy >= 0.13, `${id} r ${obs.redundancy.toFixed(3)}`);
+    }
   }
   const fxPct = (result.focals[0].sigma ?? 0) * 100;
   assert.ok(Math.abs(fxPct - 0.042) < 0.004, `fx ${fxPct.toFixed(4)}%`);
@@ -363,7 +377,11 @@ test('closed cross-ties and shared fx: far mark 6.3 mm, ties MDB ≤ 21 mm', () 
 
 test('per-photo fx with the setup offset: closed far mark 13.4 mm', () => {
   const { input } = load('loop4ct.json');
-  const result = solve(traverse(input, false));
+  const stamped: SolveInput = {
+    ...input,
+    photos: (input.photos ?? []).map((p) => (p.id.includes('-close-') ? { ...p, closing: true } : p)),
+  };
+  const result = solve(traverse(stamped, false));
   assert.equal(result.fxSharedInSolve, false);
   assert.equal(result.degreesOfFreedom, 34);
   const c3 = result.points.find((p) => p.id === 'C3');
@@ -447,11 +465,24 @@ test('closure χ² Monte Carlo: mean within 10% of rank, 95% exceedance 3–8%',
     chis.push(closureChi2(d, report.qDPlus));
   }
   const mean = chis.reduce((s, v) => s + v, 0) / Math.max(1, chis.length);
-  const exceed = chis.filter((v) => v > report.chi2Limit95).length / Math.max(1, chis.length);
-  // A draw that does not settle is not a χ² sample. This seed leaves only a few.
-  assert.ok(diverged / N <= 0.02, `diverged ${diverged}`);
+  const exceed = chis.filter((v) => v > report.chi2Limit95).length / N;
+  assert.equal(diverged, 0, `diverged ${diverged} of ${N}`);
+  assert.equal(chis.length, N);
   assert.ok(Math.abs(mean - report.rank) / report.rank <= 0.1, `mean χ² ${mean.toFixed(2)} rank ${report.rank}`);
   assert.ok(exceed >= 0.03 && exceed <= 0.08, `exceedance ${(exceed * 100).toFixed(1)}% n=${chis.length}`);
+});
+
+test('Monte Carlo draws 25, 96 and 175 converge on the open chain', () => {
+  const { input, truth } = load('loop4ct-dup.json');
+  const baseInput = traverse(input, true);
+  const rng = mulberry32(20261010);
+  const targets = new Set([25, 96, 175]);
+  for (let i = 0; i <= 175; i++) {
+    const trialInput = perturb(baseInput, truth, rng);
+    if (!targets.has(i)) continue;
+    const trial = solve(trialInput);
+    assert.equal(trial.converged, true, `draw ${i} unset`);
+  }
 });
 
 test('incremental solve: ellipses grow 3 → 33 → 70 mm and close at 6.1 mm', () => {
@@ -467,13 +498,119 @@ test('incremental solve: ellipses grow 3 → 33 → 70 mm and close at 6.1 mm', 
   assert.ok(Math.abs(mm(1) - 33.0) < 1.5, `step2 ${mm(1).toFixed(2)}`);
   assert.ok(Math.abs(mm(2) - 70.0) < 1.5, `step3 ${mm(2).toFixed(2)}`);
   assert.ok(Math.abs(mm(3) - 6.1) < 0.4, `step4 ${mm(3).toFixed(2)}`);
-  // Analytic minimum is the leg-station ray S3→C1 at 0.136, which the design prints as 0.14.
+  // Minimum is the leg-station ray S3→C1 at 0.136. The design table prints 0.14.
   assert.ok(
-    steps[3].tieRedundancy != null && Math.abs(steps[3].tieRedundancy - 0.136) < 0.015,
-    `r ${steps[3].tieRedundancy}`,
+    steps[3].tieRayRedundancy != null && steps[3].tieRayRedundancy >= 0.13,
+    `ray r ${steps[3].tieRayRedundancy}`,
   );
-  assert.ok(steps[3].tieMdbM != null && steps[3].tieMdbM * 1000 <= 21.3, `MDB ${steps[3].tieMdbM}`);
+  assert.ok(
+    Math.abs((steps[3].tieRayRedundancy ?? 0) - 0.136) < 0.015,
+    `ray r ${steps[3].tieRayRedundancy}`,
+  );
+  assert.ok(steps[3].tieMdbMm != null && steps[3].tieMdbMm <= 21.3, `tape MDB ${steps[3].tieMdbMm} mm`);
+  assert.ok(
+    steps[3].tieMdbMm != null && Math.abs(steps[3].tieMdbMm - 21.246) < 0.05,
+    `tape MDB ${steps[3].tieMdbMm} mm`,
+  );
+  assert.ok(steps[3].tieRayMdbMrad != null && steps[3].tieRayMdbMrad < 15, `ray MDB ${steps[3].tieRayMdbMrad} mrad`);
+  const tapeTies = steps[3].ties.filter((t) => t.kind === 'tape');
+  const rayTies = steps[3].ties.filter((t) => t.kind === 'ray');
+  assert.ok(tapeTies.length > 0 && rayTies.length > 0);
+  const cross = tapeTies.filter((t) => t.id.includes('H'));
+  assert.ok(cross.length > 0 && Math.min(...cross.map((t) => t.redundancy)) >= 0.34);
   const fxPct = (steps[3].fxSigma ?? 0) * 100;
   assert.ok(Math.abs(fxPct - 0.042) < 0.004, `fx ${fxPct}`);
   assert.ok(steps.every((s) => s.converged));
+});
+
+test('a -close- photo id without the closing field keeps the opening offset', () => {
+  const width = 1200;
+  const fxOverWidth = 0.75;
+  const photo = (id: string, extra: Partial<SolverPhotoInput> = {}): SolverPhotoInput => ({
+    id,
+    stationId: 'A',
+    width,
+    height: 900,
+    fxOverWidth,
+    gravity: { x: 0, y: 1, z: 0 },
+    sigmaPx: 2,
+    clicks: [{ pointId: 'B', px: 400, py: 450 }],
+    ...extra,
+  });
+  const result = solve({
+    cameraCentring: 'setup',
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 4, fixScale: true },
+    photos: [
+      photo('open-A'),
+      photo('shot-close-A'),
+      photo('real-close-A', { closing: true }),
+      photo('role-close-A', { role: 'close' }),
+    ],
+  });
+  const ids = result.observations.map((o) => o.id);
+  assert.ok(ids.includes('ox:A|open'), ids.filter((id) => id.startsWith('ox:')).join(','));
+  assert.ok(ids.includes('ox:A|close'));
+  assert.equal(ids.filter((id) => id === 'ox:A|open').length, 1);
+  assert.equal(ids.filter((id) => id === 'ox:A|close').length, 1);
+  const warn = result.warnings.find((w) => w.code === 'closing-unmarked');
+  assert.ok(warn);
+  assert.deepEqual(warn.photoIds, ['shot-close-A']);
+});
+
+test('a danger resection with one tape falls back to the arc and that tape', () => {
+  const marks = [
+    { x: 0, y: 0 },
+    { x: 6, y: 0 },
+    { x: 3, y: 1 },
+  ];
+  const station = { x: 3, y: -9.25 };
+  const width = 1200;
+  const fxOverWidth = 0.72;
+  const yaw = Math.atan2(3 - station.y, 3 - station.x);
+  const ids = ['A', 'B', 'C'];
+  const bare = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 6, fixScale: true },
+    points: [{ id: 'C', held: { x: 3, y: 1 } }],
+    photos: [
+      {
+        id: 'cam',
+        stationId: 'S',
+        width,
+        height: 900,
+        fxOverWidth,
+        gravity: { x: 0, y: 1, z: 0 },
+        sigmaPx: 0.5,
+        clicks: marks.map((m, i) => ({ pointId: ids[i], ...projectClick(station, yaw, m, width, fxOverWidth) })),
+      },
+    ],
+  });
+  assert.equal(bare.points.find((p) => p.id === 'S')?.unsetCode, 'danger');
+  const taped = solve({
+    datum: { originId: 'A', axisPointId: 'B', lengthM: 6, fixScale: true },
+    points: [{ id: 'C', held: { x: 3, y: 1 } }],
+    distances: [
+      {
+        id: 'tape',
+        a: 'S',
+        b: 'A',
+        slopeM: Math.hypot(station.x - marks[0].x, station.y - marks[0].y),
+        sigmaM: 0.005,
+      },
+    ],
+    photos: [
+      {
+        id: 'cam',
+        stationId: 'S',
+        width,
+        height: 900,
+        fxOverWidth,
+        gravity: { x: 0, y: 1, z: 0 },
+        sigmaPx: 0.5,
+        clicks: marks.map((m, i) => ({ pointId: ids[i], ...projectClick(station, yaw, m, width, fxOverWidth) })),
+      },
+    ],
+  });
+  const placed = taped.points.find((p) => p.id === 'S');
+  assert.ok(placed?.x != null && placed.y != null, placed?.unsetCode);
+  assert.ok(Math.hypot(placed.x - station.x, placed.y - station.y) < 0.05, `${placed.x}, ${placed.y}`);
 });

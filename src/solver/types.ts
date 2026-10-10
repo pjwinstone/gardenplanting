@@ -149,7 +149,9 @@ export interface SolverPhotoInput {
   /**
    * Closing re-occupation of a station. With `cameraCentring: 'setup'` and
    * no `cameraSetupId`, this photo does not share the opening occupation's
-   * offset. Omitted: a photo id containing `-close-` is the closing occupation.
+   * offset. `role: 'close'` means the same thing. A photo id that contains
+   * `-close-` does not: the solve warns `closing-unmarked` and keeps the
+   * opening offset.
    */
   closing?: boolean;
   /**
@@ -226,7 +228,7 @@ export interface SolveInput {
    * each ray unless `cameraSetupId` names an offset. `setup` is the traverse
    * default: one 2D offset per station occupation, prior `sigmaCentringM` or
    * 8 mm, and no per-ray centring. Photos without `cameraSetupId` are grouped
-   * by station and by whether the photo is the closing occupation.
+   * by station and by the closing occupation (`closing` or `role: 'close'`).
    */
   cameraCentring?: 'ray' | 'setup';
 }
@@ -378,7 +380,8 @@ export type SolveWarningCode =
   | 'setup-station'
   | 'seeding-cap'
   | 'fx-prior'
-  | 'fx-held';
+  | 'fx-held'
+  | 'closing-unmarked';
 
 export interface SolveWarning {
   code: SolveWarningCode;

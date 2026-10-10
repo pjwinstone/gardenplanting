@@ -26,7 +26,7 @@
  * - A traverse solve sets cameraCentring to 'setup': one 8 mm offset per
  *   station occupation, not a centring term on every ray. The default stays
  *   'ray', so a photo with no setup id is unchanged. Closing is a separate
- *   occupation from the opening one.
+ *   occupation when the photo sets `closing` or `role: 'close'`.
  * - An arc or a resection uses the best single frame. A second frame that
  *   only adds a mark does not skip an arc-and-tape seed. Two frames that
  *   each see two marks seed the station where the arcs meet.

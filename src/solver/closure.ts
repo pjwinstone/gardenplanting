@@ -3,8 +3,9 @@
  *
  * The closing observations are solved on copies of the start marks (C1′, C2′,
  * H1′). The datum stays on the originals. Raw |w| is mostly the open-chain
- * fx uncertainty, so it is not a blunder test. The tests are the position
- * w-test, the azimuth w-test, and χ² = dᵀ Q_d⁺ d against χ²(rank).
+ * fx uncertainty, so it is not a blunder test. The tests are the 2-D
+ * position χ² (wᵀ Q⁻¹ w against χ²(2) = 5.99), the azimuth z-test |az|/σ
+ * against 1.96, and the closure χ² = dᵀ Q_d⁺ d against χ²(rank).
  */
 
 import { CHI2_2_95, Z_95 } from './constants';
@@ -49,11 +50,14 @@ export interface ClosureReport {
   azimuth95Rad: number;
   /** A-priori 3×3 cofactor of (wx, wy, azimuth). */
   qW: number[][];
-  /** wᵀ Q_w⁻¹ w for the position. Passes at χ²(2, 95%) = 5.99. */
+  /**
+   * 2-D position test, χ²(2): wᵀ Q_w⁻¹ w. Passes at 5.99. This is not a
+   * one-dimensional w-test. The azimuth check below is a z-test.
+   */
   positionW2: number;
   positionLimit: number;
   positionPass: boolean;
-  /** |azimuth| / σ. Passes at 1.96. */
+  /** Azimuth z-test: |azimuth| / σ. Passes at 1.96. */
   azimuthStandardised: number;
   azimuthLimit: number;
   azimuthPass: boolean;
