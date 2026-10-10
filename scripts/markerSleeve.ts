@@ -10,12 +10,12 @@
  *   28–275 code (19 × 13 mm), 275–283 quiet, 283–292 top legend,
  *   292–297 top trim.
  * One sleeve is one A4 page. The fold is the expected outer
- * circumference, 2π × 30.2 mm, from the left edge of the bands. The
- * same bands continue 3 mm past the fold (underlap bleed) so a slightly
- * larger sleeve still shows ink. The remaining 12 mm of the 15 mm tab
- * is blank. The 250 mm ruler and the 50 mm bar sit in that blank part.
- * A cut line at the left edge of the bands is the visible seam after
- * the margin is cut off. Quiet strips of the code stay empty.
+ * circumference, 2π × 30.2 mm, measured from the coded edge to x = 195 mm.
+ * The same bands continue 3 mm past the fold (underlap bleed) and 0.75 mm
+ * left of the coded edge (cutting tolerance). The remaining 12 mm of the
+ * 15 mm tab is blank. The 250 mm ruler and the 50 mm bar sit in that blank
+ * part. The CUT HERE dash is centred just left of the band ink, so its
+ * stroke does not enter the bands. Quiet strips of the code stay empty.
  *
  * Coded width + tab is about 204.8 mm. A typical printer's printable
  * width on A4 is about 200–202 mm (4–5 mm margins), so the outer
@@ -206,6 +206,21 @@ export const CODE_LEFT_MM = CODE_RIGHT_MM - CODED_WIDTH_MM;
 /** Same bands, continued onto the tab. Blank paper starts after this. */
 export const BLEED_MM = 3;
 export const BLANK_START_MM = CODE_RIGHT_MM + BLEED_MM;
+/**
+ * Extra band ink left of the coded edge. A cut that wanders still meets ink.
+ * The coded width to the fold does not include this.
+ */
+export const EDGE_BLEED_MM = 0.75;
+/** Left edge of the printed bands. */
+export const BAND_LEFT_MM = CODE_LEFT_MM - EDGE_BLEED_MM;
+/** Stroke of the left cut dash, in points. The path is the centre of the stroke. */
+export const LEFT_CUT_STROKE_PT = 0.5;
+/**
+ * Centre of the CUT HERE dash. Just left of the band ink: the 0.5 pt stroke
+ * must not paint x >= CODE_LEFT − 0.75.
+ */
+export const LEFT_CUT_X_MM =
+  BAND_LEFT_MM - (LEFT_CUT_STROKE_PT / 2) * (25.4 / 72) - 0.15;
 /** Dashed cut, just inside the sheet edge so the stroke is on the page. */
 export const CUT_X_MM = PAGE_WIDTH_MM - 0.4;
 
@@ -230,7 +245,7 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
     const top = CODE_TOP - i * MODULE;
     const bottom = CODE_TOP - j * MODULE;
     parts.push(`% RUN ${i} ${j}`);
-    parts.push(rect(CODE_LEFT_MM, bottom, CODED_WIDTH_MM + BLEED_MM, top - bottom));
+    parts.push(rect(BAND_LEFT_MM, bottom, CODED_WIDTH_MM + BLEED_MM + EDGE_BLEED_MM, top - bottom));
     parts.push('f');
     i = j;
   }
@@ -244,8 +259,8 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push('f');
 
   parts.push('0.8 w');
-  parts.push(seg(CODE_LEFT_MM, 5, 210, 5));
-  parts.push(seg(CODE_LEFT_MM, 292, 210, 292));
+  parts.push(seg(BAND_LEFT_MM, 5, 210, 5));
+  parts.push(seg(BAND_LEFT_MM, 292, 210, 292));
   parts.push(seg(188, 287.6, CODE_RIGHT_MM, 287.6));
   parts.push(seg(188, 12.2, CODE_RIGHT_MM, 12.2));
 
@@ -277,12 +292,12 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push(seg(22, 10.5, 22, 13.4));
   parts.push(seg(122, 10.5, 122, 13.4));
 
-  // Full height, on the left edge of the bands. Cut this off so the
-  // margin does not lie over the seam. The stroke is the only ink
-  // allowed to the left of that edge.
-  parts.push('0.5 w');
+  // Full height, just left of the band ink. A stroke centred on the
+  // coded edge leaves a dashed sliver in the bands. This path is the
+  // only ink allowed to the left of the bands.
+  parts.push(`${LEFT_CUT_STROKE_PT} w`);
   parts.push('% LEFTCUT');
-  parts.push(`q\n[1.6 1.1] 0 d\n${seg(CODE_LEFT_MM, 0, CODE_LEFT_MM, 297)}\nQ`);
+  parts.push(`q\n[1.6 1.1] 0 d\n${seg(LEFT_CUT_X_MM, 0, LEFT_CUT_X_MM, 297)}\nQ`);
   parts.push(textAt(7.2, 286.2, 6, 'CUT HERE'));
 
   parts.push(textAt(26, 286.2, 11, sleeve.point));

@@ -5,13 +5,17 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CIRCLE_SLEEVES,
+  BAND_LEFT_MM,
   BLEED_MM,
   BLANK_START_MM,
   CODE_LEFT_MM,
   CODE_RIGHT_MM,
   CODED_WIDTH_MM,
   CUT_X_MM,
+  EDGE_BLEED_MM,
   EXPECTED_R_MM,
+  LEFT_CUT_STROKE_PT,
+  LEFT_CUT_X_MM,
   TAB_MM,
   issuedWords,
   renderAllSleevesPdf,
@@ -128,8 +132,9 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
   expect(Math.abs(sync!.h - pt(52))).toBeLessThan(0.05);
   expect(Math.abs(sync!.y + sync!.h - codeTop)).toBeLessThan(0.05);
   for (const rect of wide) {
-    expect(Math.abs(rect.w - pt(CODED_WIDTH_MM + BLEED_MM))).toBeLessThanOrEqual(pt(0.1));
-    expect(Math.abs(rect.x - pt(CODE_LEFT_MM))).toBeLessThanOrEqual(pt(0.1));
+    expect(Math.abs(rect.w - pt(CODED_WIDTH_MM + BLEED_MM + EDGE_BLEED_MM))).toBeLessThanOrEqual(pt(0.1));
+    expect(Math.abs(rect.x - pt(BAND_LEFT_MM))).toBeLessThanOrEqual(pt(0.1));
+    expect(rect.x).toBeLessThanOrEqual(pt(4.5));
     expect(Math.abs(rect.x + rect.w - pt(BLANK_START_MM))).toBeLessThanOrEqual(pt(0.1));
     const modules = rect.h / pt(13);
     expect(Math.abs(modules - Math.round(modules))).toBeLessThan(0.02);
@@ -187,19 +192,27 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
   }
   const leftCut = linesOf(stream).filter(
     (line) =>
-      Math.abs(line.x1 - pt(CODE_LEFT_MM)) < 0.05 &&
-      Math.abs(line.x2 - pt(CODE_LEFT_MM)) < 0.05 &&
+      Math.abs(line.x1 - pt(LEFT_CUT_X_MM)) < 0.05 &&
+      Math.abs(line.x2 - pt(LEFT_CUT_X_MM)) < 0.05 &&
       Math.abs(line.y2 - line.y1) > pt(250),
   );
   expect(leftCut.length).toBeGreaterThan(0);
+  const cutMark = stream.indexOf('% LEFTCUT');
+  const strokePt = Number(stream.slice(0, cutMark).match(/([\d.]+) w\n$/)?.[1]);
+  expect(strokePt).toBe(LEFT_CUT_STROKE_PT);
+  const cutInkRightMm = LEFT_CUT_X_MM + (strokePt / 2) * (25.4 / 72);
+  expect(cutInkRightMm).toBeLessThan(CODE_LEFT_MM - EDGE_BLEED_MM);
+  expect(cutInkRightMm).toBeLessThan(5.25 - 0.75);
+  expect(BAND_LEFT_MM).toBeLessThanOrEqual(4.5);
+  expect(Math.abs(BAND_LEFT_MM - (CODE_LEFT_MM - 0.75))).toBeLessThanOrEqual(0.001);
   for (const rect of rects) {
-    expect(rect.x).toBeGreaterThanOrEqual(pt(CODE_LEFT_MM) - 0.05);
+    expect(rect.x).toBeGreaterThanOrEqual(pt(BAND_LEFT_MM) - 0.05);
   }
   for (const line of linesOf(stream)) {
     const onCut =
-      Math.abs(line.x1 - pt(CODE_LEFT_MM)) < 0.05 && Math.abs(line.x2 - pt(CODE_LEFT_MM)) < 0.05;
+      Math.abs(line.x1 - pt(LEFT_CUT_X_MM)) < 0.05 && Math.abs(line.x2 - pt(LEFT_CUT_X_MM)) < 0.05;
     if (onCut) continue;
-    expect(Math.min(line.x1, line.x2)).toBeGreaterThanOrEqual(pt(CODE_LEFT_MM) - 0.05);
+    expect(Math.min(line.x1, line.x2)).toBeGreaterThanOrEqual(pt(BAND_LEFT_MM) - 0.05);
   }
   const ruler180 = linesOf(stream).find(
     (line) => Math.abs(line.y1 - line.y2) < 0.02 && Math.abs(Math.abs(line.x2 - line.x1) - pt(180)) < 0.05,
@@ -338,12 +351,17 @@ function assertRenderedSleeves(prefix: string, pdf: string, sleeves: typeof CIRC
     }
     const syncY = mmY(page, 5 + 9 + 8 + 26);
     const bandMm = (blackRunNear(page, 5 + 9 + 8 + 26, (CODE_LEFT_MM + CODE_RIGHT_MM) / 2) / page.width) * 210;
-    expect(Math.abs(bandMm - (CODED_WIDTH_MM + BLEED_MM))).toBeLessThanOrEqual(0.1);
+    expect(Math.abs(bandMm - (CODED_WIDTH_MM + BLEED_MM + EDGE_BLEED_MM))).toBeLessThanOrEqual(0.1);
+    expect(isBlack(page, mmX(page, 4.5), syncY)).toBe(true);
     expect(isBlack(page, mmX(page, CODE_LEFT_MM + 0.15), syncY)).toBe(true);
+    expect(isBlack(page, mmX(page, CODE_LEFT_MM - 0.4), syncY)).toBe(true);
     expect(isBlack(page, mmX(page, CODE_RIGHT_MM - 0.15), syncY)).toBe(true);
     expect(isBlack(page, mmX(page, CODE_RIGHT_MM + 1.5), syncY)).toBe(true);
-    expect(isBlack(page, mmX(page, CODE_LEFT_MM - 0.4), syncY)).toBe(false);
-    for (const xMm of [1, 3, 4.5]) {
+    const quietY = mmY(page, 18);
+    for (const xMm of [4.5, 4.8, 5.1]) {
+      expect(isBlack(page, mmX(page, xMm), quietY)).toBe(false);
+    }
+    for (const xMm of [1, 3]) {
       expect(isBlack(page, mmX(page, xMm), syncY)).toBe(false);
       expect(isBlack(page, mmX(page, xMm), mmY(page, 150))).toBe(false);
     }
