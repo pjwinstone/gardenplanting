@@ -251,6 +251,14 @@ export function readProgress(doc: { workflowProgress?: WorkflowProgress } | unde
   };
 }
 
+/** Finished runs kept on the garden. Older than this are dropped; the newest stays last. */
+export const PAST_RUN_LIMIT = 20;
+
+function capPastRuns(list: WorkflowPastRun[]): WorkflowPastRun[] | undefined {
+  if (!list.length) return undefined;
+  return list.length > PAST_RUN_LIMIT ? list.slice(-PAST_RUN_LIMIT) : list;
+}
+
 function readPastRuns(raw: unknown): WorkflowPastRun[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const list: WorkflowPastRun[] = [];
@@ -273,7 +281,7 @@ function readPastRuns(raw: unknown): WorkflowPastRun[] | undefined {
       notes,
     });
   }
-  return list.length ? list : undefined;
+  return capPastRuns(list);
 }
 
 function progressJson(progress: WorkflowProgress): string {
@@ -481,7 +489,7 @@ export function restartWorkflow(progress: WorkflowProgress, id: string, now = ne
     version: 1,
     activeId: ready.def.id,
     runs: { ...progress.runs, [ready.def.id]: run },
-    pastRuns: [...(progress.pastRuns ?? []), archivedRun(existing, now)],
+    pastRuns: capPastRuns([...(progress.pastRuns ?? []), archivedRun(existing, now)]),
   };
   return { progress: next, link: ready.def.steps[0]?.link, changed: true };
 }
