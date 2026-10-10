@@ -249,12 +249,12 @@ export const printFitMarkers: WorkflowDefinition = {
     {
       id: 'cut',
       title: 'Cut',
-      instruction: 'Left edge on CUT HERE. Right edge on the dash, or the sheet.',
+      instruction: 'Just inside CUT HERE, toward the bands. Right edge on the dash, or the sheet.',
       detail: [
         'Laminate or film the flat sheet first, if you use film. Then cut. Bands stay horizontal. TOP stays up.',
-        'Cut the left edge exactly on the dashed line marked CUT HERE, so the band ink runs to that edge. Leave the margin on, and a white stripe about 5 mm wide hides the bleed.',
-        'Cut the right edge on its dashed line. If those dashes did not print, cut the right-hand edge of the sheet. That edge is the outer edge of the blank tab.',
-        'Cut 5 mm off the top and the bottom. Do not crease the fold.',
+        'Cut just inside the CUT HERE dash, between the dash and the start of the bands (about 4.4–5.0 mm from the sheet edge), so the band ink runs right to the cut edge. Inside means toward the bands, not into the margin.',
+        'Do not cut down the dash. Its ink ends near 4.35 mm and the bands start near 4.50 mm, so the line itself leaves a sliver of dash plus white at the seam. If you leave the margin on, a white stripe about 5 mm wide hides the bleed. If the dashes or the band ink are clipped, cut at the edge of the ink.',
+        'Cut the right edge on its dashed line. If those dashes did not print, cut the right-hand edge of the sheet. That edge is the outer edge of the blank tab. Cut 5 mm off the top and the bottom. Do not crease the fold.',
       ],
       complete: { on: 'manual' },
       link: none,
@@ -264,8 +264,8 @@ export const printFitMarkers: WorkflowDefinition = {
       title: 'Join the sleeve',
       instruction: 'Fix the tab, wrap, stick the left edge down, seam away.',
       detail: [
-        'Fasten the blank tab to the 60 mm dowel before you wrap. A staple-gun or a drawing-pin in wood. Glue or thin double-sided tape on a tube.',
-        'Staples go in the blank only, at least 4 mm from the fold, never through the bands. The tab reads staple/glue here — overlap under the other edge.',
+        'Fix the blank tab to the 60 mm dowel before you wrap. Flush staples or flush pins in wood, or glue or thin double-sided tape on a tube. No raised heads under the overlap.',
+        'Staples go in the blank part only, at least 4 mm from the fold, never through the bands. The tab reads staple/glue here — overlap under the other edge.',
         'Wrap snug, printed face out, TOP up. Do not crease the fold. Stick the cut left edge down over the tab.',
         'Turn that seam away from the stations and away from the camera.',
       ],

@@ -10,6 +10,10 @@ describe('workflow markdown', () => {
     expect(generated).toContain('12 steps');
     expect(generated).toContain('7 steps');
     expect(generated).toContain('CUT HERE');
+    expect(generated).toContain('just inside the CUT HERE dash');
+    expect(generated).toContain('4.4–5.0 mm');
+    expect(generated).toContain('Flush staples');
+    expect(generated).not.toContain('exactly on the dashed line');
     expect(generated).toContain('STN01');
     expect(generated).toContain('STN03');
     expect(generated).toContain('Coming soon');

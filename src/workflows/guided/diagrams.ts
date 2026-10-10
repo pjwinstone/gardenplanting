@@ -72,12 +72,12 @@ function sleeveJoin(): string {
     <text x="220" y="84" ${text}>tab</text>
     <circle cx="300" cy="78" r="28" fill="none" stroke="currentColor" stroke-width="3"/>
     <text x="276" y="128" ${text}>dowel</text>
-    <text x="8" y="156" ${text}>1. Cut the left edge on CUT HERE.</text>
+    <text x="8" y="156" ${text}>1. Cut just inside CUT HERE.</text>
     <text x="8" y="180" ${text}>2. Fix the tab to the dowel.</text>
     <text x="8" y="204" ${text}>3. Wrap, stick the left edge down.</text>
     <text x="8" y="228" ${text}>4. Turn the seam away.</text>
     `,
-    'Sleeve join. Cut on CUT HERE, fix the blank tab to the dowel, wrap, stick the edge, turn the seam away.',
+    'Sleeve join. Cut just inside CUT HERE, toward the bands. Fix the blank tab, wrap, stick the edge, turn the seam away.',
     248,
   );
 }
