@@ -105,6 +105,10 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
     private var configuredZoom: CGFloat = 1
     private var pendingExt = "jpg"
     private var pendingMime = "image/jpeg"
+    /// One coordinator for this device and preview. Creating a new one per frame
+    /// reads the angle before the coordinator has tracked the phone.
+    private var horizonRotation: AnyObject?
+    private weak var horizonRotationDevice: AVCaptureDevice?
 
     private let hint = UILabel()
     private let shutter = UIButton(type: .custom)
@@ -207,11 +211,6 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
                 // `.speed` keeps Smart HDR / Deep Fusion from blending the still.
                 // The settings used at capture must not ask for a higher quality than this.
                 self.photoOutput.maxPhotoQualityPrioritization = .speed
-                if #available(iOS 16.0, *) {
-                    if let dims = self.preferredPhotoDimensions(on: device) {
-                        self.photoOutput.maxPhotoDimensions = dims
-                    }
-                }
                 if self.photoOutput.isContentAwareDistortionCorrectionSupported {
                     self.photoOutput.isContentAwareDistortionCorrectionEnabled = false
                 }
@@ -230,6 +229,13 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
                 }
                 device.unlockForConfiguration()
                 self.session.commitConfiguration()
+                // The .photo preset is applied only after commit. supportedMaxPhotoDimensions
+                // before that is the previous format, so the still size is chosen here.
+                if #available(iOS 16.0, *) {
+                    if let dims = self.preferredPhotoDimensions(on: device) {
+                        self.photoOutput.maxPhotoDimensions = dims
+                    }
+                }
                 self.session.startRunning()
                 DispatchQueue.main.async {
                     self.observeFocus(device)
@@ -266,11 +272,22 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
         }
     }
 
+    /// The same coordinator serves the preview and the still. A new device gets a new one.
+    @available(iOS 17.0, *)
+    private func horizonCoordinator(for device: AVCaptureDevice) -> AVCaptureDevice.RotationCoordinator {
+        if horizonRotationDevice === device, let existing = horizonRotation as? AVCaptureDevice.RotationCoordinator {
+            return existing
+        }
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
+        horizonRotation = coordinator
+        horizonRotationDevice = device
+        return coordinator
+    }
+
     private func updatePreviewOrientation() {
         guard let connection = previewLayer.connection else { return }
         if #available(iOS 17.0, *), let device {
-            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
-            let angle = coordinator.videoRotationAngleForHorizonLevelPreview
+            let angle = horizonCoordinator(for: device).videoRotationAngleForHorizonLevelPreview
             if connection.isVideoRotationAngleSupported(angle) {
                 connection.videoRotationAngle = angle
             }
@@ -283,8 +300,7 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
     private func applyPhotoConnectionRotation() {
         guard let connection = photoOutput.connection(with: .video) else { return }
         if #available(iOS 17.0, *), let device {
-            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
-            let angle = coordinator.videoRotationAngleForHorizonLevelCapture
+            let angle = horizonCoordinator(for: device).videoRotationAngleForHorizonLevelCapture
             if connection.isVideoRotationAngleSupported(angle) {
                 connection.videoRotationAngle = angle
             }

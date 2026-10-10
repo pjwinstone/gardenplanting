@@ -1,11 +1,10 @@
 name: TestFlight
 
-# Signing secrets are available to workflows in this repository. They are not
-# available to pull requests from forks, and a pull request opened inside this
-# repository would still receive them. This workflow therefore does not run on
-# pull_request, and it does not run on a push to main. Dispatch it by hand
-# from main. The job is skipped on any other ref. If any secret is missing
-# the job exits green and says so.
+# Signing secrets live on the GitHub environment `testflight`, not as
+# repository secrets. That environment is limited to the main branch.
+# This workflow does not run on pull_request and does not run on a push.
+# Dispatch it by hand from main. The job is skipped on any other ref.
+# If any environment secret is missing the job exits green and says so.
 
 on:
   workflow_dispatch:
@@ -20,6 +19,7 @@ concurrency:
 jobs:
   testflight:
     if: github.ref == 'refs/heads/main'
+    environment: testflight
     runs-on: macos-latest
     timeout-minutes: 60
     permissions:

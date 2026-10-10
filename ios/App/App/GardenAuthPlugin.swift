@@ -25,11 +25,15 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private let presenter = AuthPresenter()
     private let tokenQueue = DispatchQueue(label: "garden.auth.refresh")
+    private let accessLock = NSLock()
+    private let interactiveLock = NSLock()
     private var session: ASWebAuthenticationSession?
     private var accessToken: String?
     private var accessExpiry: Date?
     private var refreshInFlight = false
     private var refreshWaiters: [(RefreshOutcome) -> Void] = []
+    private var interactiveInFlight = false
+    private var interactiveWaiters: [CAPPluginCall] = []
 
     @objc func status(_ call: CAPPluginCall) {
         guard let stored = KeychainSession.load() else {
@@ -81,8 +85,8 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         enqueueRefresh(stored: stored, clientId: clientId, tenant: tenant, scopes: scopes) { [weak self] outcome in
             switch outcome {
-            case .token(let token, let session):
-                self?.remember(token: token, session: session)
+            case .token(let token, let session, let expiry):
+                self?.remember(token: token, expiry: expiry, session: session)
                 var result = session.pluginResult(signedIn: true)
                 result["accessToken"] = token
                 call.resolve(result)
@@ -101,27 +105,43 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func signOut(_ call: CAPPluginCall) {
-        accessToken = nil
-        accessExpiry = nil
+        clearCachedAccess()
         KeychainSession.clear()
         call.resolve()
     }
 
     private func cachedAccessToken() -> String? {
+        accessLock.lock()
+        defer { accessLock.unlock() }
         guard let accessToken, let accessExpiry, accessExpiry > Date() else { return nil }
         return accessToken
     }
 
-    private func remember(token: String, session: StoredSession) {
+    private func remember(token: String, expiry: Date, session: StoredSession) {
+        accessLock.lock()
         accessToken = token
+        accessExpiry = expiry
+        accessLock.unlock()
         KeychainSession.save(session)
     }
 
+    private func clearCachedAccess() {
+        accessLock.lock()
+        accessToken = nil
+        accessExpiry = nil
+        accessLock.unlock()
+    }
+
+    /// A second sign-in while the browser or code exchange is open joins that attempt.
     private func interactive(call: CAPPluginCall, clientId: String, tenant: String, redirect: String, scopes: String) {
-        if session != nil {
-            call.reject("Sign-in is already open.")
+        interactiveLock.lock()
+        if interactiveInFlight {
+            interactiveWaiters.append(call)
+            interactiveLock.unlock()
             return
         }
+        interactiveLock.unlock()
+
         let pair = pkce()
         var components = URLComponents(string: "https://login.microsoftonline.com/\(tenant)/oauth2/v2.0/authorize")
         components?.queryItems = [
@@ -138,46 +158,68 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             call.reject("Could not build the Microsoft sign-in URL.")
             return
         }
+
         let scheme = URL(string: redirect)?.scheme ?? GardenEntra.scheme
         let auth = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) { [weak self] callback, error in
-            self?.session = nil
+            guard let self else { return }
             if let error {
                 if let authError = error as? ASWebAuthenticationSessionError, authError.code == .canceledLogin {
-                    call.reject("cancelled", "USER_CANCELLED")
+                    self.finishInteractive { $0.reject("cancelled", "USER_CANCELLED") }
                 } else {
-                    call.reject(error.localizedDescription)
+                    let message = error.localizedDescription
+                    self.finishInteractive { $0.reject(message) }
                 }
                 return
             }
             guard let callback, let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems else {
-                call.reject("Microsoft did not return a sign-in result.")
+                self.finishInteractive { $0.reject("Microsoft did not return a sign-in result.") }
                 return
             }
             if let err = items.first(where: { $0.name == "error" })?.value {
-                let desc = items.first(where: { $0.name == "error_description" })?.value
-                call.reject(desc ?? err)
+                let desc = items.first(where: { $0.name == "error_description" })?.value ?? err
+                self.finishInteractive { $0.reject(desc) }
                 return
             }
             guard let code = items.first(where: { $0.name == "code" })?.value else {
-                call.reject("Microsoft did not return an authorization code.")
+                self.finishInteractive { $0.reject("Microsoft did not return an authorization code.") }
                 return
             }
-            self?.exchangeCode(
+            self.exchangeCode(
                 code: code,
                 verifier: pair.verifier,
                 clientId: clientId,
                 tenant: tenant,
                 redirect: redirect,
-                scopes: scopes,
-                call: call
+                scopes: scopes
             )
         }
         auth.presentationContextProvider = presenter
         auth.prefersEphemeralWebBrowserSession = false
+        interactiveLock.lock()
+        if interactiveInFlight {
+            interactiveWaiters.append(call)
+            interactiveLock.unlock()
+            return
+        }
+        interactiveInFlight = true
+        interactiveWaiters = [call]
         session = auth
+        interactiveLock.unlock()
         if !auth.start() {
-            session = nil
-            call.reject("The system browser did not open.")
+            finishInteractive { $0.reject("The system browser did not open.") }
+        }
+    }
+
+    /// Hands the same resolve or reject to every call that joined this sign-in.
+    private func finishInteractive(_ body: (CAPPluginCall) -> Void) {
+        interactiveLock.lock()
+        let waiters = interactiveWaiters
+        interactiveWaiters.removeAll()
+        interactiveInFlight = false
+        session = nil
+        interactiveLock.unlock()
+        for waiter in waiters {
+            body(waiter)
         }
     }
 
@@ -187,8 +229,7 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         clientId: String,
         tenant: String,
         redirect: String,
-        scopes: String,
-        call: CAPPluginCall
+        scopes: String
     ) {
         let body = form([
             "client_id": clientId,
@@ -199,18 +240,20 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             "scope": scopes,
         ])
         tokenRequest(tenant: tenant, body: body) { [weak self] outcome in
+            guard let self else { return }
             switch outcome {
             case .token(let token, let refresh, let expires, let idToken):
                 let stored = StoredSession(refreshToken: refresh, idToken: idToken, tenantId: tenant)
-                self?.accessExpiry = Date().addingTimeInterval(expires)
-                self?.remember(token: token, session: stored)
+                let expiry = Date().addingTimeInterval(expires)
+                self.remember(token: token, expiry: expiry, session: stored)
                 var result = stored.pluginResult(signedIn: true)
                 result["accessToken"] = token
-                call.resolve(result)
+                self.finishInteractive { $0.resolve(result) }
             case .interactionRequired(let message):
-                call.resolve(["interactionRequired": true, "error": message])
+                self.clearCachedAccess()
+                self.finishInteractive { $0.resolve(["interactionRequired": true, "error": message]) }
             case .failed(let message):
-                call.reject(message)
+                self.finishInteractive { $0.reject(message) }
             }
         }
     }
@@ -265,11 +308,11 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 if let idToken {
                     next = StoredSession(refreshToken: refresh, idToken: idToken, tenantId: stored.tenantId)
                 }
-                self?.accessExpiry = Date().addingTimeInterval(expires)
-                done(.token(token, next))
+                let expiry = Date().addingTimeInterval(expires)
+                done(.token(token, next, expiry))
             case .interactionRequired(let message):
                 KeychainSession.clear()
-                self?.accessToken = nil
+                self?.clearCachedAccess()
                 done(.interactionRequired(message))
             case .failed(let message):
                 done(.failed(message))
@@ -348,7 +391,7 @@ private enum TokenOutcome {
 }
 
 private enum RefreshOutcome {
-    case token(String, StoredSession)
+    case token(String, StoredSession, Date)
     case interactionRequired(String)
     case failed(String)
 }
