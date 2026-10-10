@@ -10,6 +10,7 @@ import {
   emptyProgress,
   nameMatchesStation,
   noteWorkflow,
+  PAST_RUN_LIMIT,
   readProgress,
   reconcileRun,
   reduceRun,
@@ -20,8 +21,8 @@ import {
   withWorkflowEvent,
   workflowAfterUploadedPhoto,
 } from '../src/workflows/guided/engine';
-import { handleWorkflowCommand } from '../src/workflows/guided/guidedChrome';
-import type { WorkflowDefinition, WorkflowEvent, WorkflowRun } from '../src/workflows/guided/types';
+import { formatPastRunLine, handleWorkflowCommand } from '../src/workflows/guided/guidedChrome';
+import type { WorkflowDefinition, WorkflowEvent, WorkflowPastRun, WorkflowRun } from '../src/workflows/guided/types';
 
 const NOW = '2026-06-01T12:00:00.000Z';
 const LATER = '2026-06-01T12:05:00.000Z';
@@ -193,6 +194,25 @@ describe('guided workflow engine', () => {
       { stepId: 'laser-check', note: 'CHK-BASE 8.001' },
       { stepId: 'plumb', note: 'sleeve R 30.2 mm, height 0.5 m' },
     ]);
+    const when = new Date(LATER).toLocaleString('en-GB', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+    const line = formatPastRunLine(again.progress.pastRuns?.[0] as WorkflowPastRun);
+    expect(line).toBe(
+      `Circle field test · ${when} · Laser CHK-BASE: CHK-BASE 8.001 · Plumb and height: sleeve R 30.2 mm, height 0.5 m`,
+    );
+    expect(line).not.toContain('circle-field-test');
+    expect(line).not.toContain('laser-check');
+    expect(line).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
+    expect(
+      formatPastRunLine({
+        workflowId: 'print-fit-markers',
+        startedAt: 'not-a-date',
+        archivedAt: 'still-not',
+        notes: [{ stepId: 'nope', note: 'kept' }],
+      }),
+    ).toBe('Print & fit markers · Note: kept');
     expect(again.progress.runs['circle-field-test']?.steps['laser-check']?.note).toBeUndefined();
     expect(again.progress.runs['circle-field-test']?.steps.plumb?.status).toBe('pending');
 
@@ -202,6 +222,37 @@ describe('guided workflow engine', () => {
       getAttribute: (name: string) => (name === 'data-workflow' ? 'circle-field-test' : null),
     });
     expect(declined.doc).toBeUndefined();
+  });
+
+  it('keeps only the last 20 past runs', () => {
+    let progress = startWorkflow(emptyProgress(), 'print-fit-markers', NOW).progress;
+    for (let i = 0; i < printFitMarkers.steps.length; i += 1) {
+      progress = advanceWorkflow(progress, NOW).progress;
+    }
+    const seeded: WorkflowPastRun[] = Array.from({ length: PAST_RUN_LIMIT }, (_, index) => ({
+      workflowId: 'print-fit-markers',
+      startedAt: `2026-05-${String(index + 1).padStart(2, '0')}T08:00:00.000Z`,
+      archivedAt: `2026-05-${String(index + 1).padStart(2, '0')}T09:00:00.000Z`,
+      notes: [],
+    }));
+    progress = { ...progress, pastRuns: seeded };
+    const again = restartWorkflow(progress, 'print-fit-markers', LATER);
+    expect(again.progress.pastRuns).toHaveLength(PAST_RUN_LIMIT);
+    expect(again.progress.pastRuns?.[0]?.startedAt).toBe(seeded[1]?.startedAt);
+    expect(again.progress.pastRuns?.at(-1)?.archivedAt).toBe(LATER);
+
+    const doc = emptyDocument('Crowded');
+    const crowded: WorkflowPastRun[] = Array.from({ length: PAST_RUN_LIMIT + 5 }, (_, index) => ({
+      workflowId: 'circle-field-test',
+      startedAt: `2026-04-${String(index + 1).padStart(2, '0')}T08:00:00.000Z`,
+      archivedAt: `2026-04-${String(index + 1).padStart(2, '0')}T09:00:00.000Z`,
+      notes: index === PAST_RUN_LIMIT + 4 ? [{ stepId: 'plumb', note: 'height 0.5 m' }] : [],
+    }));
+    doc.workflowProgress = { version: 1, runs: {}, pastRuns: crowded };
+    const read = readProgress(doc);
+    expect(read.pastRuns).toHaveLength(PAST_RUN_LIMIT);
+    expect(read.pastRuns?.[0]?.startedAt).toBe(crowded[5]?.startedAt);
+    expect(read.pastRuns?.at(-1)?.notes).toEqual([{ stepId: 'plumb', note: 'height 0.5 m' }]);
   });
 
   it('needs both baseline pulls in the note and a tape save with zero offsets', () => {

@@ -1288,6 +1288,10 @@ const listeners: Listener[] = [];
 
 /** Debounce silent OneDrive backup after local edits when signed in. */
 let cloudSaveTimer: ReturnType<typeof setTimeout> | null = null;
+/** True while the Save and send follow-up is queued or uploading. Ordinary edits stay "Not saved". */
+let saveSendFollowUp = false;
+let applyingCloudSavedTick = false;
+const SAVING_STATUS = 'Saving…';
 
 export function getState(): UiState {
   return state;
@@ -1318,6 +1322,7 @@ function setState(partial: Partial<UiState>, opts?: { fromRemote?: boolean }): v
   // on legal transitions while illegal refusals (no save) still appear to work.
   if (doc && fromRemote) {
     // The OneDrive copy is already the saved garden. Do not mark it dirty or upload it again.
+    saveSendFollowUp = false;
     if (cloudSaveTimer) {
       clearTimeout(cloudSaveTimer);
       cloudSaveTimer = null;
@@ -1330,6 +1335,9 @@ function setState(partial: Partial<UiState>, opts?: { fromRemote?: boolean }): v
     }
     clearGardenDirty();
   } else if (doc) {
+    const dropSavingMessage =
+      !applyingCloudSavedTick && saveSendFollowUp && getCloudStatus().message === SAVING_STATUS;
+    if (!applyingCloudSavedTick) saveSendFollowUp = false;
     noteLocalGardenEdit();
     const saved = persistGardenLocal(doc);
     if (!saved.ok) {
@@ -1338,6 +1346,7 @@ function setState(partial: Partial<UiState>, opts?: { fromRemote?: boolean }): v
       state = { ...state, refuseMessage: null };
     }
     scheduleCloudBackup(doc);
+    if (dropSavingMessage && getCloudStatus().message === SAVING_STATUS) setCloudMessage(null);
   }
   for (const fn of [...listeners]) fn();
 }
@@ -1362,7 +1371,7 @@ function handleLocalPersistFailure(
     );
     if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
     cloudSaveTimer = null;
-    void quietCloudSave(doc, { afterLocalQuota: true });
+    void quietCloudSave(doc, { afterLocalQuota: true, saveSendFollowUp });
     return;
   }
   if (quota) {
@@ -1389,15 +1398,30 @@ function setDoc(doc: GardenDocument, refuse: string | null = null): void {
  */
 function recordCloudSavedTick(): void {
   const ticked = withWorkflowEvent(state.doc, { type: 'cloud.saved' });
-  if (ticked !== state.doc) setDoc(ticked, null);
+  if (ticked === state.doc) {
+    saveSendFollowUp = false;
+    return;
+  }
+  saveSendFollowUp = true;
+  setCloudMessage(SAVING_STATUS);
+  applyingCloudSavedTick = true;
+  try {
+    setDoc(ticked, null);
+  } finally {
+    applyingCloudSavedTick = false;
+  }
 }
 
 function scheduleCloudBackup(doc: GardenDocument): void {
-  if (!isSignedIn()) return;
+  if (!isSignedIn()) {
+    saveSendFollowUp = false;
+    return;
+  }
+  const followUp = saveSendFollowUp;
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(() => {
     cloudSaveTimer = null;
-    void quietCloudSave(doc);
+    void quietCloudSave(doc, { saveSendFollowUp: followUp });
   }, 2500);
 }
 
@@ -1588,6 +1612,9 @@ export const gardenCloudUiForTests = {
   recordCloudSaved(): void {
     recordCloudSavedTick();
   },
+  signInStatus(): { tone: 'ok' | 'warn' | 'error' | 'idle'; inline?: string; text?: string } {
+    return cloudSectionStatus(state.doc);
+  },
   loadNow(fileName?: string): Promise<void> {
     return onOneDriveLoad(fileName);
   },
@@ -1614,6 +1641,8 @@ type PendingSave = {
   afterLocalQuota?: boolean;
   token?: string;
   manual?: boolean;
+  /** The queued upload is the Save and send follow-up, not an ordinary edit. */
+  saveSendFollowUp?: boolean;
 };
 
 type GardenQueueSlot = {
@@ -1634,6 +1663,7 @@ function coalesceSave(prev: PendingSave, next: PendingSave): PendingSave {
     afterLocalQuota: Boolean(prev.afterLocalQuota || next.afterLocalQuota),
     token: next.token ?? prev.token,
     manual: Boolean(prev.manual || next.manual),
+    saveSendFollowUp: Boolean(prev.saveSendFollowUp || next.saveSendFollowUp),
   };
 }
 
@@ -1767,17 +1797,23 @@ async function withGardenSaveLock<T>(fn: () => Promise<T>, purpose: 'save' | 'lo
 
 function quietCloudSave(
   _doc: GardenDocument,
-  opts: { afterLocalQuota?: boolean; token?: string; revision?: number } = {},
+  opts: { afterLocalQuota?: boolean; token?: string; revision?: number; saveSendFollowUp?: boolean } = {},
 ): Promise<void> {
-  if (!isSignedIn()) return Promise.resolve();
+  if (!isSignedIn()) {
+    if (opts.saveSendFollowUp) saveSendFollowUp = false;
+    return Promise.resolve();
+  }
   return enqueueGardenSave({
     prompt: 'auto',
     afterLocalQuota: opts.afterLocalQuota,
     token: opts.token,
+    saveSendFollowUp: opts.saveSendFollowUp,
   });
 }
 
 async function executeGardenSave(job: PendingSave): Promise<void> {
+  let followUpSettled = !job.saveSendFollowUp;
+  try {
   if (!isSignedIn()) {
     if (job.manual) setCloudMessage('Sign in to save.');
     return;
@@ -1848,6 +1884,7 @@ async function executeGardenSave(job: PendingSave): Promise<void> {
       setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
     }
     recordCloudSavedTick();
+    followUpSettled = true;
     return;
   }
   if (result.ok && !result.wrote) {
@@ -1883,6 +1920,9 @@ async function executeGardenSave(job: PendingSave): Promise<void> {
       ? `Browser storage full, and OneDrive save failed: ${result.error}. Export garden.json now.`
       : result.error,
   );
+  } finally {
+    if (!followUpSettled) saveSendFollowUp = false;
+  }
 }
 
 export function mount(root: HTMLElement): void {
@@ -3805,12 +3845,14 @@ function menuAccordion(
 
 /** Concertina status for Sign in (see docs/design-philosophy-status-colours.md). */
 function appendUnsavedStatus(panel: HTMLElement, message?: string | null): void {
-  if (!(gardenIsDirty() || gardenSaveIsOwed()) || message === GARDEN_UNSAVED_STATUS) return;
+  if (!(gardenIsDirty() || gardenSaveIsOwed())) return;
+  const text = saveSendFollowUp ? SAVING_STATUS : GARDEN_UNSAVED_STATUS;
+  if (message === text) return;
   panel.appendChild(
     el('p', {
       className: 'cloud-status__line cloud-status__msg',
-      text: GARDEN_UNSAVED_STATUS,
-      attrs: { 'data-testid': 'garden-not-saved' },
+      text,
+      attrs: { 'data-testid': saveSendFollowUp ? 'garden-saving' : 'garden-not-saved' },
     }),
   );
 }
@@ -3820,6 +3862,9 @@ function cloudSectionStatus(
 ): { tone: 'ok' | 'warn' | 'error' | 'idle'; inline?: string; text?: string } {
   const cloud = getCloudStatus();
   const unsaved = gardenIsDirty() || gardenSaveIsOwed();
+  if (unsaved && saveSendFollowUp) {
+    return { tone: 'idle', inline: SAVING_STATUS, text: SAVING_STATUS };
+  }
   if (!cloud.configured) {
     return unsaved
       ? { tone: 'warn', inline: 'not saved', text: GARDEN_UNSAVED_STATUS }
