@@ -5,6 +5,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CIRCLE_SLEEVES,
+  BLEED_MM,
+  BLANK_START_MM,
+  CODE_LEFT_MM,
+  CODE_RIGHT_MM,
+  CODED_WIDTH_MM,
+  CUT_X_MM,
+  EXPECTED_R_MM,
+  TAB_MM,
   issuedWords,
   renderAllSleevesPdf,
   renderSleevePdf,
@@ -92,7 +100,7 @@ function readBands(stream: string) {
   let bits = '';
   for (let i = 0; i < 19; i++) {
     const cy = pt(codeTop - (i + 0.5) * 13);
-    const cx = pt((16.5 + 205) / 2);
+    const cx = pt((CODE_LEFT_MM + CODE_RIGHT_MM) / 2);
     const on = wide.some(
       (rect) => cx >= rect.x - 1 && cx <= rect.x + rect.w + 1 && cy >= rect.y - 1 && cy <= rect.y + rect.h + 1,
     );
@@ -120,11 +128,36 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
   expect(Math.abs(sync!.h - pt(52))).toBeLessThan(0.05);
   expect(Math.abs(sync!.y + sync!.h - codeTop)).toBeLessThan(0.05);
   for (const rect of wide) {
-    expect(rect.x).toBeLessThanOrEqual(pt(16.5) + 0.5);
-    expect(rect.x + rect.w).toBeGreaterThanOrEqual(pt(205) - 0.5);
+    expect(Math.abs(rect.w - pt(CODED_WIDTH_MM + BLEED_MM))).toBeLessThanOrEqual(pt(0.1));
+    expect(Math.abs(rect.x - pt(CODE_LEFT_MM))).toBeLessThanOrEqual(pt(0.1));
+    expect(Math.abs(rect.x + rect.w - pt(BLANK_START_MM))).toBeLessThanOrEqual(pt(0.1));
     const modules = rect.h / pt(13);
     expect(Math.abs(modules - Math.round(modules))).toBeLessThan(0.02);
   }
+  expect(Math.abs(CODED_WIDTH_MM - 2 * Math.PI * EXPECTED_R_MM)).toBeLessThanOrEqual(0.1);
+  expect(Math.abs(CODE_RIGHT_MM - CODE_LEFT_MM - CODED_WIDTH_MM)).toBeLessThanOrEqual(0.1);
+  expect(BLEED_MM).toBe(3);
+  expect(BLANK_START_MM).toBe(198);
+  expect(TAB_MM).toBe(15);
+  const codeTopMm = 275;
+  for (let i = 0; i < 19; i++) {
+    const cy = pt(codeTopMm - (i + 0.5) * 13);
+    const covers = (xMm: number) =>
+      wide.some(
+        (rect) =>
+          pt(xMm) >= rect.x - 0.2 &&
+          pt(xMm) <= rect.x + rect.w + 0.2 &&
+          cy >= rect.y - 0.2 &&
+          cy <= rect.y + rect.h + 0.2,
+      );
+    expect(covers(CODE_LEFT_MM + 1.5)).toBe(covers(CODE_RIGHT_MM + 1.5));
+    expect(covers(CODE_RIGHT_MM - 0.2)).toBe(covers(CODE_RIGHT_MM + 0.2));
+    expect(covers(BLANK_START_MM + 0.4)).toBe(false);
+  }
+  const tabInk = rects.filter(
+    (rect) => rect.x + rect.w > pt(BLANK_START_MM) + pt(0.05) && rect.h > pt(10) && rect.w > pt(20),
+  );
+  expect(tabInk).toEqual([]);
 
   const quietYs = [pt(24), pt(279)];
   for (const y of quietYs) {
@@ -137,20 +170,36 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
   const bar50 = rects.find((rect) => Math.abs(rect.h - pt(50)) < 0.02 && rect.w < pt(3));
   expect(bar50).toBeTruthy();
 
-  const trimSegs = linesOf(stream).filter(
+  const seamXs = [pt(CODE_RIGHT_MM), pt(CUT_X_MM)];
+  const seamSegs = linesOf(stream).filter(
     (line) =>
-      Math.abs(line.x1 - pt(205)) < 0.02 &&
-      Math.abs(line.x2 - pt(205)) < 0.02 &&
-      Math.abs(line.y2 - line.y1) > pt(10),
+      seamXs.some((x) => Math.abs(line.x1 - x) < 0.05 && Math.abs(line.x2 - x) < 0.05) &&
+      Math.abs(line.y2 - line.y1) > pt(8),
   );
-  expect(trimSegs.length).toBeGreaterThan(0);
-  for (const line of trimSegs) {
+  expect(seamSegs.length).toBeGreaterThan(0);
+  for (const line of seamSegs) {
     const y0 = Math.min(line.y1, line.y2);
     const y1 = Math.max(line.y1, line.y2);
     const overlaps = (a: number, b: number) => y1 > a + 0.4 && y0 < b - 0.4;
     expect(overlaps(pt(20), pt(28))).toBe(false);
     expect(overlaps(pt(28), pt(275))).toBe(false);
     expect(overlaps(pt(275), pt(283))).toBe(false);
+  }
+  const leftCut = linesOf(stream).filter(
+    (line) =>
+      Math.abs(line.x1 - pt(CODE_LEFT_MM)) < 0.05 &&
+      Math.abs(line.x2 - pt(CODE_LEFT_MM)) < 0.05 &&
+      Math.abs(line.y2 - line.y1) > pt(250),
+  );
+  expect(leftCut.length).toBeGreaterThan(0);
+  for (const rect of rects) {
+    expect(rect.x).toBeGreaterThanOrEqual(pt(CODE_LEFT_MM) - 0.05);
+  }
+  for (const line of linesOf(stream)) {
+    const onCut =
+      Math.abs(line.x1 - pt(CODE_LEFT_MM)) < 0.05 && Math.abs(line.x2 - pt(CODE_LEFT_MM)) < 0.05;
+    if (onCut) continue;
+    expect(Math.min(line.x1, line.x2)).toBeGreaterThanOrEqual(pt(CODE_LEFT_MM) - 0.05);
   }
   const ruler180 = linesOf(stream).find(
     (line) => Math.abs(line.y1 - line.y2) < 0.02 && Math.abs(Math.abs(line.x2 - line.x1) - pt(180)) < 0.05,
@@ -166,7 +215,10 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
   expect(stream.includes('(PRINT AT 100% / ACTUAL SIZE)')).toBe(true);
   expect(stream.includes('(TOP)')).toBe(true);
   expect(stream.includes('(BOTTOM)')).toBe(true);
-  expect(stream.includes('(GLUE UNDER)') || stream.includes('GLUE UNDER')).toBe(true);
+  expect(stream.includes('(CUT HERE)')).toBe(true);
+  expect(stream.includes('(staple/glue here -- overlap under the other edge)')).toBe(true);
+  expect(stream.includes('GLUE UNDER')).toBe(false);
+  expect(stream.includes('TRIM 205')).toBe(false);
 }
 
 describe('marker sleeves', () => {
@@ -273,8 +325,28 @@ function assertRenderedSleeves(prefix: string, pdf: string, sleeves: typeof CIRC
     expect(readPixels(page)).toBe(expectedBits(sleeve.id));
     const barMm = (blackRunNear(page, 285.8, 22) / page.width) * 210;
     expect(Math.abs(barMm - 100)).toBeLessThanOrEqual(0.5);
-    expect(isBlack(page, mmX(page, 204.85), mmY(page, 18))).toBe(false);
-    expect(isBlack(page, mmX(page, 204.85), mmY(page, 273))).toBe(false);
+    const quietX = mmX(page, CODE_RIGHT_MM - 0.3);
+    expect(isBlack(page, quietX, mmY(page, 18))).toBe(false);
+    expect(isBlack(page, quietX, mmY(page, 273))).toBe(false);
+    for (let i = 0; i < 19; i++) {
+      const yMm = 5 + 9 + 8 + (i + 0.5) * 13;
+      const y = mmY(page, yMm);
+      expect(isBlack(page, mmX(page, BLANK_START_MM + 0.4), y)).toBe(false);
+      expect(isBlack(page, mmX(page, CODE_LEFT_MM + 1.5), y)).toBe(
+        isBlack(page, mmX(page, CODE_RIGHT_MM + 1.5), y),
+      );
+    }
+    const syncY = mmY(page, 5 + 9 + 8 + 26);
+    const bandMm = (blackRunNear(page, 5 + 9 + 8 + 26, (CODE_LEFT_MM + CODE_RIGHT_MM) / 2) / page.width) * 210;
+    expect(Math.abs(bandMm - (CODED_WIDTH_MM + BLEED_MM))).toBeLessThanOrEqual(0.1);
+    expect(isBlack(page, mmX(page, CODE_LEFT_MM + 0.15), syncY)).toBe(true);
+    expect(isBlack(page, mmX(page, CODE_RIGHT_MM - 0.15), syncY)).toBe(true);
+    expect(isBlack(page, mmX(page, CODE_RIGHT_MM + 1.5), syncY)).toBe(true);
+    expect(isBlack(page, mmX(page, CODE_LEFT_MM - 0.4), syncY)).toBe(false);
+    for (const xMm of [1, 3, 4.5]) {
+      expect(isBlack(page, mmX(page, xMm), syncY)).toBe(false);
+      expect(isBlack(page, mmX(page, xMm), mmY(page, 150))).toBe(false);
+    }
   });
 }
 
@@ -333,7 +405,7 @@ function isBlack(page: { width: number; rgb: Buffer }, x: number, y: number) {
 
 /** Nineteen band centres, MSB at the top, sampled in the middle of the pattern. */
 function readPixels(page: { width: number; height: number; rgb: Buffer }) {
-  const x = mmX(page, (16.5 + 205) / 2);
+  const x = mmX(page, (CODE_LEFT_MM + CODE_RIGHT_MM) / 2);
   let bits = '';
   for (let i = 0; i < 19; i++) {
     const y = mmY(page, 5 + 9 + 8 + (i + 0.5) * 13);
