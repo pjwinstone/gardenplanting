@@ -76,14 +76,14 @@ public class GardenCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 }
 
-private enum CameraFinish {
+fileprivate enum CameraFinish {
     case cancelled
     case failed(String)
     case photo([String: Any])
 }
 
 final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, PHPickerViewControllerDelegate {
-    var onFinished: ((CameraFinish) -> Void)?
+    fileprivate var onFinished: ((CameraFinish) -> Void)?
 
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "garden.camera.session")
