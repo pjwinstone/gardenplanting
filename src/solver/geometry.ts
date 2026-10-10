@@ -334,6 +334,35 @@ export function intersectRays(s1: Xy, az1: number, s2: Xy, az2: number): RayHit 
   return { point, behind: t1 <= 1e-6 || t2 <= 1e-6 };
 }
 
+export interface RayCircleHit {
+  point: Xy;
+  /** Signed distance along the ray. Negative is behind the camera. */
+  t: number;
+  behind: boolean;
+}
+
+/**
+ * Ray ∩ circle. The quadratic can return two roots. A non-positive t is
+ * behind the camera and is not a place to publish.
+ */
+export function intersectRayCircle(origin: Xy, azimuth: number, centre: Xy, radius: number): RayCircleHit[] {
+  const ux = Math.cos(azimuth);
+  const uy = Math.sin(azimuth);
+  const fx = origin.x - centre.x;
+  const fy = origin.y - centre.y;
+  const b = 2 * (ux * fx + uy * fy);
+  const c = fx * fx + fy * fy - radius * radius;
+  const disc = b * b - 4 * c;
+  if (disc < -1e-8) return [];
+  const sqrt = disc <= 1e-8 ? 0 : Math.sqrt(disc);
+  const roots = disc <= 1e-8 ? [-b / 2] : [(-b - sqrt) / 2, (-b + sqrt) / 2];
+  return roots.map((t) => ({
+    point: { x: origin.x + t * ux, y: origin.y + t * uy },
+    t,
+    behind: t <= 1e-6,
+  }));
+}
+
 /** Crossing angle of two directions, in (0, π/2]. */
 export function crossingAngle(az1: number, az2: number): number {
   const d = Math.abs(wrap(az1 - az2));
