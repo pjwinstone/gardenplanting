@@ -219,11 +219,19 @@ describe('iOS identity', () => {
     expect(commit).toBeGreaterThan(-1);
     expect(dims).toBeGreaterThan(commit);
     expect(dims).toBeLessThan(running);
+    const preview = camera.slice(
+      camera.indexOf('func updatePreviewOrientation'),
+      camera.indexOf('func applyPhotoConnectionRotation'),
+    );
+    expect(preview.indexOf('sessionQueue.async')).toBeGreaterThan(-1);
+    expect(preview.indexOf('sessionQueue.async')).toBeLessThan(preview.indexOf('horizonCoordinator'));
     expect(auth).toContain('refreshInFlight');
     expect(auth).toContain('refreshWaiters');
-    expect(auth).toContain('interactiveWaiters');
+    expect(auth).toContain('InteractiveSignIn');
+    expect(auth).toContain('Sign-in was interrupted.');
     expect(auth).toContain('accessLock');
     expect(auth).not.toContain('Sign-in is already open.');
+    expect(auth).not.toContain('guard let self else { return }');
     const flight = readFileSync('.github/workflows/testflight.yml', 'utf8');
     expect(flight).toContain("github.ref == 'refs/heads/main'");
     expect(flight).toContain('environment: testflight');

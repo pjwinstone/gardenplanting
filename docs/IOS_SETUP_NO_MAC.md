@@ -61,16 +61,17 @@ Admin is the role to use because cloud signing creates profiles and may create a
 
 Keep the `.p8` only until the next step. Then delete the download. GitHub holds the copy.
 
-## 4. Create the `testflight` environment and add the four secrets there
+## 4. Create the `testflight` environment, then add the four secrets there
 
 **Needed before** you dispatch the TestFlight workflow and expect an upload. Until the secrets exist, that workflow still runs and exits successfully with: “Skipping TestFlight upload. One or more signing secrets are absent.”
 
-These are **environment** secrets, not repository secrets. Do not add them under Settings → Secrets and variables → Actions → Repository secrets.
+Do this in order. Create the environment and set its branch rule **before** you add secrets, and **before** you dispatch the workflow. If a dispatch runs while the environment does not exist, GitHub creates `testflight` for you with no deployment-branch rule.
 
-Repo → **Settings** → **Environments** → **New environment**. Name it `testflight`. [GitHub environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment).
+1. Repo → **Settings** → **Environments** → **New environment**. Name it `testflight`. [GitHub environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment).
+2. On that environment, set deployment branches to **Selected branches** and allow **`main` only**. Save that rule before the next step.
+3. Add the four values as **environment secrets** on `testflight`, not as repository secrets. Names must match exactly:
 
-- Deployment branches: **Selected branches**, and allow **`main` only**
-- Environment secrets, names exact:
+These are **environment** secrets. Do not add them under Settings → Secrets and variables → Actions → Repository secrets. If those four names are already repository secrets, delete them there after the environment copies exist. A pull request inside this repo can still read repository secrets.
 
 | Secret name | Value |
 |---|---|
@@ -183,7 +184,15 @@ Do this on the **TestFlight** install, at a real station (the add-point you are 
 
 1. **TestFlight sign-in round trip.** Sign in with Microsoft. The system browser should open and return to the app. Sign out. Sign in again. The second sign-in should land back in the app with your account shown. A second tap while the browser is already open should join that sign-in, not show an error that sign-in is already open.
 2. **Capture at the station.** Add a point and take the photo. The original should upload to `/Garden Survey/photos/`. The shutter must not crash.
-3. **EXIF orientation in all four holds.** From that same station, take four stills: portrait, portrait upside down, landscape with the home indicator on the left, and landscape with it on the right. On each uploaded original, EXIF Orientation matches that hold. `FocalLength` and `LensModel` are present on each.
+3. **EXIF orientation in all four holds.** From that same station, take four stills with the rear camera. On each uploaded original, EXIF Orientation is the value for that hold, and `FocalLength` and `LensModel` are present.
+
+| Hold | EXIF Orientation |
+|---|---|
+| Portrait | 6 |
+| Upside down | 8 |
+| Landscape, home indicator on the right | 1 |
+| Landscape, home indicator on the left | 3 |
+
 4. **A real 4032×3024 capture.** At least one of those stills is 4032×3024. That is the 12 MP shutter frame, not a 24 MP Camera.app frame. `requestedWidth` / `requestedHeight` on the photo match that size when the wide camera offered it.
 5. **Distortion correction off.** In the photo metadata (`nativeCapture` on the garden photo, and the same fields on the `photos/manifest.json` row), `geometricDistortionCorrectionEnabled` is `false` and `contentAwareDistortionCorrectionEnabled` is `false`. `photoQualityPrioritization` is `speed`.
 6. **Gravity sign against the maker-note tilt.** The sidecar `gravity` is CoreMotion’s device frame: +X to the right, +Y up, +Z out of the screen. Hold the phone upright and expect about `(0, −1, 0)`. Apple MakerNote `AccelerationVector` (ExifTool tag `0x0008`) points the opposite way. Negate each maker-note axis, then compare with `gravity`. They should agree after that flip. A raw match, without the negation, is the wrong sign.

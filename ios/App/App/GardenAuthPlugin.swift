@@ -12,6 +12,38 @@ enum GardenEntra {
     static let scheme = "msauth.com.pjwinstone.gardenplanting"
 }
 
+/// One browser sign-in and every call waiting on it.
+/// The session callback retains this, so the calls can still be rejected if the plugin is gone.
+private final class InteractiveSignIn {
+    private let lock = NSLock()
+    private var waiters: [CAPPluginCall] = []
+    private var settled = false
+
+    /// False when this attempt has already finished.
+    func join(_ call: CAPPluginCall) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if settled { return false }
+        waiters.append(call)
+        return true
+    }
+
+    func finish(_ body: (CAPPluginCall) -> Void) {
+        lock.lock()
+        if settled {
+            lock.unlock()
+            return
+        }
+        settled = true
+        let pending = waiters
+        waiters.removeAll()
+        lock.unlock()
+        for call in pending {
+            body(call)
+        }
+    }
+}
+
 @objc(GardenAuthPlugin)
 public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "GardenAuthPlugin"
@@ -32,8 +64,11 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
     private var accessExpiry: Date?
     private var refreshInFlight = false
     private var refreshWaiters: [(RefreshOutcome) -> Void] = []
-    private var interactiveInFlight = false
-    private var interactiveWaiters: [CAPPluginCall] = []
+    private var interactiveSignIn: InteractiveSignIn?
+
+    deinit {
+        interactiveSignIn?.finish { $0.reject("Sign-in was interrupted.") }
+    }
 
     @objc func status(_ call: CAPPluginCall) {
         guard let stored = KeychainSession.load() else {
@@ -135,11 +170,11 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
     /// A second sign-in while the browser or code exchange is open joins that attempt.
     private func interactive(call: CAPPluginCall, clientId: String, tenant: String, redirect: String, scopes: String) {
         interactiveLock.lock()
-        if interactiveInFlight {
-            interactiveWaiters.append(call)
+        if let existing = interactiveSignIn, existing.join(call) {
             interactiveLock.unlock()
             return
         }
+        interactiveSignIn = nil
         interactiveLock.unlock()
 
         let pair = pkce()
@@ -160,28 +195,32 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let scheme = URL(string: redirect)?.scheme ?? GardenEntra.scheme
+        let attempt = InteractiveSignIn()
         let auth = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) { [weak self] callback, error in
-            guard let self else { return }
+            guard let self else {
+                attempt.finish { $0.reject("Sign-in was interrupted.") }
+                return
+            }
             if let error {
                 if let authError = error as? ASWebAuthenticationSessionError, authError.code == .canceledLogin {
-                    self.finishInteractive { $0.reject("cancelled", "USER_CANCELLED") }
+                    self.finishInteractive(attempt) { $0.reject("cancelled", "USER_CANCELLED") }
                 } else {
                     let message = error.localizedDescription
-                    self.finishInteractive { $0.reject(message) }
+                    self.finishInteractive(attempt) { $0.reject(message) }
                 }
                 return
             }
             guard let callback, let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems else {
-                self.finishInteractive { $0.reject("Microsoft did not return a sign-in result.") }
+                self.finishInteractive(attempt) { $0.reject("Microsoft did not return a sign-in result.") }
                 return
             }
             if let err = items.first(where: { $0.name == "error" })?.value {
                 let desc = items.first(where: { $0.name == "error_description" })?.value ?? err
-                self.finishInteractive { $0.reject(desc) }
+                self.finishInteractive(attempt) { $0.reject(desc) }
                 return
             }
             guard let code = items.first(where: { $0.name == "code" })?.value else {
-                self.finishInteractive { $0.reject("Microsoft did not return an authorization code.") }
+                self.finishInteractive(attempt) { $0.reject("Microsoft did not return an authorization code.") }
                 return
             }
             self.exchangeCode(
@@ -190,37 +229,35 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 clientId: clientId,
                 tenant: tenant,
                 redirect: redirect,
-                scopes: scopes
+                scopes: scopes,
+                attempt: attempt
             )
         }
         auth.presentationContextProvider = presenter
         auth.prefersEphemeralWebBrowserSession = false
         interactiveLock.lock()
-        if interactiveInFlight {
-            interactiveWaiters.append(call)
+        if let existing = interactiveSignIn, existing.join(call) {
             interactiveLock.unlock()
             return
         }
-        interactiveInFlight = true
-        interactiveWaiters = [call]
+        _ = attempt.join(call)
+        interactiveSignIn = attempt
         session = auth
         interactiveLock.unlock()
         if !auth.start() {
-            finishInteractive { $0.reject("The system browser did not open.") }
+            finishInteractive(attempt) { $0.reject("The system browser did not open.") }
         }
     }
 
     /// Hands the same resolve or reject to every call that joined this sign-in.
-    private func finishInteractive(_ body: (CAPPluginCall) -> Void) {
+    private func finishInteractive(_ attempt: InteractiveSignIn, _ body: (CAPPluginCall) -> Void) {
+        attempt.finish(body)
         interactiveLock.lock()
-        let waiters = interactiveWaiters
-        interactiveWaiters.removeAll()
-        interactiveInFlight = false
-        session = nil
-        interactiveLock.unlock()
-        for waiter in waiters {
-            body(waiter)
+        if interactiveSignIn === attempt {
+            interactiveSignIn = nil
+            session = nil
         }
+        interactiveLock.unlock()
     }
 
     private func exchangeCode(
@@ -229,7 +266,8 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
         clientId: String,
         tenant: String,
         redirect: String,
-        scopes: String
+        scopes: String,
+        attempt: InteractiveSignIn
     ) {
         let body = form([
             "client_id": clientId,
@@ -240,7 +278,10 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             "scope": scopes,
         ])
         tokenRequest(tenant: tenant, body: body) { [weak self] outcome in
-            guard let self else { return }
+            guard let self else {
+                attempt.finish { $0.reject("Sign-in was interrupted.") }
+                return
+            }
             switch outcome {
             case .token(let token, let refresh, let expires, let idToken):
                 let stored = StoredSession(refreshToken: refresh, idToken: idToken, tenantId: tenant)
@@ -248,12 +289,12 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
                 self.remember(token: token, expiry: expiry, session: stored)
                 var result = stored.pluginResult(signedIn: true)
                 result["accessToken"] = token
-                self.finishInteractive { $0.resolve(result) }
+                self.finishInteractive(attempt) { $0.resolve(result) }
             case .interactionRequired(let message):
                 self.clearCachedAccess()
-                self.finishInteractive { $0.resolve(["interactionRequired": true, "error": message]) }
+                self.finishInteractive(attempt) { $0.resolve(["interactionRequired": true, "error": message]) }
             case .failed(let message):
-                self.finishInteractive { $0.reject(message) }
+                self.finishInteractive(attempt) { $0.reject(message) }
             }
         }
     }
