@@ -586,7 +586,7 @@ body {
   --point-ui-scale: 1;
   position: fixed;
   left: max(0.4rem, env(safe-area-inset-left));
-  top: max(0.4rem, env(safe-area-inset-top));
+  top: calc(max(0.4rem, env(safe-area-inset-top)) + var(--workflow-chrome-offset, 0px));
   /* Above refuse--overlay — persist/coach banners must never cover Close / A± */
   z-index: 45;
   width: min(20.5rem, calc(100vw - 0.9rem));

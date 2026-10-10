@@ -7,6 +7,7 @@ import { gardenSaveIsOwed } from '../src/cloudSignIn';
 import { setGraphTokenClientForTests } from '../src/msalAuth';
 import { emptyDocument, type GardenDocument, type Photo } from '../src/model';
 import { gardenCloudUiForTests, getState, photosOnPoint } from '../src/ui';
+import { advanceWorkflow, emptyProgress, startWorkflow } from '../src/workflows/guided/engine';
 
 const authFlag = vi.hoisted(() => ({ signedIn: false }));
 
@@ -614,7 +615,139 @@ describe('adopt remote garden', () => {
       'This browser changed while OneDrive was being adopted. Nothing was replaced. Tap Save to retry.',
     );
   });
+
+  it('keeps a cloud.saved tick on reload instead of adopting the pre-tick OneDrive file', async () => {
+    const pending = saveSendProgress();
+    const local = namedGarden('On save step');
+    local.workflowProgress = pending;
+    local.updatedAt = '2026-06-01T12:00:00.000Z';
+    const remote = namedGarden('On save step');
+    remote.createdAt = local.createdAt;
+    remote.updatedAt = local.updatedAt;
+    remote.workflowProgress = pending;
+    const puts = mockGardenDrive(remote, '"v1"');
+    gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"v1"');
+    const revision = gardenRevision();
+    let asked = false;
+    vi.stubGlobal('window', {
+      confirm: () => {
+        asked = true;
+        return false;
+      },
+      alert: () => {},
+    });
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: async (
+          _name: string,
+          optionsOrCallback: { signal?: AbortSignal } | (() => Promise<unknown>),
+          maybeCallback?: () => Promise<unknown>,
+        ) => {
+          const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+          return callback?.();
+        },
+      },
+    });
+
+    gardenCloudUiForTests.recordCloudSaved();
+    expect(gardenRevision()).toBe(revision + 1);
+    expect(gardenIsDirty()).toBe(true);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('complete');
+
+    await gardenCloudUiForTests.afterSignIn();
+
+    expect(asked).toBe(true);
+    expect(puts).toEqual([]);
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.completedBy).toBe('auto');
+    expect(gardenIsDirty()).toBe(true);
+  });
+
+  it('uploads the cloud.saved tick once against the fresh eTag and does not loop', async () => {
+    const local = namedGarden('On save step');
+    local.workflowProgress = saveSendProgress();
+    local.updatedAt = '2026-06-01T12:00:00.000Z';
+    const remote = namedGarden('On save step');
+    remote.createdAt = local.createdAt;
+    remote.updatedAt = local.updatedAt;
+    remote.workflowProgress = saveSendProgress();
+    const puts = mockGardenDrive(remote, '"v1"');
+    gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"v1"');
+    gardenCloudUiForTests.edit(getState().doc);
+
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(puts).toHaveLength(1);
+    expect(puts[0]?.ifMatch).toBe('"v1"');
+    expect(puts[0]?.saveSend).not.toBe('complete');
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('complete');
+    expect(gardenIsDirty()).toBe(true);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(puts).toHaveLength(2);
+    expect(puts[1]?.ifMatch).toBe('"v2"');
+    expect(puts[1]?.saveSend).toBe('complete');
+    expect(gardenIsDirty()).toBe(false);
+    expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(puts).toHaveLength(2);
+  });
 });
+
+function saveSendProgress() {
+  let progress = startWorkflow(emptyProgress(), 'circle-field-test', '2026-06-01T12:00:00.000Z').progress;
+  for (let i = 0; i < 11; i += 1) {
+    progress = advanceWorkflow(progress, '2026-06-01T12:00:00.000Z').progress;
+  }
+  return progress;
+}
+
+function mockGardenDrive(remote: GardenDocument, initialETag: string): Array<{ ifMatch: string | null; saveSend: string | undefined }> {
+  let remoteEtag = initialETag;
+  let remoteDoc = remote;
+  const puts: Array<{ ifMatch: string | null; saveSend: string | undefined }> = [];
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const method = init?.method ?? 'GET';
+    if (method === 'POST') return new Response('', { status: 409 });
+    if (method === 'GET' && url.includes('$select=')) {
+      return new Response(
+        JSON.stringify({
+          eTag: remoteEtag,
+          lastModifiedDateTime: remoteDoc.updatedAt,
+          '@microsoft.graph.downloadUrl': 'https://download.example/garden',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.startsWith('https://download.example/garden')) {
+      return new Response(JSON.stringify(remoteDoc), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (method === 'PUT' && url.includes('garden')) {
+      const doc = JSON.parse(String(init?.body)) as GardenDocument;
+      const headers = new Headers(init?.headers);
+      puts.push({
+        ifMatch: headers.get('If-Match'),
+        saveSend: doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status,
+      });
+      remoteDoc = doc;
+      remoteEtag = `"v${puts.length + 1}"`;
+      return new Response(JSON.stringify({ eTag: remoteEtag }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', etag: remoteEtag },
+      });
+    }
+    return new Response(JSON.stringify({ error: { message: 'missing' } }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  return puts;
+}
 
 function pointPhoto(id: string, addPointId: string, thumbnailDataUrl?: string): Photo {
   return { ...uploadingPhoto(id), addPointId, thumbnailDataUrl };
