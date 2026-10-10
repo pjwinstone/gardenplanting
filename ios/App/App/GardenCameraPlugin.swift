@@ -273,6 +273,7 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
     }
 
     /// The same coordinator serves the preview and the still. A new device gets a new one.
+    /// Only call this on `sessionQueue`. The preview and the shutter both read it there.
     @available(iOS 17.0, *)
     private func horizonCoordinator(for device: AVCaptureDevice) -> AVCaptureDevice.RotationCoordinator {
         if horizonRotationDevice === device, let existing = horizonRotation as? AVCaptureDevice.RotationCoordinator {
@@ -285,18 +286,30 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
     }
 
     private func updatePreviewOrientation() {
-        guard let connection = previewLayer.connection else { return }
-        if #available(iOS 17.0, *), let device {
-            let angle = horizonCoordinator(for: device).videoRotationAngleForHorizonLevelPreview
-            if connection.isVideoRotationAngleSupported(angle) {
-                connection.videoRotationAngle = angle
+        let fallback = fallbackVideoOrientation()
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            var angle: CGFloat?
+            if #available(iOS 17.0, *), let device = self.device {
+                angle = self.horizonCoordinator(for: device).videoRotationAngleForHorizonLevelPreview
             }
+            DispatchQueue.main.async { [weak self] in
+                self?.applyPreviewRotation(angle: angle, fallback: fallback)
+            }
+        }
+    }
+
+    private func applyPreviewRotation(angle: CGFloat?, fallback: AVCaptureVideoOrientation) {
+        guard let connection = previewLayer.connection else { return }
+        if #available(iOS 17.0, *), let angle, connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
         } else if connection.isVideoOrientationSupported {
-            connection.videoOrientation = fallbackVideoOrientation()
+            connection.videoOrientation = fallback
         }
     }
 
     /// EXIF orientation follows the phone, not a hardcoded portrait preview.
+    /// `shoot()` calls this on `sessionQueue`, which is the only queue that touches the coordinator.
     private func applyPhotoConnectionRotation() {
         guard let connection = photoOutput.connection(with: .video) else { return }
         if #available(iOS 17.0, *), let device {
