@@ -533,10 +533,8 @@ function solveOnce(input: SolveInput): SolveResult {
       const other = candidates.length === 1 ? best : best === 0 ? 1 : 0;
       const sep = Math.hypot(candidates[best].x - candidates[other].x, candidates[best].y - candidates[other].y);
       // Bearings side a both-tapes station without a user branch flag. A ray
-      // does the same when the hit sits with one tape intersection. A hit
-      // near the bisector does not choose, and the pair stays unresolved.
-      // Half the separation is that margin: the mirror is several times
-      // farther, the way SIDE_MATCH_RAD rejects the other station side.
+      // does the same when the hit is at least half the separation closer to
+      // one candidate than the other. Otherwise the pair stays unresolved.
       const clear = candidates.length === 1 || secondD - bestD >= 0.5 * sep;
       if (!clear) {
         s.x = undefined;

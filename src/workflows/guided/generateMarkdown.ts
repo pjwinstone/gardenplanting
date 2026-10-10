@@ -9,6 +9,7 @@ function triggerText(trigger: WorkflowTrigger): string {
     case 'manual':
       return 'Tick by hand';
     case 'baseline.saved':
+      if (!trigger.endA || !trigger.endB) return `baseline.saved ${trigger.kind}`;
       return `baseline.saved ${trigger.kind} ${trigger.endA}–${trigger.endB}, offsets ${trigger.offsetAMm ?? 'any'}/${trigger.offsetBMm ?? 'any'} mm`;
     case 'photo.uploaded':
       return `photo.uploaded ${trigger.stationId}, ${trigger.minPhotos} photo${trigger.minPhotos === 1 ? '' : 's'}`;
@@ -22,6 +23,8 @@ function triggerText(trigger: WorkflowTrigger): string {
       return `tape.entered${trigger.endA ? ` ${trigger.endA}–${trigger.endB ?? ''}` : ''}`;
     case 'cloud.saved':
       return 'cloud.saved';
+    case 'traverse.phase':
+      return `traverse.phase ${trigger.phase}`;
     default:
       return 'unknown';
   }

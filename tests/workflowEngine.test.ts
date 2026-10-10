@@ -80,14 +80,17 @@ describe('guided workflow engine', () => {
     vi.stubGlobal('window', { confirm: () => false });
   });
 
-  it('ports the circle sheet and the marker sheet, and leaves the other two for later', () => {
+  it('ports the circle sheet, the marker sheet, and the house walk, and leaves iOS setup for later', () => {
     expect(circleFieldTest.steps).toHaveLength(12);
     expect(printFitMarkers.steps).toHaveLength(7);
     expect(new Set(circleFieldTest.steps.map((step) => step.id)).size).toBe(12);
-    const later = startWorkflow(emptyProgress(), 'house-traverse', NOW);
+    const house = startWorkflow(emptyProgress(), 'house-traverse', NOW);
+    expect(house.changed).toBe(true);
+    expect(house.progress.runs['house-traverse']?.currentStepId).toBe('datum');
+    expect(house.progress.runs['house-traverse']?.steps.datum?.status).toBe('pending');
+    const later = startWorkflow(emptyProgress(), 'ios-setup', NOW);
     expect(later.changed).toBe(false);
     expect(later.notice).toMatch(/coming soon/i);
-    expect(startWorkflow(emptyProgress(), 'ios-setup', NOW).changed).toBe(false);
   });
 
   it('ticks by hand, including a step the app can detect, and labels that tick manual', () => {

@@ -99,6 +99,24 @@
   font-weight: 600;
 }
 
+.workflow-live {
+  margin: 8px 0 0;
+}
+
+.workflow-live-line {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.workflow-bar .workflow-live-line {
+  color: #f4faf2;
+}
+
+.workflow-sheet .workflow-live-line {
+  color: #1a140c;
+}
+
 .workflow-tick-line {
   display: flex;
   align-items: center;
@@ -272,6 +290,7 @@
 .workflow-sun .workflow-sheet .workflow-instruction,
 .workflow-sun .workflow-note-label,
 .workflow-sun .workflow-detail,
+.workflow-sun .workflow-live-line,
 .workflow-sun .workflow-row p,
 .workflow-sun .workflow-diagram {
   color: #fff;

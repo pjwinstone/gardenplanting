@@ -77,7 +77,7 @@ function eventMatches(trigger: Exclude<WorkflowTrigger, { all: WorkflowTrigger[]
   if (trigger.on !== event.type) return false;
   if (trigger.on === 'baseline.saved' && event.type === 'baseline.saved') {
     if (event.kind !== trigger.kind) return false;
-    if (!endsMatch(event, trigger.endA, trigger.endB)) return false;
+    if (trigger.endA && trigger.endB && !endsMatch(event, trigger.endA, trigger.endB)) return false;
     if (trigger.offsetAMm !== undefined && event.offsetAMm !== trigger.offsetAMm) return false;
     if (trigger.offsetBMm !== undefined && event.offsetBMm !== trigger.offsetBMm) return false;
     return true;
@@ -109,6 +109,7 @@ function eventMatches(trigger: Exclude<WorkflowTrigger, { all: WorkflowTrigger[]
     return true;
   }
   if (trigger.on === 'cloud.saved' && event.type === 'cloud.saved') return true;
+  if (trigger.on === 'traverse.phase' && event.type === 'traverse.phase') return event.phase === trigger.phase;
   return false;
 }
 
@@ -355,11 +356,20 @@ export function commitWorkflow(doc: GardenDocument, progress: WorkflowProgress):
   return { ...doc, workflowProgress: progress };
 }
 
+/** A workflow module can fold document entities after the tick. Set once, from that module. */
+let workflowEventHook: ((doc: GardenDocument, event: WorkflowEvent, now: string) => GardenDocument) | null = null;
+
+export function setWorkflowEventHook(
+  hook: (doc: GardenDocument, event: WorkflowEvent, now: string) => GardenDocument,
+): void {
+  workflowEventHook = hook;
+}
+
 export function withWorkflowEvent(doc: GardenDocument, event: WorkflowEvent, now = new Date().toISOString()): GardenDocument {
   const progress = readProgress(doc);
   const next = applyWorkflowEvent(progress, event, now);
-  if (progressJson(progress) === progressJson(next)) return doc;
-  return commitWorkflow(doc, next);
+  const committed = progressJson(progress) === progressJson(next) ? doc : commitWorkflow(doc, next);
+  return workflowEventHook ? workflowEventHook(committed, event, now) : committed;
 }
 
 export function applyWorkflowEvent(progress: WorkflowProgress, event: WorkflowEvent, now = new Date().toISOString()): WorkflowProgress {

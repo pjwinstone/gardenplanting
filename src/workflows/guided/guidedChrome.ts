@@ -24,6 +24,7 @@ import {
 } from './engine';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
 import type { WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
+import { nextTraverse } from './traverseWalk';
 
 const SUN_KEY = 'garden-survey:workflow-sunlight';
 
@@ -122,6 +123,16 @@ export function handleWorkflowCommand(
     const agreed = window.confirm('Start over? Notes from this run, such as sleeve R, heights, and CHK-BASE, stay under Past runs.');
     if (!agreed) return {};
     move = restartWorkflow(progress, workflowId || progress.activeId || '');
+  }
+  else if (cmd === 'workflow-next' && progress.activeId === 'house-traverse') {
+    const walked = nextTraverse(doc);
+    notice = walked.notice ?? null;
+    if (walked.link && walked.link.to !== 'none') {
+      sheetOpen = false;
+      pickerOpen = false;
+    }
+    if (!walked.changed) return {};
+    return { doc: walked.doc, link: walked.link };
   }
   else if (cmd === 'workflow-next') move = advanceWorkflow(progress);
   else if (cmd === 'workflow-back') move = backWorkflow(progress);
@@ -261,6 +272,7 @@ function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: Workflow
     bar.append(el('p', 'workflow-auto', 'Ticked by you.'));
   }
   if (notice) bar.append(el('p', 'workflow-notice', notice));
+  appendLive(bar, run);
   const actions = el('div', 'workflow-actions');
   const back = button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 });
   const details = button('Details', 'workflow-expand');
@@ -336,6 +348,7 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
     sheet.append(host);
   }
   for (const line of step.detail) sheet.append(el('p', 'workflow-detail', line));
+  appendLive(sheet, run);
   if (step.noteLabel) {
     sheet.append(el('label', 'workflow-note-label', step.noteLabel));
     const note = document.createElement('textarea');
@@ -370,6 +383,14 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
   actions.append(button(nextLabel(step, last), 'workflow-next', { primary: true }));
   sheet.append(actions);
   return sheet;
+}
+
+function appendLive(parent: HTMLElement, run: WorkflowRun): void {
+  if (!run.liveLines?.length) return;
+  const block = el('div', 'workflow-live');
+  block.dataset.testid = 'workflow-live';
+  for (const line of run.liveLines) block.append(el('p', 'workflow-live-line', line));
+  parent.append(block);
 }
 
 function renderPicker(progress: WorkflowProgress): HTMLElement {

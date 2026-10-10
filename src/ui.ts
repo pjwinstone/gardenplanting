@@ -80,7 +80,7 @@ import {
   renderGuidedChrome,
   workflowNoteChange,
 } from './workflows/guided/guidedChrome';
-import { hydrateWorkflowProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
+import { hydrateWorkflowProgress, readProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
   appendPhotoToPoint,
@@ -2090,6 +2090,11 @@ function applyWorkflowLink(link: WorkflowLink): void {
   if (link.to === 'mode') {
     if (link.mode === 'ADD_POINT') {
       startAddPointDialog();
+      return;
+    }
+    if (link.mode === 'ADJUST') {
+      if (legalActions(state.doc).includes('adjust')) onModeAction('adjust');
+      else openMenuSection('coach');
       return;
     }
     if (legalActions(state.doc).includes('establish_baseline')) onModeAction('establish_baseline');
@@ -5413,8 +5418,13 @@ function runAdjust(doc: GardenDocument): void {
     speakCoachLine(result.reason ?? '', doc.session.speakSteps);
     return;
   }
-  setDoc(result.doc, null);
-  const coach = buildCoach(result.doc);
+  const progress = readProgress(result.doc);
+  const walking = progress.activeId === 'house-traverse' ? progress.runs['house-traverse'] : undefined;
+  const adjusted = walking?.currentStepId === 'adjust'
+    ? withWorkflowEvent(result.doc, { type: 'traverse.phase', phase: 'adjust' })
+    : result.doc;
+  setDoc(adjusted, null);
+  const coach = buildCoach(adjusted);
   const spoken = result.residualNotes.join(' ') || coach.body.join(' ');
   speakCoachLine(spoken, result.doc.session.speakSteps);
 }

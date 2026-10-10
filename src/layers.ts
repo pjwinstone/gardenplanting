@@ -12,6 +12,7 @@ import type {
 } from './model';
 import { fitCircle, fitRectangle, fitTriangleOutline } from './geometryFit';
 import { placeholderThumb } from './model';
+import { datumRemovalBlock } from './workflows/guided/traverseWalk';
 import {
   photoHasBaselineEnds,
   stationFromBaselineSighting,
@@ -391,6 +392,9 @@ export function deletePointMeasurement(
   if (!point) {
     return { doc: next, reason: `Point ${pointId} is not in the garden.` };
   }
+
+  const datumBlock = datumRemovalBlock(next, pointId);
+  if (datumBlock) return { doc: next, reason: datumBlock };
 
   const usedAsBaselineEnd = next.baselines.some((b) => b.a === pointId || b.b === pointId);
   if (usedAsBaselineEnd) {

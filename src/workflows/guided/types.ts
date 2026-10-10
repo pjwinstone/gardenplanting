@@ -15,7 +15,7 @@ export type WorkflowDiagram = 'circle-plan' | 'stn01' | 'sleeve-join';
 /** Where a step sends the surveyor. Only screens the app already has. */
 export type WorkflowLink =
   | { to: 'none' }
-  | { to: 'mode'; mode: 'BASELINE' | 'ADD_POINT' }
+  | { to: 'mode'; mode: 'BASELINE' | 'ADD_POINT' | 'ADJUST' }
   | { to: 'menu'; section: 'baseline' | 'cloud' | 'tools' }
   | { to: 'print-tags' }
   | { to: 'marker-pdf'; file: string };
@@ -24,8 +24,9 @@ export type WorkflowTrigger =
   | { on: 'manual' }
   | {
       on: 'baseline.saved';
-      endA: string;
-      endB: string;
+      /** When both are set, the saved ends must match. Omit them to accept any tape baseline. */
+      endA?: string;
+      endB?: string;
       kind: 'tape' | 'laser';
       /** When set, the saved offsets must match (millimetres). */
       offsetAMm?: number;
@@ -41,6 +42,7 @@ export type WorkflowTrigger =
   | { on: 'item.created'; name: string; geometry: GeometryType }
   | { on: 'tape.entered'; endA?: string; endB?: string }
   | { on: 'cloud.saved' }
+  | { on: 'traverse.phase'; phase: 'datum' | 'leg' | 'close' | 'closure-review' | 'adjust' }
   | { all: WorkflowTrigger[] };
 
 /** Facts the app already records. A step ticks when its trigger matches. */
@@ -93,7 +95,10 @@ export type WorkflowEvent =
       lengthM: number;
     }
   | { type: 'cloud.saved' }
-  | { type: 'manual.tick'; stepId: string; note?: string };
+  | { type: 'manual.tick'; stepId: string; note?: string }
+  | { type: 'traverse.observe'; step: number; newestId: string }
+  | { type: 'traverse.close' }
+  | { type: 'traverse.phase'; phase: 'datum' | 'leg' | 'close' | 'closure-review' | 'adjust' };
 
 export interface WorkflowStep {
   id: string;
@@ -143,6 +148,8 @@ export interface WorkflowRun {
   finishedAt?: string;
   /** Step ids from an older revision. One line in the sheet, not a solver field. */
   parkedStepIds?: string[];
+  /** Live numbers for the current step. Ellipse, ties, or the closure review. */
+  liveLines?: string[];
   steps: Record<string, StepState>;
 }
 

@@ -295,10 +295,67 @@ export const printFitMarkers: WorkflowDefinition = {
 export const houseTraverse: WorkflowDefinition = {
   id: 'house-traverse',
   revision: 1,
-  status: 'later',
+  status: 'ready',
   title: 'Walk round the house',
-  summary: 'A traverse around the house. Coming soon.',
-  steps: [],
+  summary: 'Tape one house edge, then walk the corners back to the start.',
+  steps: [
+    {
+      id: 'datum',
+      title: 'Datum',
+      instruction: 'This edge is your baseline. Two tape readings. Offsets are OK.',
+      detail: [
+        'Mark both ends of one house edge and tape it.',
+        'C1 and C2 stay until the loop is closed. They are the datum ends.',
+      ],
+      complete: { on: 'baseline.saved', kind: 'tape' },
+      link: { to: 'mode', mode: 'BASELINE' },
+    },
+    {
+      id: 'leg',
+      title: 'Leg',
+      instruction: 'Tape the next corner, then photograph it with the live control.',
+      detail: [
+        'The next leg stays blocked until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and every tape MDB is at most 21.3 mm.',
+        'Add a cross-tie before the next leg when a tie is short.',
+        'A house mark seen from only one setup needs another photo from here. You will not see it again.',
+      ],
+      complete: { on: 'traverse.phase', phase: 'leg' },
+      link: { to: 'mode', mode: 'ADD_POINT' },
+    },
+    {
+      id: 'close',
+      title: 'Close',
+      instruction: 'Tape back to the start, then re-occupy it.',
+      detail: [
+        'Close the loop: tape to the first mark, then stand there again and photograph the last mark and the second datum end with the first house mark.',
+      ],
+      complete: { on: 'traverse.phase', phase: 'close' },
+      link: { to: 'mode', mode: 'ADD_POINT' },
+    },
+    {
+      id: 'closure-review',
+      title: 'Closure review',
+      instruction: 'Read the misclosure before you adjust.',
+      detail: [
+        'Along, across, and azimuth sit against their 1σ.',
+        'The position flag is a 2-D χ² test. The azimuth flag is a z-test.',
+        'χ² is compared with the rank of the duplicate misclosure.',
+        'The raw misclosure is not a blunder test.',
+      ],
+      complete: { on: 'traverse.phase', phase: 'closure-review' },
+      link: { to: 'none' },
+    },
+    {
+      id: 'adjust',
+      title: 'Adjust',
+      instruction: 'Run Adjust. A single isolated blunder is named.',
+      detail: [
+        'The variance test names a single isolated blunder when one observation carries it.',
+      ],
+      complete: { on: 'traverse.phase', phase: 'adjust' },
+      link: { to: 'mode', mode: 'ADJUST' },
+    },
+  ],
 };
 
 export const iosSetup: WorkflowDefinition = {

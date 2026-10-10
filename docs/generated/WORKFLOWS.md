@@ -275,9 +275,65 @@ Note: Sleeve R mm and height m.
 
 ## Walk round the house
 
-Coming soon.
+Ready. 5 steps.
 
-A traverse around the house. Coming soon.
+Tape one house edge, then walk the corners back to the start.
+
+### 1. Datum
+
+This edge is your baseline. Two tape readings. Offsets are OK.
+
+- Mark both ends of one house edge and tape it.
+- C1 and C2 stay until the loop is closed. They are the datum ends.
+
+Completes when: baseline.saved tape.
+
+Opens: Mode BASELINE.
+
+### 2. Leg
+
+Tape the next corner, then photograph it with the live control.
+
+- The next leg stays blocked until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and every tape MDB is at most 21.3 mm.
+- Add a cross-tie before the next leg when a tie is short.
+- A house mark seen from only one setup needs another photo from here. You will not see it again.
+
+Completes when: traverse.phase leg.
+
+Opens: Mode ADD_POINT.
+
+### 3. Close
+
+Tape back to the start, then re-occupy it.
+
+- Close the loop: tape to the first mark, then stand there again and photograph the last mark and the second datum end with the first house mark.
+
+Completes when: traverse.phase close.
+
+Opens: Mode ADD_POINT.
+
+### 4. Closure review
+
+Read the misclosure before you adjust.
+
+- Along, across, and azimuth sit against their 1σ.
+- The position flag is a 2-D χ² test. The azimuth flag is a z-test.
+- χ² is compared with the rank of the duplicate misclosure.
+- The raw misclosure is not a blunder test.
+
+Completes when: traverse.phase closure-review.
+
+Opens: —.
+
+### 5. Adjust
+
+Run Adjust. A single isolated blunder is named.
+
+- The variance test names a single isolated blunder when one observation carries it.
+
+Completes when: traverse.phase adjust.
+
+Opens: Mode ADJUST.
 
 ## iOS setup
 
