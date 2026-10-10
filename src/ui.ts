@@ -75,6 +75,14 @@ import {
   workflowAddPoint,
 } from './workflows';
 import {
+  handleWorkflowCommand,
+  installWorkflowChrome,
+  renderGuidedChrome,
+  workflowNoteChange,
+} from './workflows/guided/guidedChrome';
+import { hydrateWorkflowProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
+import type { WorkflowLink } from './workflows/guided/types';
+import {
   appendPhotoToPoint,
   applyPhotoMarks,
   baselinesByTrust,
@@ -764,14 +772,12 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
     }
     return;
   }
-  setDoc(
-    {
-      ...state.doc,
-      photos,
-      photosManifest: state.doc.photosManifest ?? photosManifestLink(),
-    },
-    null,
-  );
+  const withPhotos = {
+    ...state.doc,
+    photos,
+    photosManifest: state.doc.photosManifest ?? photosManifestLink(),
+  };
+  setDoc(update.status === 'verified' ? workflowAfterUploadedPhoto(withPhotos, update.photoId) : withPhotos, null);
   if (update.status === 'queued') {
     setCloudMessage(`Photo ${update.fileName} queued for OneDrive.`);
   } else if (update.status === 'uploading') {
@@ -959,9 +965,22 @@ function placeMarkAt(px: number, py: number): void {
 
 function confirmPhotoMarks(): void {
   if (!markDraft) return;
-  const result = applyPhotoMarks(state.doc, markDraft.photoId, markDraft.clicks);
+  const draft = markDraft;
+  const result = applyPhotoMarks(state.doc, draft.photoId, draft.clicks);
   markDraft = null;
-  setDoc(result.doc, null);
+  const photo = result.doc.photos.find((item) => item.id === draft.photoId);
+  const point = result.doc.points.find((item) => item.id === photo?.addPointId);
+  const object = point ? result.doc.objects.find((item) => item.id === point.objectId) : undefined;
+  setDoc(
+    withWorkflowEvent(result.doc, {
+      type: 'photo.marksConfirmed',
+      stationId: point?.id ?? '',
+      pointLabel: point?.label ?? '',
+      objectName: object?.name ?? '',
+      marks: draft.clicks.map((click) => click.pointId),
+    }),
+    null,
+  );
   setState({ markPhotoId: null });
   speakCoachLine(result.message, result.doc.session.speakSteps);
   setCloudMessage(result.message);
@@ -994,7 +1013,7 @@ function markCurrentBuildSeen(): void {
 }
 
 let state: UiState = {
-  doc: loadCachedGarden() ?? createEmptyGarden(),
+  doc: hydrateWorkflowProgress(loadCachedGarden() ?? createEmptyGarden()),
   view: 'survey',
   refuseMessage: null,
   showStage2Checklist: false,
@@ -1362,6 +1381,17 @@ function setDoc(doc: GardenDocument, refuse: string | null = null): void {
   setState({ doc, refuseMessage: refuse });
 }
 
+/**
+ * The cloud.saved tick is a normal edit: dirty, a new revision, and one queued
+ * save. The follow-up upload uses the eTag just stored, so it does not conflict
+ * with the save that produced the event. Once the step is already complete the
+ * event is a no-op, so that follow-up does not queue another save.
+ */
+function recordCloudSavedTick(): void {
+  const ticked = withWorkflowEvent(state.doc, { type: 'cloud.saved' });
+  if (ticked !== state.doc) setDoc(ticked, null);
+}
+
 function scheduleCloudBackup(doc: GardenDocument): void {
   if (!isSignedIn()) return;
   if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
@@ -1427,7 +1457,7 @@ function adoptRemoteGarden(
   clearGardenSaveOwed();
   setGardenCloudFileName(fileName);
   notifyCloudPrefsChanged();
-  setState({ doc, refuseMessage: null }, { fromRemote: true });
+  setState({ doc: hydrateWorkflowProgress(doc), refuseMessage: null }, { fromRemote: true });
   offerReattachLocalPhotos(localOnlyPhotos, preservedAs, localPoints);
   return true;
 }
@@ -1554,6 +1584,9 @@ export const gardenCloudUiForTests = {
   },
   saveNow(): Promise<void> {
     return onOneDriveSave();
+  },
+  recordCloudSaved(): void {
+    recordCloudSavedTick();
   },
   loadNow(fileName?: string): Promise<void> {
     return onOneDriveLoad(fileName);
@@ -1814,6 +1847,7 @@ async function executeGardenSave(job: PendingSave): Promise<void> {
     } else {
       setCloudMessage(`Saved ${result.fileName} to OneDrive.`);
     }
+    recordCloudSavedTick();
     return;
   }
   if (result.ok && !result.wrote) {
@@ -1868,6 +1902,7 @@ export function mount(root: HTMLElement): void {
   subscribeAuth(render);
   subscribeCloud(render);
   subscribeErrorLog(render);
+  installWorkflowChrome(() => setState({}));
   render();
   startPhotoUploadLoop({
     getToken: async () => {
@@ -2010,12 +2045,48 @@ function reconcileOpenGarden(fileName: string, token: string, account: string): 
   });
 }
 
+function applyWorkflowLink(link: WorkflowLink): void {
+  if (link.to === 'none') return;
+  if (link.to === 'mode') {
+    if (link.mode === 'ADD_POINT') {
+      startAddPointDialog();
+      return;
+    }
+    if (legalActions(state.doc).includes('establish_baseline')) onModeAction('establish_baseline');
+    else openMenuSection('baseline');
+    return;
+  }
+  if (link.to === 'menu') {
+    openMenuSection(link.section);
+    return;
+  }
+  if (link.to === 'print-tags') {
+    setState({ view: 'tags', menuOpen: false });
+    return;
+  }
+  const file = encodeURIComponent(link.file);
+  window.open(`https://github.com/pjwinstone/gardenplanting/raw/main/docs/markers/${file}`, '_blank', 'noopener');
+}
+
 async function onShellClick(e: Event): Promise<void> {
   const target = (e.target as HTMLElement | null)?.closest?.('[data-cmd]') as HTMLElement | null;
   if (!target) return;
   const cmd = target.getAttribute('data-cmd');
   if (!cmd) return;
   e.preventDefault();
+
+  if (cmd.startsWith('workflow-')) {
+    const result = handleWorkflowCommand(cmd, state.doc, target);
+    if (result.doc) {
+      setState({ doc: result.doc, menuOpen: result.menuOpen ?? false, openErrorLog: false });
+    } else if (result.menuOpen !== undefined) {
+      setState({ menuOpen: result.menuOpen, openErrorLog: false });
+    } else {
+      setState({});
+    }
+    if (result.link) applyWorkflowLink(result.link);
+    return;
+  }
 
   if (cmd === 'mode') {
     const action = target.getAttribute('data-action') as ModeAction | null;
@@ -2476,7 +2547,7 @@ async function onShellClick(e: Event): Promise<void> {
     const geometryType = ((panel?.querySelector('[data-field=geometry]') as HTMLSelectElement | null)
       ?.value || stickyGeometry(state.doc)) as GeometryType;
     const { doc } = createObject(state.doc, { layerId, name, geometryType });
-    setDoc(doc, null);
+    setDoc(withWorkflowEvent(doc, { type: 'item.created', name, geometry: geometryType }), null);
     return;
   }
   if (cmd === 'save-object') {
@@ -2549,7 +2620,35 @@ async function onShellClick(e: Event): Promise<void> {
       openMenuSection('baseline');
       return;
     }
-    setDoc(result.doc, null);
+    const endA =
+      (panel?.querySelector('[data-field=end-a]') as HTMLInputElement | null)?.value?.trim() ?? '';
+    const endB =
+      (panel?.querySelector('[data-field=end-b]') as HTMLInputElement | null)?.value?.trim() ?? '';
+    const savedBaseline = baselineId
+      ? result.doc.baselines.find((item) => item.id === baselineId) ?? result.doc.baselines.at(-1)
+      : result.doc.baselines.at(-1);
+    let nextDoc = withWorkflowEvent(result.doc, {
+      type: 'baseline.saved',
+      endA,
+      endB,
+      endAId: savedBaseline?.a,
+      endBId: savedBaseline?.b,
+      kind,
+      offsetAMm: Number.isFinite(offsetA) ? offsetA : 0,
+      offsetBMm: Number.isFinite(offsetB) ? offsetB : 0,
+      lengthM: length,
+    });
+    if (kind === 'tape') {
+      nextDoc = withWorkflowEvent(nextDoc, {
+        type: 'tape.entered',
+        endA,
+        endB,
+        endAId: savedBaseline?.a,
+        endBId: savedBaseline?.b,
+        lengthM: length,
+      });
+    }
+    setDoc(nextDoc, null);
     setState({ menuOpen: true, menuFocus: 'baseline', openErrorLog: false });
     speakCoachLine(
       result.doc.session.lastAction ??
@@ -2881,6 +2980,16 @@ function onShellChange(e: Event): void {
   const t = e.target as HTMLInputElement | HTMLSelectElement | null;
   if (!t) return;
   const cmd = t.getAttribute('data-cmd');
+  if (cmd === 'workflow-note') {
+    const stepId = t.getAttribute('data-step') ?? '';
+    const value = t.value;
+    // Blur saves the note after the click that caused the blur, so Tick / Next still land.
+    window.setTimeout(() => {
+      const next = workflowNoteChange(state.doc, stepId, value);
+      if (next) setDoc(next, null);
+    }, 0);
+    return;
+  }
   if (cmd === 'speak-toggle') {
     setDoc({
       ...state.doc,
@@ -3014,6 +3123,7 @@ function buildSurveyView(): HTMLElement {
     wrap.appendChild(buildPhotoMarkOverlay(doc));
   }
 
+  wrap.appendChild(renderGuidedChrome(doc));
   return wrap;
 }
 
@@ -4490,6 +4600,18 @@ function buildMenuDrawer(
     }),
   );
   panel.appendChild(menuAccordion('version', buildMenuTitle(), versionBody));
+
+  panel.appendChild(
+    el('button', {
+      className: 'btn btn--util',
+      text: 'Workflows',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'workflow-open-picker',
+        'data-testid': 'menu-workflows',
+      },
+    }),
+  );
 
   // —— Workflows ——
   panel.appendChild(menuAccordion('recommend', 'Recommended next', buildRecommendBody(doc, coach, legal)));
