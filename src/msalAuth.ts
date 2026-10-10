@@ -9,6 +9,14 @@ import {
   type RedirectRequest,
 } from '@azure/msal-browser';
 import { msalConfigured, readMsalEnv } from './cloudConfig';
+import { isNativeApp } from './nativePlatform';
+import {
+  currentNativeAccount,
+  loadNativeSession,
+  nativeAcquireToken,
+  nativeSignIn,
+  nativeSignOut,
+} from './nativeAuth';
 
 const GRAPH_SCOPES = ['User.Read', 'Files.ReadWrite'];
 
@@ -72,6 +80,7 @@ export function getAuthInitResult(): AuthInitResult {
 }
 
 export function getAccount(): AccountInfo | null {
+  if (isNativeApp()) return currentNativeAccount();
   if (!pca) return null;
   const active = pca.getActiveAccount();
   if (active) return active;
@@ -115,6 +124,7 @@ function restoreCachedAccount(): AccountInfo | null {
  */
 export async function initAuth(): Promise<AuthInitResult> {
   if (initDone) return lastInit;
+  if (isNativeApp()) return initNativeAuth();
 
   const env = readMsalEnv();
   if (!env) {
@@ -189,6 +199,20 @@ export async function initAuth(): Promise<AuthInitResult> {
 
 /** Prefer redirect on all platforms (required for reliable iOS Safari). */
 export async function signIn(): Promise<{ ok: boolean; error?: string }> {
+  if (isNativeApp()) {
+    if (!initDone) return { ok: false, error: 'Sign-in is still starting. Wait a moment and try again.' };
+    const result = await nativeSignIn();
+    if (result.ok) {
+      lastInit = {
+        configured: true,
+        signedIn: true,
+        fromRedirect: false,
+        accountLabel: result.label,
+      };
+      notifyAuth();
+    }
+    return result;
+  }
   if (!msalConfigured() || !pca) {
     return {
       ok: false,
@@ -222,6 +246,12 @@ export async function signIn(): Promise<{ ok: boolean; error?: string }> {
 }
 
 export async function signOut(): Promise<{ ok: boolean; error?: string }> {
+  if (isNativeApp()) {
+    await nativeSignOut();
+    lastInit = { configured: msalConfigured(), signedIn: false, fromRedirect: false };
+    notifyAuth();
+    return { ok: true };
+  }
   if (!pca) return { ok: true };
   try {
     const account = getAccount();
@@ -261,6 +291,7 @@ export async function acquireGraphTokenSilent(): Promise<
 async function acquireGraphTokenInner(
   allowRedirect: boolean,
 ): Promise<{ ok: true; token: string } | { ok: false; interactionRequired: boolean; error: string }> {
+  if (!graphTokenTestClient && isNativeApp()) return nativeAcquireToken(allowRedirect);
   if (!pca && !graphTokenTestClient) {
     return {
       ok: false,
@@ -306,6 +337,20 @@ async function acquireGraphTokenInner(
     }
     return { ok: false, interactionRequired: false, error: plainAuthError(e) };
   }
+}
+
+async function initNativeAuth(): Promise<AuthInitResult> {
+  const session = await loadNativeSession();
+  lastInit = {
+    configured: session.configured,
+    signedIn: session.signedIn,
+    fromRedirect: false,
+    error: session.error,
+    accountLabel: session.label,
+  };
+  initDone = true;
+  notifyAuth();
+  return lastInit;
 }
 
 function isInteractionRequired(error: unknown): boolean {

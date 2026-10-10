@@ -12,6 +12,8 @@ Static PWA (Vite + TypeScript) for surveying a ~20×20 m UK garden. No backend. 
 
 **Microsoft sign-in + OneDrive:** saves `garden.json` to personal OneDrive at `/Garden Survey/garden.json`. The OneDrive folder keeps its legacy name **Garden Survey** so existing surveys stay readable. A migration to a new folder is a possible later step. Setup: **[docs/entra-onedrive-setup.md](docs/entra-onedrive-setup.md)**.
 
+**iPhone app:** the same Vite app in a Capacitor shell (`com.pjwinstone.gardenplanting`, display name Garden Planting). Pull requests run an unsigned iOS build. TestFlight signing is a separate workflow and skips until the Apple secrets exist. Browser steps, in the order the pipeline needs them: **[docs/IOS_SETUP_NO_MAC.md](docs/IOS_SETUP_NO_MAC.md)**. `npm run build:ios` writes the relative-base build the shell loads. `npm run build` stays the GitHub Pages build.
+
 ## Run
 
 ```bash

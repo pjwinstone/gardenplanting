@@ -150,6 +150,39 @@ export interface PhotoClick {
 export type PhotoUploadStatus = 'queued' | 'uploading' | 'verified' | 'failed';
 
 /**
+ * Sidecar from the iOS survey shutter. The original file is still the bytes
+ * uploaded to OneDrive. A survey still does not carry a calibration matrix;
+ * `intrinsicMatrix` stays null unless the file itself included one, and that
+ * matrix is not a prior for a different distortion-correction mode.
+ * `gravity` is CoreMotion's device frame (right-handed, +X right, +Y up,
+ * +Z out of the screen). Apple MakerNote AccelerationVector is left-handed
+ * in the opposite direction: negate each axis before comparing the two.
+ */
+export interface NativeCaptureRecord {
+  source: 'shutter' | 'library';
+  deviceType: string;
+  videoZoomFactor: number | null;
+  lensPosition: number | null;
+  focusLocked: boolean;
+  exposureLocked: boolean;
+  geometricDistortionCorrectionSupported: boolean | null;
+  geometricDistortionCorrectionEnabled: boolean | null;
+  photoQualityPrioritization: string | null;
+  stabilization: string | null;
+  focalLengthMm: number | null;
+  focalLength35mm: number | null;
+  lensModel: string | null;
+  intrinsicMatrix: number[] | null;
+  intrinsicReferenceWidth: number | null;
+  intrinsicReferenceHeight: number | null;
+  motionInterpolated: boolean;
+  gravity: { x: number; y: number; z: number } | null;
+  width: number | null;
+  height: number | null;
+  orientation: number | null;
+}
+
+/**
  * Pointer to the original camera file in `/Garden Survey/photos/`.
  * Absent on older documents. The thumbnail stays a separate display preview.
  */
@@ -185,6 +218,8 @@ export interface PhotoOriginalFile {
   uploadPermanent?: boolean;
   /** Missing lens data, or capture time outside the station setup. */
   usabilityNote?: string;
+  /** Present when the iOS app took or picked this original. */
+  nativeCapture?: NativeCaptureRecord;
   uploadStatus?: PhotoUploadStatus;
   uploadError?: string;
 }
