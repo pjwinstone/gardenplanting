@@ -12,7 +12,6 @@ import {
   CODED_WIDTH_MM,
   CUT_X_MM,
   EXPECTED_R_MM,
-  SEAM_TICK_X_MM,
   TAB_MM,
   issuedWords,
   renderAllSleevesPdf,
@@ -186,16 +185,21 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
     expect(overlaps(pt(28), pt(275))).toBe(false);
     expect(overlaps(pt(275), pt(283))).toBe(false);
   }
-  const ticks = linesOf(stream).filter(
-    (line) => Math.abs(line.x1 - pt(SEAM_TICK_X_MM)) < 0.05 && Math.abs(line.x2 - pt(SEAM_TICK_X_MM)) < 0.05,
+  const leftCut = linesOf(stream).filter(
+    (line) =>
+      Math.abs(line.x1 - pt(CODE_LEFT_MM)) < 0.05 &&
+      Math.abs(line.x2 - pt(CODE_LEFT_MM)) < 0.05 &&
+      Math.abs(line.y2 - line.y1) > pt(250),
   );
-  expect(ticks.length).toBeGreaterThanOrEqual(2);
-  for (const line of ticks) {
-    const y0 = Math.min(line.y1, line.y2);
-    const y1 = Math.max(line.y1, line.y2);
-    const inQuiet = (y0 >= pt(20) - 0.2 && y1 <= pt(28) + 0.2) || (y0 >= pt(275) - 0.2 && y1 <= pt(283) + 0.2);
-    expect(inQuiet).toBe(true);
-    expect(y1 > pt(28) + 0.2 && y0 < pt(275) - 0.2).toBe(false);
+  expect(leftCut.length).toBeGreaterThan(0);
+  for (const rect of rects) {
+    expect(rect.x).toBeGreaterThanOrEqual(pt(CODE_LEFT_MM) - 0.05);
+  }
+  for (const line of linesOf(stream)) {
+    const onCut =
+      Math.abs(line.x1 - pt(CODE_LEFT_MM)) < 0.05 && Math.abs(line.x2 - pt(CODE_LEFT_MM)) < 0.05;
+    if (onCut) continue;
+    expect(Math.min(line.x1, line.x2)).toBeGreaterThanOrEqual(pt(CODE_LEFT_MM) - 0.05);
   }
   const ruler180 = linesOf(stream).find(
     (line) => Math.abs(line.y1 - line.y2) < 0.02 && Math.abs(Math.abs(line.x2 - line.x1) - pt(180)) < 0.05,
@@ -211,6 +215,7 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
   expect(stream.includes('(PRINT AT 100% / ACTUAL SIZE)')).toBe(true);
   expect(stream.includes('(TOP)')).toBe(true);
   expect(stream.includes('(BOTTOM)')).toBe(true);
+  expect(stream.includes('(CUT HERE)')).toBe(true);
   expect(stream.includes('(staple/glue here -- overlap under the other edge)')).toBe(true);
   expect(stream.includes('GLUE UNDER')).toBe(false);
   expect(stream.includes('TRIM 205')).toBe(false);
@@ -338,6 +343,10 @@ function assertRenderedSleeves(prefix: string, pdf: string, sleeves: typeof CIRC
     expect(isBlack(page, mmX(page, CODE_RIGHT_MM - 0.15), syncY)).toBe(true);
     expect(isBlack(page, mmX(page, CODE_RIGHT_MM + 1.5), syncY)).toBe(true);
     expect(isBlack(page, mmX(page, CODE_LEFT_MM - 0.4), syncY)).toBe(false);
+    for (const xMm of [1, 3, 4.5]) {
+      expect(isBlack(page, mmX(page, xMm), syncY)).toBe(false);
+      expect(isBlack(page, mmX(page, xMm), mmY(page, 150))).toBe(false);
+    }
   });
 }
 

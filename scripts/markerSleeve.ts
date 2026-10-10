@@ -14,8 +14,8 @@
  * same bands continue 3 mm past the fold (underlap bleed) so a slightly
  * larger sleeve still shows ink. The remaining 12 mm of the 15 mm tab
  * is blank. The 250 mm ruler and the 50 mm bar sit in that blank part.
- * Quiet strips of the code stay empty, apart from the seam ticks near
- * the left edge.
+ * A cut line at the left edge of the bands is the visible seam after
+ * the margin is cut off. Quiet strips of the code stay empty.
  *
  * Coded width + tab is about 204.8 mm. A typical printer's printable
  * width on A4 is about 200–202 mm (4–5 mm margins), so the outer
@@ -208,8 +208,6 @@ export const BLEED_MM = 3;
 export const BLANK_START_MM = CODE_RIGHT_MM + BLEED_MM;
 /** Dashed cut, just inside the sheet edge so the stroke is on the page. */
 export const CUT_X_MM = PAGE_WIDTH_MM - 0.4;
-/** Prints. The cut-edge crosses sit in the unprintable margin. */
-export const SEAM_TICK_X_MM = 6.5;
 
 export function sleeveContent(sleeve: { point: string; id: string }) {
   const bits = sleeveBits(sleeve.id);
@@ -246,8 +244,8 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push('f');
 
   parts.push('0.8 w');
-  parts.push(seg(0, 5, 210, 5));
-  parts.push(seg(0, 292, 210, 292));
+  parts.push(seg(CODE_LEFT_MM, 5, 210, 5));
+  parts.push(seg(CODE_LEFT_MM, 292, 210, 292));
   parts.push(seg(188, 287.6, CODE_RIGHT_MM, 287.6));
   parts.push(seg(188, 12.2, CODE_RIGHT_MM, 12.2));
 
@@ -270,12 +268,6 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push(cross(CUT_X_MM, 287.6, 1.2));
   parts.push(cross(CUT_X_MM, 12.2, 1.2));
   parts.push(cross(186, 287.6, 1.6));
-  // Quiet zones only. A tick on a band would be another module.
-  parts.push('% SEAMTICK');
-  parts.push(seg(SEAM_TICK_X_MM, 21.2, SEAM_TICK_X_MM, 26.8));
-  parts.push(seg(SEAM_TICK_X_MM - 1, 24, SEAM_TICK_X_MM + 1, 24));
-  parts.push(seg(SEAM_TICK_X_MM, 276.2, SEAM_TICK_X_MM, 281.8));
-  parts.push(seg(SEAM_TICK_X_MM - 1, 279, SEAM_TICK_X_MM + 1, 279));
   parts.push(arrowUp(64, 284.4, 290.6));
   parts.push(arrowDown(9.6, 7.2, 17.2));
 
@@ -284,6 +276,14 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push(hRuler(22, 7.2, 180));
   parts.push(seg(22, 10.5, 22, 13.4));
   parts.push(seg(122, 10.5, 122, 13.4));
+
+  // Full height, on the left edge of the bands. Cut this off so the
+  // margin does not lie over the seam. The stroke is the only ink
+  // allowed to the left of that edge.
+  parts.push('0.5 w');
+  parts.push('% LEFTCUT');
+  parts.push(`q\n[1.6 1.1] 0 d\n${seg(CODE_LEFT_MM, 0, CODE_LEFT_MM, 297)}\nQ`);
+  parts.push(textAt(7.2, 286.2, 6, 'CUT HERE'));
 
   parts.push(textAt(26, 286.2, 11, sleeve.point));
   parts.push(textAt(48, 286.2, 11, sleeve.id));
