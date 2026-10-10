@@ -9,13 +9,18 @@
  *   0–5 mm bottom trim, 5–20 bottom legend, 20–28 quiet,
  *   28–275 code (19 × 13 mm), 275–283 quiet, 283–292 top legend,
  *   292–297 top trim.
- * Trim the right edge at 205 mm. The left 16.5 mm is the glue flap
- * (outer 5 mm left blank). Bands cover x = 12.2–205 mm so the inner
- * flap repeats the pattern; the outer flap holds the ruler and the name.
- * The 250 mm ruler sits in that outer flap, so it crosses the flap's
- * share of the quiet-zone heights. A continuous 250 mm line does not fit
- * in the 247 mm code stack. The quiet strips of the visible pattern
- * (x ≥ 16.5 mm) stay empty.
+ * One sleeve is one A4 page. The fold is the expected outer
+ * circumference, 2π × 30.2 mm, from the left edge of the bands. The
+ * same bands continue 3 mm past the fold (underlap bleed) so a slightly
+ * larger sleeve still shows ink. The remaining 12 mm of the 15 mm tab
+ * is blank. The 250 mm ruler and the 50 mm bar sit in that blank part.
+ * A cut line at the left edge of the bands is the visible seam after
+ * the margin is cut off. Quiet strips of the code stay empty.
+ *
+ * Coded width + tab is about 204.8 mm. A typical printer's printable
+ * width on A4 is about 200–202 mm (4–5 mm margins), so the outer
+ * millimetres of the blank tab can miss toner. The code starts just
+ * past 5 mm, where that clip does not reach it.
  */
 
 export const PUBLISHED_CODEBOOK =
@@ -188,8 +193,21 @@ function vRuler(x: number, y: number, length: number) {
 
 const CODE_TOP = 275;
 const MODULE = 13;
-const BAND_LEFT = 12.2;
-const TRIM_X = 205;
+
+/** Expected outside radius of a 0.2 mm sheet on a 60 mm dowel. Not a measured R. */
+export const EXPECTED_R_MM = 30.2;
+/** Printed circumference of the coded area. One trip around the expected outside. */
+export const CODED_WIDTH_MM = 2 * Math.PI * EXPECTED_R_MM;
+export const TAB_MM = 15;
+export const PAGE_WIDTH_MM = 210;
+/** Fold. Coded width is measured to here, not to the end of the ink. */
+export const CODE_RIGHT_MM = PAGE_WIDTH_MM - TAB_MM;
+export const CODE_LEFT_MM = CODE_RIGHT_MM - CODED_WIDTH_MM;
+/** Same bands, continued onto the tab. Blank paper starts after this. */
+export const BLEED_MM = 3;
+export const BLANK_START_MM = CODE_RIGHT_MM + BLEED_MM;
+/** Dashed cut, just inside the sheet edge so the stroke is on the page. */
+export const CUT_X_MM = PAGE_WIDTH_MM - 0.4;
 
 export function sleeveContent(sleeve: { point: string; id: string }) {
   const bits = sleeveBits(sleeve.id);
@@ -212,51 +230,67 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
     const top = CODE_TOP - i * MODULE;
     const bottom = CODE_TOP - j * MODULE;
     parts.push(`% RUN ${i} ${j}`);
-    parts.push(rect(BAND_LEFT, bottom, TRIM_X - BAND_LEFT, top - bottom));
+    parts.push(rect(CODE_LEFT_MM, bottom, CODED_WIDTH_MM + BLEED_MM, top - bottom));
     parts.push('f');
     i = j;
   }
 
-  // 100 mm horizontal bar in the bottom legend. 50 mm vertical bar in the flap.
+  // 100 mm horizontal bar in the bottom legend. 50 mm vertical bar in the tab.
   parts.push('% SCALE100');
   parts.push(rect(22, 10.5, 100, 1.4));
   parts.push('f');
   parts.push('% SCALE50');
-  parts.push(rect(6.9, 128, 0.8, 50));
+  parts.push(rect(200.6, 118, 0.6, 50));
   parts.push('f');
 
   parts.push('0.8 w');
-  parts.push('% TRIM205');
-  // Stop before the bands and the quiet zones. A full-height stroke centred
-  // on x=205 leaves a hairline in the quiet strips.
-  parts.push(seg(TRIM_X, 0, TRIM_X, 20));
-  parts.push(seg(TRIM_X, 283, TRIM_X, 297));
-  parts.push(seg(0, 5, 210, 5));
-  parts.push(seg(0, 292, 210, 292));
-  parts.push(seg(198, 287.6, TRIM_X, 287.6));
-  parts.push(seg(198, 12.2, TRIM_X, 12.2));
+  parts.push(seg(CODE_LEFT_MM, 5, 210, 5));
+  parts.push(seg(CODE_LEFT_MM, 292, 210, 292));
+  parts.push(seg(188, 287.6, CODE_RIGHT_MM, 287.6));
+  parts.push(seg(188, 12.2, CODE_RIGHT_MM, 12.2));
+
+  // Fold at the seam, and the dashed cut on the tab's outer edge.
+  // Both stop in the legends. A stroke through the quiet strips or the
+  // bands would leave a hairline in the code.
+  parts.push('0.45 0.45 0.45 RG');
+  parts.push('0.4 w');
+  parts.push('% FOLD');
+  parts.push(seg(CODE_RIGHT_MM, 0, CODE_RIGHT_MM, 20));
+  parts.push(seg(CODE_RIGHT_MM, 283, CODE_RIGHT_MM, 297));
+  parts.push('0.25 w');
+  parts.push('% CUT');
+  parts.push(`q\n[1.4 1] 0 d\n${seg(CUT_X_MM, 0, CUT_X_MM, 20)}\n${seg(CUT_X_MM, 283, CUT_X_MM, 297)}\nQ`);
+  parts.push('0 0 0 RG');
 
   parts.push('0.6 w');
-  parts.push(cross(16.5, 287.6, 1.8));
-  parts.push(cross(16.5, 12.2, 1.8));
-  parts.push(cross(TRIM_X, 287.6, 1.8));
-  parts.push(cross(TRIM_X, 12.2, 1.8));
-  parts.push(cross(190, 287.6, 1.6));
+  parts.push(cross(CODE_RIGHT_MM, 287.6, 1.8));
+  parts.push(cross(CODE_RIGHT_MM, 12.2, 1.8));
+  parts.push(cross(CUT_X_MM, 287.6, 1.2));
+  parts.push(cross(CUT_X_MM, 12.2, 1.2));
+  parts.push(cross(186, 287.6, 1.6));
   parts.push(arrowUp(64, 284.4, 290.6));
   parts.push(arrowDown(9.6, 7.2, 17.2));
 
   parts.push('0.9 w');
-  parts.push(vRuler(5.4, 23, 250));
+  parts.push(vRuler(198.8, 23, 250));
   parts.push(hRuler(22, 7.2, 180));
   parts.push(seg(22, 10.5, 22, 13.4));
   parts.push(seg(122, 10.5, 122, 13.4));
+
+  // Full height, on the left edge of the bands. Cut this off so the
+  // margin does not lie over the seam. The stroke is the only ink
+  // allowed to the left of that edge.
+  parts.push('0.5 w');
+  parts.push('% LEFTCUT');
+  parts.push(`q\n[1.6 1.1] 0 d\n${seg(CODE_LEFT_MM, 0, CODE_LEFT_MM, 297)}\nQ`);
+  parts.push(textAt(7.2, 286.2, 6, 'CUT HERE'));
 
   parts.push(textAt(26, 286.2, 11, sleeve.point));
   parts.push(textAt(48, 286.2, 11, sleeve.id));
   parts.push(textAt(68, 286.2, 8, 'TOP'));
   parts.push(textAt(84, 286.2, 7, 'PRINT AT 100% / ACTUAL SIZE'));
-  parts.push(textAt(158, 286.2, 7, 'TRIM 205 mm'));
-  parts.push(textAt(6.2, 284.6, 6, 'SEAM'));
+  parts.push(textAt(156, 286.2, 7, '15 mm TAB'));
+  parts.push(textAt(171, 284.4, 6, 'SEAM'));
 
   parts.push(textAt(24, 16.0, 8, 'BOTTOM'));
   parts.push(textAt(46, 16.0, 10, sleeve.point));
@@ -264,9 +298,13 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push(textAt(148, 16.0, 7, '180 mm ruler'));
   parts.push(textAt(124, 10.7, 7, '100 mm'));
 
-  parts.push(textUp(10.2, 36, 7, `${sleeve.point}   ${sleeve.id}   GLUE UNDER`));
-  parts.push(textUp(10.2, 132, 6.5, '50 mm'));
-  parts.push(textUp(10.2, 198, 6.5, '250 mm'));
+  parts.push('0.62 0.62 0.62 rg');
+  parts.push(
+    textUp(204.2, 32, 6.5, 'staple/glue here -- overlap under the other edge'),
+  );
+  parts.push(textUp(204.4, 176, 6, '50 mm'));
+  parts.push(textUp(204.4, 214, 6, '250 mm'));
+  parts.push('0 0 0 rg');
 
   return `${parts.join('\n')}\n`;
 }

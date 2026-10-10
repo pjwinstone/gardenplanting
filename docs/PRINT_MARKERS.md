@@ -30,11 +30,11 @@ Write the code on the dowel in pencil as well, next to the top of the sleeve, so
 
 - A4 portrait, **210 × 297 mm**.
 - **Actual size / 100%.** No “fit to page”, no shrink to printable area, no scaling.
-- **No borderless.** Borderless often scales the page. The 5 mm margin is part of the template.
+- **No borderless.** Borderless often scales the page. The 5 mm top and bottom trims are part of the template. A side margin that clips the blank tab is acceptable; one that clips the bands is not.
 - Highest quality. Black only. Colour management off if the driver has a switch for it.
 - One sheet per page. Do not print two-up.
 
-Before you cut, check the **100 mm** bar with a steel ruler. It must be 100 mm within **±0.5 mm**. The **50 mm** bar on the glue flap is the other axis. The sheet also carries the design’s own rulers: **250 mm** down the glue flap, and **180 mm** along the bottom legend. Letter paper with fit-to-page lands near 94% and turns those into about 235 mm and 169 mm. A miss means the driver scaled the page. Reprint. Do not use that sheet.
+Before you cut, check the **100 mm** bar with a steel ruler. It must be 100 mm within **±0.5 mm**. The **50 mm** bar on the blank tab is the other axis. The sheet also carries the design’s own rulers: **250 mm** down the tab, and **180 mm** along the bottom legend. Letter paper with fit-to-page lands near 94% and turns those into about 235 mm and 169 mm. A miss means the driver scaled the page. Reprint. Do not use that sheet.
 
 The four black bars at the **TOP** are the sync. Together they are **52 mm**.
 
@@ -50,37 +50,47 @@ Preferred weatherproofing is **matte film over laser toner**. A matte pouch or a
 
 Outdoors: keep the sheets dry until the glue has set. Do not leave dye ink in the rain.
 
-## Cut
+## Widths
 
-The page is 210 × 297 mm. The finished sleeve is **205 × 287 mm**.
+Each sleeve is **one A4 sheet**. Nothing is split across pages, so there is only one join.
 
-- Cut the **right** edge on the line marked **TRIM 205 mm**. That removes 5 mm.
-- Cut **5 mm** off the top and **5 mm** off the bottom, on the horizontal lines. Finished height **H = 287 mm**.
-- Do **not** cut the left edge. The left **16.5 mm** is the glue flap. The outer 5 mm of that flap is the unprinted border. It hides under the glue. About 11 mm of the flap is printed.
+| Part | Width | Where it sits |
+|---|---|---|
+| Coded bands, to the fold | **189.8 mm** | x = 5.2 mm to 195.0 mm. This is 2π × 30.2 mm, the expected outer circumference. |
+| Underlap bleed | **3.0 mm** | x = 195.0 mm to 198.0 mm. The same bands, continued. |
+| Blank tab | **12.0 mm** | x = 198.0 mm to the sheet edge at 210 mm. No band ink. |
+| Coded + tab | **204.8 mm** | Wider than a typical printable width. |
+| Page | **210 mm** | A4 portrait. |
 
-The alignment crosses sit on the flap’s inner edge and on the cut edge. They are the seam marks. The name and the code are in the legends and in the flap, outside the black-and-white code.
+A home printer’s printable width on A4 is about **200–202 mm**, with **4–5 mm** margins. 204.8 mm does not fit in that. The tab is on the **right**, where a clipped edge eats blank paper and not the code. The left cut line is at **5.2 mm** (marked **CUT HERE**), so a 5 mm left margin does not eat the bands. The right dashed cut is 0.4 mm inside the sheet edge (x = 209.6 mm). A 4–5 mm right margin will not put toner on that line, or on the outer few millimetres of the tab. The paper is still there. Cut the sheet edge if those dashes are missing. The fold line at **195 mm** is only a mark in the legends. Do not crease it.
 
-## Wrap
+Expected outside size is unchanged: **D ≈ 60.4 mm**, **R ≈ 30.2 mm** for a 0.2 mm sheet. The coded width to the fold is that outer circumference, not a new radius. One turn of the paper, through the middle of a 0.2 mm sheet, is about `2π(R − t/2) ≈ 189.1 mm`. The printed outer length is 189.8 mm, so the overlap is about 0.6 mm longer than that turn. Harmless. Each extra 0.1 mm of thickness adds about **0.3 mm** to one turn of the paper.
 
-Dowel **60 mm**. Not a 63 mm pipe: after the trim only about 7 mm would be left to glue, and that does not snug.
+## Cut and join
 
-Bands stay **horizontal**. They become rings. The **TOP** arrow points to the top of the stick. The four black sync bars are at that end. **BOTTOM** is the black stop.
+The page is 210 × 297 mm. Finished height is still **H = 287 mm**. Laminate or film the flat sheet first, if you use film. Then cut. A film put on after the cut changes the size you just cut to.
 
-1. Printed face outward.
-2. Lay the glue flap on the dowel first. The words **GLUE UNDER** go against the overlap, then under it.
-3. Roll the sheet tight. Put **both** seam alignment crosses on the cut edge — the top one and the bottom one — onto the matching crosses at the inner edge of the flap. A **1°** spiral misaligns the bands by about **3.3 mm**, so keep the TOP arrow square to the dowel. The overlap on a 60 mm dowel is **205 − π × 60 ≈ 16.5 mm** (circumference 188.5 mm). A white gap opens at the seam if the outside circumference goes over about **192.8 mm**. That is an outside diameter of about **61.4 mm** (192.8 / π), so the threshold is a dowel of about **61.0 mm** with 0.2 mm stock. The bands do not cover that extra paper.
-4. Glue the flap to the wood, and glue or tape the overlap down. A loose sleeve is not a bearing: the silhouette would follow the paper, not the dowel.
-5. Press the seam flat. It is a vertical join, not a ridge. A ridge splits the silhouette.
+Bands stay **horizontal**. They become rings. The **TOP** arrow points to the top of the stick. The four black sync bars are at that end. **BOTTOM** is the black stop. Dowel **60 mm**. A 63 mm pipe is larger than this code: its outside would be about 199 mm around, and the 3 mm bleed cannot cover that gap.
 
-The design does not give the seam a compass bearing. The circle stations stand on both sides of the baseline, so the seam cannot face away from all of them. Press it flat. When you can, keep that ridge off the middle of the calibration photo.
+1. Laminate or film first, if you use it. Then cut both edges. Cut the **left** edge exactly on the dashed line marked **CUT HERE** (x = 5.2 mm), so the band ink runs to that edge. Leave the margin on, and a white stripe about 5 mm wide hides the bleed. Cut the **right** edge on its dashed line. If those dashes did not print, cut the right-hand edge of the sheet. That edge is the outer edge of the **15 mm** tab. Cut **5 mm** off the top and the bottom, on the horizontal lines.
+2. Measure R after the sheet is on the dowel (step 4), not on the flat sheet. The outside after the film is the R that counts. The method is in the next section.
+3. Fasten the blank tab to the dowel before you wrap. A stapler cannot close once the sheet is around the stick, and the tab will be hidden under the bands. On a wooden dowel, use a staple-gun or a drawing-pin. On a tube, use glue or thin double-sided tape. Staples go in the blank part only, at least **4 mm** from the fold (past the 3 mm bleed). Never through the bands. The words on the tab read **staple/glue here — overlap under the other edge**.
+4. Wrap snug, printed face outward. Do **not** crease the fold line. A crease under the overlap makes a ridge, and a ridge splits the silhouette. Stick the cut left edge down over the tab with glue or thin double-sided tape, so the bands meet the bleed. No staples through the bands. The left edge is the visible seam. Up to 3 mm of oversize then shows band ink, not white. A **1°** spiral misaligns the bands by about **3.3 mm**, so keep the TOP arrow square to the dowel.
+5. Turn that seam **away from the stations and away from the camera**.
+
+Do not crease the fold. The fold mark in the legends is only there to show where the coded width ends. The cut-edge crosses are in the same margin as the right-hand dashes, so they may not print. The name and the code are in the legends, outside the black-and-white code.
+
+Once the left edge has been cut on **CUT HERE**, a white gap opens at the seam only if the finished outside circumference is longer than about **192.8 mm** (the 189.8 mm fold plus the 3.0 mm bleed). That is an outside diameter of about **61.4 mm** (192.8 / π), a dowel of about **61.0 mm** with 0.2 mm stock. The design size, D = 60.4 mm and R = 30.2 mm, sits inside that limit. The step at the tab moves the centreline by only **0.1–0.2 mm**. A loose sleeve is not a bearing: the silhouette would follow the paper, not the dowel.
+
+The circle stations stand on both sides of the baseline. The seam still cannot face away from all of them at once. Keep it off the middle of the calibration photo.
 
 Expected outside size for a **0.2 mm** sheet, before you measure: **D ≈ 60.4 mm**, **R ≈ 30.2 mm**. Stock, glue, and film move it. The laser offset is the **measured** R, added after the tape has been made level. It is not 30.2 mm unless that is what you measured.
 
 ## Measure R, height, and plumb
 
-Do this after the glue is dry, and after any matte film.
+Do this after the sheet is stuck down. Laminate before you cut, if you laminate. The outside after the film is the R that counts.
 
-**Radius.** At three heights — about 40 mm below the top, the middle, and about 40 mm above the bottom — wrap a **paper strip** or a **cloth tape** around the sleeve and pull it snug. Do not use a steel tape: it stands off the curve and reads long. The length is the outside circumference C. After lamination, this outside R is the one that counts. The step at the glue flap moves the centreline by only **0.1–0.2 mm**.
+**Radius.** At three heights — about 40 mm below the top, the middle, and about 40 mm above the bottom — wrap a **paper strip** or a **cloth tape** around the sleeve and pull it snug. Do not use a steel tape: it stands off the curve and reads long. The length is the outside circumference C. After lamination, this outside R is the one that counts. The step at the tab moves the centreline by only **0.1–0.2 mm**.
 
 `R = C / (2π)`
 
