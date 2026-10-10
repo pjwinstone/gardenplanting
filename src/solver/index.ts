@@ -23,6 +23,17 @@
  * - One blunder is dropped only when its |w| is at least twice the next
  *   residual, flagged or not, and the variance test then passes.
  * - ∂β/∂s uses the nominal focal length. The current fx would add a factor (1+s).
+ * - A traverse solve sets cameraCentring to 'setup': one 8 mm offset per
+ *   station occupation, not a centring term on every ray. The default stays
+ *   'ray', so a photo with no setup id is unchanged. Closing is a separate
+ *   occupation when the photo sets `closing` or `role: 'close'`.
+ * - An arc or a resection uses the best single frame. A second frame that
+ *   only adds a mark does not skip an arc-and-tape seed. Two frames that
+ *   each see two marks seed the station where the arcs meet.
+ * - Photos that share a scale and disagree on the fx prior use the smallest.
+ *   A held solve publishes sigmaHeld and marks the scale not calibratable.
+ * - closureReport is the duplicate-point misclosure. Raw |w| is not a blunder
+ *   test. solveTraverseStep is one adjustment of the observations so far.
  * - A both-tapes station takes its side from the branch choice or from the
  *   bearing order in its own photo. For a tape pair, index 0 is +Y of
  *   origin→axis (BAS01 at the origin, BAS02 on +X, so the peg side is index
@@ -44,6 +55,10 @@
 
 export { ELLIPSE_95, CHI2_2_95, W_CRITICAL, MDB_FACTOR, Z_95 } from './constants';
 export { solve } from './adjust';
+export { closureReport, closureChi2, duplicateMisclosure } from './closure';
+export type { ClosurePair, ClosureRequest, ClosureReport } from './closure';
+export { solveIncremental, solveTraverseStep, sliceTraverseStep } from './incremental';
+export type { IncrementalStepQuery, IncrementalStepReport, IncrementalTie } from './incremental';
 export { solveGardenDocument } from './document';
 export { circleTrialVerdict } from './circleTrial';
 export type { CircleTrialInput, CircleTrialVerdict } from './circleTrial';
