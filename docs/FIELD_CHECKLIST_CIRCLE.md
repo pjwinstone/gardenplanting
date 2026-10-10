@@ -4,7 +4,7 @@
 
 ## Print the markers
 
-Print the sleeves the day before. **Actual size / 100%**. No fit-to-page, no scaling, no borderless. Black only, highest quality. The **100 mm** bar must measure 100 mm (±0.5 mm), or reprint. Cut the **205 mm** line, and 5 mm off the top and the bottom. Wrap snug on a **60 mm** dowel, bands horizontal, **TOP** up. Glue the **16.5 mm** flap and press the seam flat. R = C / 2π at three heights, to **0.1 mm**, on the cane row. Steps: [How to print the markers](PRINT_MARKERS.md).
+Print the sleeves the day before. Each sleeve is one A4 sheet. **Actual size / 100%**. No fit-to-page, no scaling, no borderless. Black only, highest quality. The **100 mm** bar must measure 100 mm (±0.5 mm), or reprint. Cut the dashed line on the **15 mm** tab (the right-hand sheet edge if the dashes did not print), and 5 mm off the top and the bottom. Wrap snug on a **60 mm** dowel, bands horizontal, **TOP** up. Tuck the blank tab **under** the other edge so the bands meet. Staple or glue through the tab only, never through the bands. Turn the seam away from the stations. R = C / 2π at three heights, to **0.1 mm**, on the cane row. Steps: [How to print the markers](PRINT_MARKERS.md).
 
 [All sleeves](markers/all-sleeves.pdf). BAS01 [315](markers/BAS01.pdf), BAS02 [36E](markers/BAS02.pdf), CRC01 [459](markers/CRC01.pdf), CRC02 [6BA](markers/CRC02.pdf), CRC03 [8A3](markers/CRC03.pdf), CRC04 [952](markers/CRC04.pdf), CRC05 [DAC](markers/CRC05.pdf), CRC06 [EC5](markers/CRC06.pdf).
 
