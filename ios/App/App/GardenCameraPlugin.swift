@@ -203,6 +203,11 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
                 self.session.addInput(input)
                 self.session.addOutput(self.photoOutput)
                 self.photoOutput.maxPhotoQualityPrioritization = .balanced
+                if #available(iOS 16.0, *) {
+                    if let dims = self.preferredPhotoDimensions(on: device) {
+                        self.photoOutput.maxPhotoDimensions = dims
+                    }
+                }
                 try device.lockForConfiguration()
                 let zoom = min(max(1, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
                 device.videoZoomFactor = zoom
@@ -358,11 +363,9 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
             settings.flashMode = .off
         }
         if #available(iOS 16.0, *) {
-            let supported = photoOutput.supportedMaxPhotoDimensions
-            let preferred = supported.first { $0.width == 4032 && $0.height == 3024 }
-            let largest = supported.max { Int($0.width) * Int($0.height) < Int($1.width) * Int($1.height) }
-            if let choice = preferred ?? largest {
-                settings.maxPhotoDimensions = choice
+            let dims = photoOutput.maxPhotoDimensions
+            if dims.width > 0 && dims.height > 0 {
+                settings.maxPhotoDimensions = dims
             }
         }
         photoOutput.capturePhoto(with: settings, delegate: self)
@@ -518,7 +521,27 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
         return (values, Int(size.width), Int(size.height))
     }
 
+    /// 4032×3024 when that format is offered, otherwise the largest still the active format allows.
+    @available(iOS 16.0, *)
+    private func preferredPhotoDimensions(on device: AVCaptureDevice) -> CMVideoDimensions? {
+        var match: CMVideoDimensions?
+        var largest: CMVideoDimensions?
+        var largestArea = 0
+        for dims in device.activeFormat.supportedMaxPhotoDimensions {
+            let area = Int(dims.width) * Int(dims.height)
+            if area > largestArea {
+                largestArea = area
+                largest = dims
+            }
+            if dims.width == 4032 && dims.height == 3024 {
+                match = dims
+            }
+        }
+        return match ?? largest
+    }
+
     private func hostSeconds(for photo: AVCapturePhoto) -> TimeInterval? {
+        guard #available(iOS 15.4, *) else { return nil }
         guard let clock = session.synchronizationClock else { return nil }
         let host = CMSyncConvertTime(photo.timestamp, from: clock, to: CMClockGetHostTimeClock())
         guard host.isValid else { return nil }
