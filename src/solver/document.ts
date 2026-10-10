@@ -61,6 +61,10 @@ export function solveGardenDocument(doc: GardenDocument, extra?: Partial<SolveIn
       clicks: photo.clicks.map((c) => ({ pointId: c.pointId, px: c.px, py: c.py })),
       gravity,
       yawHeldRad: undefined,
+      phoneId: photo.phoneId,
+      lens: photo.lens,
+      fxRelativeUncertainty: photo.fxRelativeUncertainty,
+      cameraSetupId: photo.cameraSetupId,
     });
   }
   const result = solve({

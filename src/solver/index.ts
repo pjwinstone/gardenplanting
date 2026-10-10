@@ -10,8 +10,10 @@
  *   A smaller gap is a weak point.
  * - A bubble with no gravity widens each ray by the tilt σ (default 0.5°):
  *   about ε·v/fx for roll and δ·u·v/(fx²+u²) for pitch.
- * - fx, when a relative σ is supplied, is a parameter with that prior. Rays
- *   from a both-tapes station carry it. Depth and "four marks" are not a class.
+ * - fx, when a relative σ is supplied, is a parameter with that prior. Photos
+ *   that name the same phone and 1× lens share one scale and one prior.
+ *   A photo with no phone keeps its own scale. Rays from a both-tapes station
+ *   carry it. Depth and "four marks" are not a class.
  * - A point is checked when every observation that moves it has an MDB-sized
  *   shift inside the class. r ≈ 0 is the only redundancy guard (a 1σ shift
  *   above 0.1 mm). A high variance factor withholds checked and plantable,
@@ -66,4 +68,5 @@ export type {
   SolverPhotoInput,
   SolverDistanceInput,
   SolverDatumInput,
+  SolveFocal,
 } from './types';

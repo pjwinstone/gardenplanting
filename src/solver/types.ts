@@ -100,12 +100,26 @@ export interface SolverPhotoInput {
   /** Replaces the pixel formula for every ray in this photo. */
   bearingSigmaRad?: number;
   /**
-   * Relative 1σ of fx, e.g. 0.01. When set, fx is a parameter with this prior
-   * and every ray from the photo carries it into the ellipses. Omitted means
-   * fx is treated as exact (the caller already folded it into bearing σ, or
-   * the rays must not check a point).
+   * Relative 1σ of fx, e.g. 0.02 for an EXIF prior. When set, fx is a
+   * parameter with this prior and every ray from the photo carries it into
+   * the ellipses. Omitted means fx is treated as exact (the caller already
+   * folded it into bearing σ, or the rays must not check a point).
    */
   fxRelativeUncertainty?: number;
+  /**
+   * Photos with the same phone and lens share one fx scale. Absent: this
+   * photo keeps its own scale, so a garden saved before shared fx still solves.
+   */
+  phoneId?: string;
+  /** Lens with `phoneId`. Defaults to `1x`. A different lens does not share fx. */
+  lens?: string;
+  /**
+   * Photos with the same id share one 2D camera offset (pole lean and lens).
+   * The prior is `sigmaCentringM`, or 8 mm when that is omitted, and the
+   * per-ray centring term is not added as well. Absent: per-ray centring,
+   * unchanged.
+   */
+  cameraSetupId?: string;
   /** Hold yaw (radians). The station position may still be free. */
   yawHeldRad?: number;
 }
@@ -213,9 +227,23 @@ export interface SolvePoint {
   markCount?: number;
 }
 
+export interface SolveFocal {
+  /** `phone:<id>|<lens>`, or the photo id when fx is not shared. */
+  id: string;
+  phoneId?: string;
+  lens?: string;
+  photoIds: string[];
+  /** True when two or more photos use this scale. */
+  shared: boolean;
+  /** Adjusted s in fx = fx₀(1+s). */
+  scale: number;
+  /** A-priori 1σ of s. Null when the normal matrix was not inverted. */
+  sigma: number | null;
+}
+
 export interface SolveObservation {
   id: string;
-  kind: 'distance' | 'bearing' | 'angle' | 'focal';
+  kind: 'distance' | 'bearing' | 'angle' | 'focal' | 'offset';
   /** Observed minus computed. Metres or radians. Meaningless when used is false. */
   residual: number;
   sigma: number;
@@ -274,5 +302,9 @@ export interface SolveResult {
   inseparableObservationIds: string[];
   /** Photos the document adapter refused to resect. */
   skippedPhotos: { id: string; code: 'no-fx' }[];
+  /** One entry per fx parameter that entered the adjustment. */
+  focals: SolveFocal[];
+  /** True when one fx parameter is shared by two or more photos. */
+  fxSharedInSolve: boolean;
   datum: { originId: string; axisPointId: string; gardenSign: 1 | -1 };
 }

@@ -176,7 +176,7 @@ Two-station points **inherit station error**. A station in the 200 mm class does
 
 `fx` is one constant **per phone and per lens**, stored as **`fx / width`** so a resized image does not change the angle. Same for `fy / height`, the principal point, and radial `k1`.
 
-For the iPhone 1× camera (24–26 mm equivalent, 4:3), `fx / width ≈ 0.69–0.75`. The code’s `0.9 × width` is about 20–30% high. Read EXIF `FocalLengthIn35mmFormat` when it is present, and use it only to check that the shot is 1×. Lock zoom at **1×**. Do not use the 0.5× ultra-wide. The taped-rod calibration below, or a checkerboard of known square size for that phone and lens, is the prior for the shared `fx` planned after the circle field trial (section 4). Not an AprilTag. This phase still keeps a separate prior on each photo.
+For the iPhone 1× camera (24–26 mm equivalent, 4:3), `fx / width ≈ 0.69–0.75`. The code’s `0.9 × width` is about 20–30% high. Read EXIF `FocalLengthIn35mmFormat` when it is present, and use it only to check that the shot is 1×. Lock zoom at **1×**. Do not use the 0.5× ultra-wide. The taped-rod calibration below, or a checkerboard of known square size for that phone and lens, is the prior for the shared `fx`. Not an AprilTag. A photo with no phone id still keeps its own prior. Photos that name the same phone and 1× lens share one scale (§4.4).
 
 Three marks cannot estimate `fx` (four unknowns). Four marks have redundancy 0 and `σ_fx ≈ 5.9%` at 0.1° bearings. Calibrate once: a 4.000 m rod across most of the frame, phone on the bisector at a taped 5 m, repeated. Two-pixel clicks reach about **0.4%**, so **1% is a fair requirement**.
 
@@ -186,7 +186,7 @@ A 10% error in `fx` is not a 10% error in `θ`. On the symmetric 7 m / 20° case
 
 One weighted non-linear least squares. Not Layer A’s turn, then Layer B’s overwrite.
 
-**Unknowns.** Feature `(x, y)` where the normal matrix has rank for them. Per solved photo: `Cx, Cy, ψ`. Mark = feature + offset vector. When a relative σ is given, `fx` is a scale parameter `fx = fx₀(1+s)` with a prior residual `−s` of that σ, and every ray from the photo uses it. The bearing derivative is `∂β/∂s = (∂β/∂fx)·fx₀`, evaluated at the current focal length. Multiplying by the current `fx` instead is too large by `(1+s)` and stalls the adjustment. Photos from one phone still carry separate priors in this phase; one shared `fx` per phone and lens is the field follow-up. The same prior applies to a both-tapes station’s rays. Omitted, `fx` is exact only when the caller has already folded it into the bearing σ; otherwise those rays must not check a point. Do not replace this with a 1e-8 m pseudo-fix. A fixed base is `fixScale` (eliminate `B_x`) or `observeLength: false`. One shared `fx` per phone and lens, with the taped-rod or checkerboard result as its prior, is the planned follow-up after the circle field trial (the maths advisor estimates radius σ falls from about 15 mm to about 6.5 mm).
+**Unknowns.** Feature `(x, y)` where the normal matrix has rank for them. Per solved photo: `Cx, Cy, ψ`. Mark = feature + offset vector. When a relative σ is given, `fx` is a scale parameter `fx = fx₀(1+s)` with a prior residual `−s` of that σ, and every ray from the photo uses it. The bearing derivative is `∂β/∂s = (∂β/∂fx)·fx₀`, evaluated at the current focal length. Multiplying by the current `fx` instead is too large by `(1+s)` and stalls the adjustment. Photos that name the same phone and 1× lens share one scale and one prior (§4.4). A photo with no phone id keeps its own prior, so an older garden still solves as it did. The same prior applies to a both-tapes station’s rays. Omitted, `fx` is exact only when the caller has already folded it into the bearing σ; otherwise those rays must not check a point. Do not replace this with a 1e-8 m pseudo-fix. A fixed base is `fixScale` (eliminate `B_x`) or `observeLength: false`. One shared `fx` per phone and lens, with the taped-rod or checkerboard result as its prior, is the planned follow-up after the circle field trial (the maths advisor estimates radius σ falls from about 15 mm to about 6.5 mm).
 
 **Determinability** is the rank and condition of the global normal matrix. “Two observations pointing at a point” is not enough if those points are themselves free. Two tapes onto undetermined points fix nothing.
 
@@ -263,6 +263,14 @@ Once angles are in the traverse they dominate. A careful tape does not make a fl
 An optional “this corner is square” may be a soft angle observation at about **0.5°** (about 30 mm at the end of a 3.5 m wall). It is **off unless the user turns it on**, and the coach says it is an assumption.
 
 **Coach outputs:** each distance residual in mm, `w` for anything that fails, the 95% semi-major of each accepted point, which points are unchecked, which are unset and what single measurement would fix them, and `σ̂₀` in a sentence.
+
+### 4.4 Shared fx and iterative placement
+
+Photos with the same `phoneId` and lens (`lens`, default `1x`) share one scale `s` in `fx = fx₀(1+s)`. The EXIF prior is a single residual `−s`. At 2% that is `fxRelativeUncertainty: 0.02`, not one prior per frame. `fxSharedInSolve` is true when that scale belongs to two or more photos. A photo with no `phoneId` keeps a private scale.
+
+Seeding repeats four stages until a round places nothing new: circle intersections, photo stations, rays from two oriented stations, then one tape and one ray. A photo whose station is already placed is oriented from the placed targets in that frame (two are enough; it does not need a three-mark resection). That yaw casts rays. An arc or a resection uses marks from one photo, so two frames at the same station do not mix yaws. One tape and one such ray place a mark when the ray meets the circle once in front of the camera. Two crossings stay two candidates.
+
+On the 4-leg closed loop with no cross-ties, one shared fx and one 8 mm camera offset per setup (pole lean and lens, not a centring term on every ray) the far mark is about 7.4 mm (1σ) and `σ_s` is about 0.045%. Naming `cameraSetupId` selects that offset. Leaving it off keeps per-ray centring, which is what older solves and the cross-tie check (C3 15.3 × 2.8 mm) still use. Raw loop misclosure is not a blunder test.
 
 ## 5. Targets
 
