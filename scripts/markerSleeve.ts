@@ -14,7 +14,7 @@
  * The same bands continue 3 mm past the fold (underlap bleed) and 0.75 mm
  * left of the coded edge (cutting tolerance). The remaining 12 mm of the
  * 15 mm tab is blank. The 250 mm ruler and the 50 mm bar sit in that blank
- * part. The CUT HERE dash is centred just left of the band ink, so its
+ * part. The left cut dash is centred just left of the band ink, so its
  * stroke does not enter the bands. Quiet strips of the code stay empty.
  *
  * Coded width + tab is about 204.8 mm. A typical printer's printable
@@ -216,7 +216,7 @@ export const BAND_LEFT_MM = CODE_LEFT_MM - EDGE_BLEED_MM;
 /** Stroke of the left cut dash, in points. The path is the centre of the stroke. */
 export const LEFT_CUT_STROKE_PT = 0.5;
 /**
- * Centre of the CUT HERE dash. Just left of the band ink: the 0.5 pt stroke
+ * Centre of the left cut dash. Just left of the band ink: the 0.5 pt stroke
  * must not paint x >= CODE_LEFT − 0.75.
  */
 export const LEFT_CUT_X_MM =
@@ -298,7 +298,7 @@ export function sleeveContent(sleeve: { point: string; id: string }) {
   parts.push(`${LEFT_CUT_STROKE_PT} w`);
   parts.push('% LEFTCUT');
   parts.push(`q\n[1.6 1.1] 0 d\n${seg(LEFT_CUT_X_MM, 0, LEFT_CUT_X_MM, 297)}\nQ`);
-  parts.push(textAt(7.2, 286.2, 6, 'CUT HERE'));
+  parts.push(textAt(7.2, 284.0, 5, 'cut just inside this line'));
 
   parts.push(textAt(26, 286.2, 11, sleeve.point));
   parts.push(textAt(48, 286.2, 11, sleeve.id));

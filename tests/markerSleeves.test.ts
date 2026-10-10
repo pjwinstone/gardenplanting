@@ -228,7 +228,7 @@ function expectSleevePage(stream: string, box: number[], point: string, id: stri
   expect(stream.includes('(PRINT AT 100% / ACTUAL SIZE)')).toBe(true);
   expect(stream.includes('(TOP)')).toBe(true);
   expect(stream.includes('(BOTTOM)')).toBe(true);
-  expect(stream.includes('(CUT HERE)')).toBe(true);
+  expect(stream.includes('(cut just inside this line)')).toBe(true);
   expect(stream.includes('(staple/glue here -- overlap under the other edge)')).toBe(true);
   expect(stream.includes('GLUE UNDER')).toBe(false);
   expect(stream.includes('TRIM 205')).toBe(false);
