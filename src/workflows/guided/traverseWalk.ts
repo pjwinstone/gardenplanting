@@ -11,7 +11,7 @@ import type { GardenDocument, Photo, Traverse, TraverseLeg, TraverseMisclosure, 
 import { solve } from '../../solver/adjust';
 import { closureReport } from '../../solver/closure';
 import { sliceTraverseStep, solveTraverseStep, type IncrementalStepReport, type IncrementalTie } from '../../solver/incremental';
-import type { SolveInput, SolverDistanceInput, SolverPhotoInput } from '../../solver/types';
+import type { SolveInput, SolveResult, SolverDistanceInput, SolverPhotoInput } from '../../solver/types';
 import {
   advanceWorkflow,
   applyWorkflowEvent,
@@ -19,12 +19,17 @@ import {
   readProgress,
   setWorkflowEventHook,
 } from './engine';
-import type { WorkflowEvent, WorkflowLink, WorkflowRun } from './types';
+import type { FieldStatus, WorkflowEvent, WorkflowLink, WorkflowRun } from './types';
 
 export const RAY_R_MIN = 0.13;
 export const CROSS_TAPE_R_MIN = 0.34;
 export const TAPE_MDB_MAX_MM = 21.3;
+export const TARGET_MM = 21;
 export const NEAR_START_M = 3;
+
+export const GOOD_LEG = 'Good — move to the next corner';
+export const LOOP_CLOSES = 'Loop closes within expected error ✓';
+export const RAW_GAP_NOTE = 'The raw gap is not a test for a bad reading.';
 
 export const CROSS_TIE_PROMPT = 'Add a cross-tie before the next leg.';
 export const LEG_NOT_TAPED = 'Tape the new corner before the next leg.';
@@ -67,6 +72,71 @@ export function classifyGate(
   const tapeFail = tapes.length > 0 && (tapeMm.some((value) => value == null) || (tapeMdbMm ?? 0) > TAPE_MDB_MAX_MM);
   const ok = settled && !rayFail && !crossFail && !tapeFail;
   return { ok, prompt: ok ? undefined : CROSS_TIE_PROMPT, rayR, crossR, tapeMdbMm };
+}
+
+/** The tape or photo the amber line names. Cross-ties come before rays. */
+export function nextAction(
+  ties: IncrementalTie[],
+  distances: { id: string; a?: string; b?: string; role?: string }[],
+  photos: { id: string; stationId?: string }[] = [],
+): string {
+  const roleOf = new Map(distances.map((row) => [row.id, row.role]));
+  const ends = new Map(distances.map((row) => [row.id, row]));
+  const tapeFails = (tie: IncrementalTie) => tie.mdb == null || tie.mdb * 1000 > TAPE_MDB_MAX_MM;
+  const crossFails = (tie: IncrementalTie) => roleOf.get(tie.id) === 'cross' && (tie.redundancy < CROSS_TAPE_R_MIN || tapeFails(tie));
+  const worst = (rows: IncrementalTie[]) => [...rows].sort((a, b) => (b.mdb ?? 0) - (a.mdb ?? 0) || a.redundancy - b.redundancy)[0];
+  const cross = worst(ties.filter((tie) => tie.kind === 'tape' && crossFails(tie)));
+  const tape = cross ?? worst(ties.filter((tie) => tie.kind === 'tape' && tapeFails(tie)));
+  if (tape) {
+    const pair = ends.get(tape.id);
+    if (pair?.a && pair.b) return `Add a cross-tie: tape ${pair.a} → ${pair.b}`;
+  }
+  const ray = [...ties.filter((tie) => tie.kind === 'ray' && tie.redundancy < RAY_R_MIN)]
+    .sort((a, b) => a.redundancy - b.redundancy)[0];
+  if (ray) {
+    const cut = ray.id.lastIndexOf(':');
+    const pointId = cut >= 0 ? ray.id.slice(cut + 1) : ray.id;
+    const photoId = cut >= 0 ? ray.id.slice(0, cut) : '';
+    const station = photos.find((photo) => photo.id === photoId)?.stationId ?? 'here';
+    return `Add a photo: from ${station} include ${pointId}`;
+  }
+  return CROSS_TIE_PROMPT;
+}
+
+/** Corners and house marks clicked from one camera setup. Datum ends are not listed. */
+export function onceSeenMarks(doc: GardenDocument, throughStep: number, datum: string[] = []): string[] {
+  const skip = new Set(datum);
+  const seen = new Map<string, Set<string>>();
+  for (const photo of doc.photos) {
+    if (photo.step == null || photo.step > throughStep) continue;
+    const station = photo.stationId ?? photo.addPointId;
+    if (!station) continue;
+    const setupId = photo.cameraSetupId ?? `${station}|${photo.closing || photo.role === 'close' ? 'close' : 'open'}`;
+    for (const click of photo.clicks) {
+      if (!/^[CH]/.test(click.pointId) || unsuffix(click.pointId) || skip.has(click.pointId)) continue;
+      const setups = seen.get(click.pointId) ?? new Set<string>();
+      setups.add(setupId);
+      seen.set(click.pointId, setups);
+    }
+  }
+  return [...seen.entries()].filter(([, setups]) => setups.size === 1).map(([id]) => id).sort();
+}
+
+export function blockedLine(markId: string): string {
+  return `Blocked: ${markId} is only seen from one setup — photograph it from here`;
+}
+
+export function legHeadline(markId: string, semiMajorM: number): string {
+  return `${markId} ± ${Math.round(semiMajorM * 1000)} mm (target ± ${TARGET_MM} mm)`;
+}
+
+/** Tick anyway cannot complete a step whose gate is blocking. */
+export function gatedTickRefusal(doc: GardenDocument, stepId: string): string | null {
+  const progress = readProgress(doc);
+  if (progress.activeId !== 'house-traverse') return null;
+  const run = progress.runs['house-traverse'];
+  if (!run?.fieldStatus?.blocked || stepId !== run.currentStepId) return null;
+  return run.fieldStatus.line;
 }
 
 /** House marks clicked from one camera setup in the revealed prefix. */
@@ -184,18 +254,23 @@ export function nextTraverse(doc: GardenDocument, now = new Date().toISOString()
       return { doc: current, notice: CLOSE_HOLD, changed: current !== doc };
     }
   }
+  const before = readProgress(current).runs['house-traverse'];
+  if (before?.currentStepId === 'closure-review' && before.fieldStatus?.blocked) {
+    return { doc: current, notice: before.fieldStatus.line, changed: current !== doc };
+  }
   const move = advanceWorkflow(readProgress(current), now);
   let next = move.changed ? commitWorkflow(current, move.progress) : current;
   next = refreshArrived(next, now);
-  const arrived = readProgress(next).runs['house-traverse']?.currentStepId;
-  const notice = arrived === 'close' ? closeSentence(next) : move.notice;
+  const arrived = readProgress(next).runs['house-traverse'];
+  const notice = arrived?.currentStepId === 'close' ? arrived.fieldStatus?.line : move.notice;
   return { doc: next, notice, link: move.link, changed: next !== doc || move.changed };
 }
 
 function nextLeg(doc: GardenDocument, now: string): TraverseMove {
   const traverse = doc.houseTraverse;
   if (!traverse || traverse.observedStep == null || !traverse.newestId) {
-    return { doc, notice: LEG_NOT_TAPED, changed: false };
+    const next = setLive(doc, [], { tone: 'amber', blocked: true, line: LEG_NOT_TAPED });
+    return { doc: next, notice: LEG_NOT_TAPED, changed: next !== doc };
   }
   const input = traverseSolveInput(doc);
   let report: IncrementalStepReport | null = null;
@@ -207,13 +282,12 @@ function nextLeg(doc: GardenDocument, now: string): TraverseMove {
     }
   }
   if (!input || !report || !report.converged || report.semiMajorM == null) {
-    const next = setLive(doc, [LEG_UNSETTLED]);
+    const next = setLive(doc, [LEG_UNSETTLED], { tone: 'red', blocked: true, line: LEG_UNSETTLED });
     return { doc: next, notice: LEG_UNSETTLED, changed: next !== doc };
   }
-  const gate = classifyGate(tiesForNextLeg(report.ties, input, traverse.closeRequested === true), input.distances ?? [], true);
-  const lines = stepLines(doc, report, gate, traverse.observedStep);
-  const shown = setLive(doc, lines);
-  if (!gate.ok) return { doc: shown, notice: gate.prompt ?? CROSS_TIE_PROMPT, changed: shown !== doc };
+  const shown = publishLeg(doc, report, input, traverse.observedStep, traverse.closeRequested === true);
+  const status = readProgress(shown).runs['house-traverse']?.fieldStatus;
+  if (status?.blocked) return { doc: shown, notice: status.line, changed: shown !== doc };
   if (!traverse.closeRequested && !nearStart(shown, input, traverse.observedStep, traverse.newestId)) {
     return { doc: shown, notice: LEG_CHECKED, changed: shown !== doc };
   }
@@ -221,7 +295,8 @@ function nextLeg(doc: GardenDocument, now: string): TraverseMove {
   const move = advanceWorkflow(readProgress(ticked), now);
   let next = move.changed ? commitWorkflow(ticked, move.progress) : ticked;
   next = refreshArrived(next, now);
-  return { doc: next, notice: closeSentence(next), link: move.link, changed: true };
+  const arrived = readProgress(next).runs['house-traverse'];
+  return { doc: next, notice: arrived?.fieldStatus?.line, link: move.link, changed: true };
 }
 
 function refreshArrived(doc: GardenDocument, now: string): GardenDocument {
@@ -232,37 +307,42 @@ function refreshArrived(doc: GardenDocument, now: string): GardenDocument {
 }
 
 function arriveClose(doc: GardenDocument, now: string): GardenDocument {
-  const sentence = closeSentence(doc);
-  let next = setLive(doc, [sentence]);
-  if (!closingReady(next)) return next;
+  const ready = closingReady(doc);
+  const start = doc.houseTraverse?.markOrder[0] || 'the start';
+  const status: FieldStatus = ready
+    ? { tone: 'green', blocked: false, line: 'Good — read the closure.' }
+    : { tone: 'amber', blocked: true, line: `Tape to ${start}, then stand there again.` };
+  let next = setLive(doc, ready ? [] : [closeSentence(doc)], status);
+  if (!ready) return next;
   const traverse = next.houseTraverse;
   if (traverse && traverse.status !== 'closed') {
     next = { ...next, houseTraverse: { ...traverse, status: 'closed', closedAt: now, closeRequested: true } };
   }
   if (readProgress(next).runs['house-traverse']?.steps.close?.status === 'complete') return next;
   next = applyPhase(next, 'close', now);
-  return setLive(next, [sentence]);
+  return setLive(next, [], status);
 }
 
 function arriveReview(doc: GardenDocument, now: string): GardenDocument {
   const built = closureLines(doc, now);
   let next = built.doc;
-  if (!built.report) return setLive(next, built.lines);
+  if (!built.report) return setLive(next, built.lines, built.status);
   if (readProgress(next).runs['house-traverse']?.steps['closure-review']?.status !== 'complete') {
     next = applyPhase(next, 'closure-review', now);
   }
-  return setLive(next, built.lines);
+  return setLive(next, built.lines, built.status);
 }
 
-function closureLines(doc: GardenDocument, now: string): { doc: GardenDocument; lines: string[]; report: boolean } {
+function closureLines(doc: GardenDocument, now: string): { doc: GardenDocument; lines: string[]; report: boolean; status: FieldStatus } {
+  const unsettled: FieldStatus = { tone: 'red', blocked: true, line: 'The closure is not settled.', note: RAW_GAP_NOTE };
   const traverse = doc.houseTraverse;
   const input = traverse ? traverseSolveInput(doc) : null;
-  if (!traverse || !input) return { doc, lines: ['The closure is not settled.'], report: false };
+  if (!traverse || !input) return { doc, lines: ['The closure is not settled.'], report: false, status: unsettled };
   let result;
   try {
     result = solve(input);
   } catch {
-    return { doc, lines: ['The closure is not settled.'], report: false };
+    return { doc, lines: ['The closure is not settled.'], report: false, status: unsettled };
   }
   const pairs = closurePairs(doc);
   const startId = traverse.markOrder[0];
@@ -270,7 +350,7 @@ function closureLines(doc: GardenDocument, now: string): { doc: GardenDocument; 
   const report = result.converged
     ? closureReport(result, { pairs, fromId, startId, axisId: traverse.markOrder[1] })
     : null;
-  if (!report) return { doc, lines: ['The closure is not settled.'], report: false };
+  if (!report) return { doc, lines: ['The closure is not settled.'], report: false, status: unsettled };
   const stored: TraverseMisclosure = {
     w: { x: report.positionM.x, y: report.positionM.y },
     qW: report.qW,
@@ -295,7 +375,27 @@ function closureLines(doc: GardenDocument, now: string): { doc: GardenDocument; 
     `Flags: position χ² ${report.positionPass ? 'pass' : 'fail'}, azimuth ${report.azimuthPass ? 'pass' : 'fail'}.`,
     'The raw misclosure is not a blunder test.',
   ];
-  return { doc: { ...doc, traverseMisclosure: stored }, lines, report: true };
+  return { doc: { ...doc, traverseMisclosure: stored }, lines, report: true, status: closureStatus(report, result) };
+}
+
+function closureStatus(report: { chi2Pass: boolean; positionPass: boolean; azimuthPass: boolean }, result: SolveResult): FieldStatus {
+  const closes = report.chi2Pass && report.positionPass && report.azimuthPass;
+  if (closes) return { tone: 'green', blocked: false, line: LOOP_CLOSES, note: RAW_GAP_NOTE };
+  const suspect = flaggedDistance(result);
+  const line = suspect
+    ? `Loop doesn't close — likely blunder at ${suspect.at} (re-tape ${suspect.tape})`
+    : "Loop doesn't close — the checks failed.";
+  return { tone: 'red', blocked: true, line, note: RAW_GAP_NOTE };
+}
+
+function flaggedDistance(result: SolveResult): { at: string; tape: string } | null {
+  const rows = result.observations
+    .filter((row) => row.used && row.flagged && row.kind === 'distance' && row.pointIds.length >= 2 && row.standardised != null)
+    .sort((a, b) => Math.abs(b.standardised ?? 0) - Math.abs(a.standardised ?? 0));
+  const hit = rows[0];
+  if (!hit) return null;
+  const [a, b] = hit.pointIds;
+  return { at: `${a}–${b}`, tape: `${a} → ${b}` };
 }
 
 function closurePairs(doc: GardenDocument): { id: string; duplicateId: string }[] {
@@ -393,13 +493,52 @@ function applyPhase(doc: GardenDocument, phase: 'datum' | 'leg' | 'close' | 'clo
   return commitWorkflow(doc, applied);
 }
 
-function setLive(doc: GardenDocument, lines: string[]): GardenDocument {
+function publishLeg(
+  doc: GardenDocument,
+  report: IncrementalStepReport,
+  input: SolveInput,
+  step: number,
+  closing: boolean,
+): GardenDocument {
+  const ties = tiesForNextLeg(report.ties, input, closing);
+  const gate = classifyGate(ties, input.distances ?? [], true);
+  return setLive(doc, stepLines(doc, report, gate, step), legStatus(doc, report, ties, input, gate.ok, closing));
+}
+
+function legStatus(
+  doc: GardenDocument,
+  report: IncrementalStepReport,
+  ties: IncrementalTie[],
+  input: SolveInput,
+  gateOk: boolean,
+  closing: boolean,
+): FieldStatus {
+  const headline = legHeadline(report.newestId, report.semiMajorM ?? 0);
+  const accuracyMm = (report.semiMajorM ?? 0) * 1000;
+  const shared = { headline, accuracyMm, targetMm: TARGET_MM };
+  const once = onceSeenMarks(doc, report.step, (doc.houseTraverse?.markOrder ?? []).slice(0, 2));
+  const named = once.includes(report.newestId) ? report.newestId : once[0];
+  if (named && !closing) return { ...shared, tone: 'red', blocked: true, line: blockedLine(named) };
+  if (!gateOk) {
+    return {
+      ...shared,
+      tone: 'amber',
+      blocked: true,
+      line: nextAction(ties, input.distances ?? [], input.photos ?? []),
+    };
+  }
+  return { ...shared, tone: 'green', blocked: false, line: GOOD_LEG };
+}
+
+function setLive(doc: GardenDocument, lines: string[], status?: FieldStatus): GardenDocument {
   const progress = readProgress(doc);
   const id = progress.activeId;
   const run = id ? progress.runs[id] : undefined;
   if (!id || !run) return doc;
-  if ((run.liveLines ?? []).join('\n') === lines.join('\n')) return doc;
-  const nextRun: WorkflowRun = { ...run, liveLines: lines };
+  const sameLines = (run.liveLines ?? []).join('\n') === lines.join('\n');
+  const sameStatus = JSON.stringify(run.fieldStatus ?? null) === JSON.stringify(status ?? null);
+  if (sameLines && sameStatus) return doc;
+  const nextRun: WorkflowRun = { ...run, liveLines: lines.length ? lines : undefined, fieldStatus: status };
   return commitWorkflow(doc, { ...progress, runs: { ...progress.runs, [id]: nextRun } });
 }
 
@@ -444,16 +583,17 @@ function observe(doc: GardenDocument, event: Extract<WorkflowEvent, { type: 'tra
   };
   next = recordLeg(next, event.step, event.newestId);
   const input = traverseSolveInput(next);
-  if (!input) return setLive(next, [LEG_UNSETTLED]);
+  if (!input) return setLive(next, [LEG_UNSETTLED], { tone: 'red', blocked: true, line: LEG_UNSETTLED });
   let report: IncrementalStepReport;
   try {
     report = solveTraverseStep(input, { step: event.step, newestId: event.newestId });
   } catch {
-    return setLive(next, [LEG_UNSETTLED]);
+    return setLive(next, [LEG_UNSETTLED], { tone: 'red', blocked: true, line: LEG_UNSETTLED });
   }
-  if (!report.converged || report.semiMajorM == null) return setLive(next, [LEG_UNSETTLED]);
-  const gate = classifyGate(report.ties, input.distances ?? [], true);
-  return setLive(next, stepLines(next, report, gate, event.step));
+  if (!report.converged || report.semiMajorM == null) {
+    return setLive(next, [LEG_UNSETTLED], { tone: 'red', blocked: true, line: LEG_UNSETTLED });
+  }
+  return publishLeg(next, report, input, event.step, next.houseTraverse?.closeRequested === true);
 }
 
 function recordLeg(doc: GardenDocument, step: number, newestId: string): GardenDocument {

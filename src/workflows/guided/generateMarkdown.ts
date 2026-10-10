@@ -60,6 +60,12 @@ function workflowSection(workflow: WorkflowDefinition): string {
       lines.push('');
       lines.push(`Diagram: ${step.diagram}.`);
     }
+    if (step.help?.length) {
+      lines.push('');
+      lines.push('Survey maths:');
+      lines.push('');
+      for (const line of step.help) lines.push(`- ${line}`);
+    }
     if (step.noteLabel) {
       lines.push('');
       lines.push(`Note: ${step.noteLabel}.`);

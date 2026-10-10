@@ -302,22 +302,19 @@ export const houseTraverse: WorkflowDefinition = {
     {
       id: 'datum',
       title: 'Datum',
-      instruction: 'This edge is your baseline. Two tape readings. Offsets are OK.',
-      detail: [
-        'Mark both ends of one house edge and tape it.',
-        'C1 and C2 stay until the loop is closed. They are the datum ends.',
-      ],
+      instruction: 'Tape this house edge. Two readings.',
+      detail: ['Offsets are OK. C1 and C2 stay until the loop is closed.'],
       complete: { on: 'baseline.saved', kind: 'tape' },
       link: { to: 'mode', mode: 'BASELINE' },
     },
     {
       id: 'leg',
       title: 'Leg',
-      instruction: 'Tape the next corner, then photograph it with the live control.',
-      detail: [
-        'The next leg stays blocked until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and every tape MDB is at most 21.3 mm.',
-        'Add a cross-tie before the next leg when a tie is short.',
-        'A house mark seen from only one setup needs another photo from here. You will not see it again.',
+      instruction: 'Tape the next corner, then photograph it.',
+      detail: ['Move on only when the status is green.'],
+      help: [
+        'Next stays off until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and tape MDB is at most 21.3 mm.',
+        'A short tie asks for a named cross-tie. A mark seen from one setup has to be photographed from here.',
       ],
       complete: { on: 'traverse.phase', phase: 'leg' },
       link: { to: 'mode', mode: 'ADD_POINT' },
@@ -325,18 +322,17 @@ export const houseTraverse: WorkflowDefinition = {
     {
       id: 'close',
       title: 'Close',
-      instruction: 'Tape back to the start, then re-occupy it.',
-      detail: [
-        'Close the loop: tape to the first mark, then stand there again and photograph the last mark and the second datum end with the first house mark.',
-      ],
+      instruction: 'Tape back to the start, then stand there again.',
+      detail: ['Photograph the last mark and the second end.'],
       complete: { on: 'traverse.phase', phase: 'close' },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
       id: 'closure-review',
       title: 'Closure review',
-      instruction: 'Read the misclosure before you adjust.',
-      detail: [
+      instruction: 'Read the loop before you adjust.',
+      detail: ['The raw gap is not a test for a bad reading.'],
+      help: [
         'Along, across, and azimuth sit against their 1σ.',
         'The position flag is a 2-D χ² test. The azimuth flag is a z-test.',
         'χ² is compared with the rank of the duplicate misclosure.',
@@ -348,10 +344,8 @@ export const houseTraverse: WorkflowDefinition = {
     {
       id: 'adjust',
       title: 'Adjust',
-      instruction: 'Run Adjust. A single isolated blunder is named.',
-      detail: [
-        'The variance test names a single isolated blunder when one observation carries it.',
-      ],
+      instruction: 'Run Adjust.',
+      detail: ['One bad reading is named.'],
       complete: { on: 'traverse.phase', phase: 'adjust' },
       link: { to: 'mode', mode: 'ADJUST' },
     },

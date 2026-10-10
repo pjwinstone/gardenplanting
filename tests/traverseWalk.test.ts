@@ -10,13 +10,19 @@ import { describe, expect, it } from 'vitest';
 import { emptyDocument, type GardenDocument, type PointKind } from '../src/model';
 import { deletePointMeasurement } from '../src/layers';
 import type { SolveInput } from '../src/solver/types';
+import { handleWorkflowCommand } from '../src/workflows/guided/guidedChrome';
 import { commitWorkflow, readProgress, startWorkflow, withWorkflowEvent } from '../src/workflows/guided/engine';
 import {
+  blockedLine,
   classifyGate,
   CROSS_TIE_PROMPT,
+  GOOD_LEG,
+  LOOP_CLOSES,
   nextTraverse,
+  RAW_GAP_NOTE,
   singleSetupWarning,
 } from '../src/workflows/guided/traverseWalk';
+import type { FieldStatus } from '../src/workflows/guided/types';
 import type { WorkflowEvent } from '../src/workflows/guided/types';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -104,6 +110,12 @@ function live(doc: GardenDocument): string {
   return (readProgress(doc).runs['house-traverse']?.liveLines ?? []).join('\n');
 }
 
+function status(doc: GardenDocument): FieldStatus | undefined {
+  return readProgress(doc).runs['house-traverse']?.fieldStatus;
+}
+
+const noDom = { getAttribute: () => null };
+
 describe('walk round the house', () => {
   it('blocks the next leg on the agreed ray, cross-tie, and tape MDB gates', () => {
     const cross = { id: 'c', kind: 'tape' as const, redundancy: 0.34, mdb: 0.021246 };
@@ -161,15 +173,22 @@ describe('walk round the house', () => {
     doc = withWorkflowEvent(doc, { type: 'traverse.observe', step: 2, newestId: 'C4' }, NOW);
     const held = nextTraverse(doc, NOW);
     expect(held.notice).toMatch(/cross-tie/i);
+    expect(status(held.doc)?.tone).toBe('amber');
+    expect(status(held.doc)?.blocked).toBe(true);
+    expect(status(held.doc)?.line).toMatch(/^Add a cross-tie: tape \S+ → \S+$/);
+    expect(status(held.doc)?.headline).toMatch(/C4 ± \d+ mm \(target ± 21 mm\)/);
     expect(stepId(held.doc)).toBe('leg');
     expect(readProgress(held.doc).runs['house-traverse']?.steps.leg?.status).not.toBe('complete');
     expect(live(held.doc)).toMatch(/Add a cross-tie before the next leg/);
 
     doc = withWorkflowEvent(held.doc, { type: 'traverse.observe', step: 3, newestId: 'C4' }, NOW);
+    expect(status(doc)?.tone).toBe('green');
+    expect(status(doc)?.blocked).toBe(false);
+    expect(status(doc)?.line).toBe(GOOD_LEG);
     doc = withWorkflowEvent(doc, { type: 'traverse.close' }, NOW);
     expect(doc.houseTraverse?.closeRequested).toBe(true);
     move = nextTraverse(doc, NOW);
-    expect(move.notice).toMatch(/Close the loop: tape to C1/);
+    expect(move.notice).toMatch(/read the closure/i);
     expect(stepId(move.doc)).toBe('close');
     expect(readProgress(move.doc).runs['house-traverse']?.steps.leg?.status).toBe('complete');
     expect(readProgress(move.doc).runs['house-traverse']?.steps.close?.status).toBe('complete');
@@ -182,7 +201,7 @@ describe('walk round the house', () => {
     doc = withWorkflowEvent(doc, { type: 'traverse.observe', step: 3, newestId: 'C4' }, NOW);
     doc = withWorkflowEvent(doc, { type: 'traverse.close' }, NOW);
     const ontoClose = nextTraverse(doc, NOW);
-    expect(ontoClose.notice ?? live(ontoClose.doc)).toMatch(/cross-tie|Close the loop/i);
+    expect(ontoClose.notice ?? status(ontoClose.doc)?.line ?? '').toMatch(/cross-tie|read the closure|Tape to C1/i);
     expect(stepId(ontoClose.doc)).toBe('close');
     const review = nextTraverse(ontoClose.doc, NOW);
     expect(stepId(review.doc)).toBe('closure-review');
@@ -201,7 +220,55 @@ describe('walk round the house', () => {
     expect(text).toMatch(/rank 6/);
     expect(text).toMatch(/position χ² pass/);
     expect(text).toMatch(/The raw misclosure is not a blunder test/);
+    expect(status(review.doc)?.line).toBe(LOOP_CLOSES);
+    expect(status(review.doc)?.note).toBe(RAW_GAP_NOTE);
+    expect(status(review.doc)?.blocked).toBe(false);
     expect(readProgress(review.doc).runs['house-traverse']?.steps['closure-review']?.status).toBe('complete');
+  }, 120_000);
+
+  it('refuses Tick anyway while a leg is blocked, including a corner seen once', () => {
+    let doc = begin(gardenFromFixture('loop4ct-steps.json'));
+    doc = nextTraverse(doc, NOW).doc;
+    doc = withWorkflowEvent(doc, { type: 'traverse.observe', step: 2, newestId: 'C4' }, NOW);
+    const held = nextTraverse(doc, NOW);
+    expect(status(held.doc)?.blocked).toBe(true);
+    const ticked = handleWorkflowCommand('workflow-tick', held.doc, noDom);
+    expect(ticked.doc).toBeUndefined();
+    expect(readProgress(held.doc).runs['house-traverse']?.steps.leg?.status).not.toBe('complete');
+    expect(stepId(nextTraverse(held.doc, NOW).doc)).toBe('leg');
+
+    let red = begin(gardenFromFixture('loop4ct-steps.json'));
+    red.photos = red.photos.map((photo) => ({
+      ...photo,
+      clicks: photo.clicks.filter((click) => click.pointId !== 'C4' || photo.stationId === 'S2'),
+    }));
+    red = nextTraverse(red, NOW).doc;
+    red = withWorkflowEvent(red, { type: 'traverse.observe', step: 2, newestId: 'C4' }, NOW);
+    expect(status(red)?.tone).toBe('red');
+    expect(status(red)?.line).toBe(blockedLine('C4'));
+    expect(status(red)?.blocked).toBe(true);
+    expect(handleWorkflowCommand('workflow-tick', red, noDom).doc).toBeUndefined();
+    expect(stepId(nextTraverse(red, NOW).doc)).toBe('leg');
+  }, 120_000);
+
+  it('names a flagged tape when the loop does not close', () => {
+    let doc = begin(gardenFromFixture('loop4ct-dup.json'));
+    const tape = doc.lines.find((line) => line.id === 't1-C2-C3');
+    expect(tape?.lengthM).toBeGreaterThan(0);
+    if (tape) tape.lengthM = (tape.lengthM ?? 0) + 0.5;
+    doc = nextTraverse(doc, NOW).doc;
+    doc = withWorkflowEvent(doc, { type: 'traverse.observe', step: 3, newestId: 'C4' }, NOW);
+    doc = withWorkflowEvent(doc, { type: 'traverse.close' }, NOW);
+    doc = nextTraverse(doc, NOW).doc;
+    const review = nextTraverse(doc, NOW);
+    expect(stepId(review.doc)).toBe('closure-review');
+    expect(status(review.doc)?.tone).toBe('red');
+    expect(status(review.doc)?.blocked).toBe(true);
+    expect(status(review.doc)?.line).toMatch(/Loop doesn't close — likely blunder at .+ \(re-tape .+ → .+\)/);
+    expect(status(review.doc)?.note).toBe(RAW_GAP_NOTE);
+    expect(live(review.doc)).toMatch(/The raw misclosure is not a blunder test/);
+    expect(handleWorkflowCommand('workflow-tick', review.doc, noDom).doc).toBeUndefined();
+    expect(stepId(nextTraverse(review.doc, NOW).doc)).toBe('closure-review');
   }, 120_000);
 
   it('refuses to remove C1 or C2 while the loop is open', () => {

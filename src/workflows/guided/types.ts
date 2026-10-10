@@ -108,8 +108,10 @@ export interface WorkflowStep {
   /** Shown in place of the title once this step has ticked, while it is still current. */
   doneTitle?: string;
   doneInstruction?: string;
-  /** Expanded sheet. Sentences from the field sheet. */
+  /** Expanded sheet. One short line. Thresholds belong in `help`. */
   detail: string[];
+  /** Survey maths. Not the line the surveyor reads first. */
+  help?: string[];
   diagram?: WorkflowDiagram;
   /** Placeholder for the write-in the model does not store yet. */
   noteLabel?: string;
@@ -138,6 +140,23 @@ export interface StepState {
   consumedPhotoIds?: string[];
 }
 
+export type FieldTone = 'green' | 'amber' | 'red';
+
+/** One outdoor line, plus the millimetre figure the meter draws. */
+export interface FieldStatus {
+  tone: FieldTone;
+  line: string;
+  headline?: string;
+  /** 1σ figure, millimetres. */
+  accuracyMm?: number;
+  /** Target 1σ, millimetres. */
+  targetMm?: number;
+  /** Plain sentence under the headline. */
+  note?: string;
+  /** Next stays disabled. Tick anyway is refused. */
+  blocked: boolean;
+}
+
 export interface WorkflowRun {
   workflowId: WorkflowId;
   revision: number;
@@ -150,6 +169,8 @@ export interface WorkflowRun {
   parkedStepIds?: string[];
   /** Live numbers for the current step. Ellipse, ties, or the closure review. */
   liveLines?: string[];
+  /** Plain status for the current step. The bar leads with this. */
+  fieldStatus?: FieldStatus;
   steps: Record<string, StepState>;
 }
 

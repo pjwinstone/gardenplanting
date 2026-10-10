@@ -23,8 +23,8 @@ import {
   type WorkflowMove,
 } from './engine';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
-import type { WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
-import { nextTraverse } from './traverseWalk';
+import type { FieldStatus, WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
+import { gatedTickRefusal, nextTraverse } from './traverseWalk';
 
 const SUN_KEY = 'garden-survey:workflow-sunlight';
 
@@ -140,7 +140,14 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-tick') {
     const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
     const id = stepId || active?.currentStepId || '';
-    const live = document.querySelector<HTMLTextAreaElement>(`textarea[data-step="${CSS.escape(id)}"]`)?.value;
+    const refusal = gatedTickRefusal(doc, id);
+    if (refusal) {
+      notice = refusal;
+      return {};
+    }
+    const live = typeof document === 'undefined'
+      ? undefined
+      : document.querySelector<HTMLTextAreaElement>(`textarea[data-step="${CSS.escape(id)}"]`)?.value;
     move = tickWorkflow(progress, id, live ?? active?.steps[id]?.note);
   }
   if (!move) return {};
@@ -262,6 +269,7 @@ function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: Workflow
   kicker.append(sunButton());
   bar.append(kicker);
   bar.append(el('h2', 'workflow-title', done && step.doneTitle ? step.doneTitle : step.title));
+  appendStatus(bar, run);
   bar.append(el('p', 'workflow-instruction', done && step.doneInstruction ? step.doneInstruction : step.instruction));
   if (done && state?.completedBy === 'auto') {
     const line = el('div', 'workflow-tick-line');
@@ -271,13 +279,13 @@ function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: Workflow
   } else if (done) {
     bar.append(el('p', 'workflow-auto', 'Ticked by you.'));
   }
-  if (notice) bar.append(el('p', 'workflow-notice', notice));
-  appendLive(bar, run);
+  if (notice && notice !== run.fieldStatus?.line) bar.append(el('p', 'workflow-notice', notice));
+  appendMaths(bar, step, run);
   const actions = el('div', 'workflow-actions');
   const back = button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 });
   const details = button('Details', 'workflow-expand');
   const last = stepIndex(def, run) === def.steps.length - 1;
-  actions.append(back, details, button(nextLabel(step, last), 'workflow-next', { primary: true }));
+  actions.append(back, details, nextButton(step, run, last));
   bar.append(actions);
   return bar;
 }
@@ -324,9 +332,12 @@ function renderThumb(def: WorkflowDefinition, run: WorkflowRun, progress: Workfl
   }
   const step = currentStep(def, run);
   const last = stepIndex(def, run) === def.steps.length - 1;
+  const held = run.fieldStatus?.blocked === true;
   return button(nextLabel(step, last), 'workflow-next', {
     className: 'workflow-thumb',
     testid: 'workflow-thumb',
+    disabled: held,
+    title: held ? run.fieldStatus?.line : undefined,
   });
 }
 
@@ -341,14 +352,18 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
   kicker.append(sunButton());
   sheet.append(kicker);
   sheet.append(el('h2', 'workflow-title', step.title));
+  appendStatus(sheet, run);
   sheet.append(el('p', 'workflow-instruction', step.instruction));
   if (step.diagram) {
     const host = el('div', 'workflow-diagram-host');
     host.innerHTML = diagramSvg(step.diagram);
     sheet.append(host);
   }
-  for (const line of step.detail) sheet.append(el('p', 'workflow-detail', line));
-  appendLive(sheet, run);
+  for (const line of step.detail) {
+    if (line === run.fieldStatus?.note) continue;
+    sheet.append(el('p', 'workflow-detail', line));
+  }
+  appendMaths(sheet, step, run);
   if (step.noteLabel) {
     sheet.append(el('label', 'workflow-note-label', step.noteLabel));
     const note = document.createElement('textarea');
@@ -360,7 +375,8 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
     sheet.append(note);
   }
   const manual = stepIsManualOnly(step);
-  if (!manual) {
+  const held = run.fieldStatus?.blocked === true;
+  if (!manual && !held) {
     const photo = uploadedStep(step);
     const hint = photo
       ? `Ticks when ${photo.minPhotos} ${photo.minPhotos === 1 ? 'photo is' : 'photos are'} saved at ${photo.stationId}.`
@@ -372,25 +388,81 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
   if (run.parkedStepIds?.length) {
     sheet.append(el('p', 'workflow-notice', `Older steps kept aside: ${run.parkedStepIds.join(', ')}.`));
   }
-  if (notice) sheet.append(el('p', 'workflow-notice', notice));
+  if (notice && notice !== run.fieldStatus?.line) sheet.append(el('p', 'workflow-notice', notice));
   const actions = el('div', 'workflow-sheet-actions');
   actions.append(button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 }));
   actions.append(button('Close', 'workflow-collapse'));
-  if (!manual && state?.status !== 'complete') {
+  if (!manual && !held && state?.status !== 'complete') {
     actions.append(button('Tick anyway', 'workflow-tick', { step: step.id }));
   }
   const last = stepIndex(def, run) === def.steps.length - 1;
-  actions.append(button(nextLabel(step, last), 'workflow-next', { primary: true }));
+  actions.append(nextButton(step, run, last));
   sheet.append(actions);
   return sheet;
 }
 
-function appendLive(parent: HTMLElement, run: WorkflowRun): void {
-  if (!run.liveLines?.length) return;
+function nextButton(step: WorkflowStep, run: WorkflowRun, last: boolean): HTMLButtonElement {
+  const held = run.fieldStatus?.blocked === true;
+  return button(nextLabel(step, last), 'workflow-next', {
+    primary: true,
+    disabled: held,
+    title: held ? run.fieldStatus?.line : undefined,
+    testid: 'workflow-next',
+  });
+}
+
+function appendStatus(parent: HTMLElement, run: WorkflowRun): void {
+  const status = run.fieldStatus;
+  if (!status) return;
+  const line = el('p', `workflow-status workflow-status--${status.tone}`, status.line);
+  line.dataset.testid = 'workflow-status';
+  parent.append(line);
+  if (status.headline) {
+    parent.append(el('p', 'workflow-headline', status.headline));
+    parent.append(accuracyMeter(status));
+  }
+  if (status.note) parent.append(el('p', 'workflow-status-note', status.note));
+}
+
+function accuracyMeter(status: FieldStatus): HTMLElement {
+  const row = el('div', 'workflow-meter-row');
+  const target = status.targetMm ?? 21;
+  const scale = target * 2.5;
+  const mm = status.accuracyMm ?? 0;
+  const fill = Math.max(8, Math.min(100, (mm / scale) * 100));
+  const mark = Math.max(0, Math.min(100, (target / scale) * 100));
+  const track = el('div', 'workflow-meter');
+  track.dataset.testid = 'workflow-meter';
+  track.setAttribute('role', 'img');
+  track.setAttribute('aria-label', status.headline ?? 'Accuracy');
+  const bar = el('span', `workflow-meter-fill workflow-meter-fill--${status.tone}`);
+  bar.style.width = `${fill}%`;
+  const tick = el('span', 'workflow-meter-target');
+  tick.style.left = `${mark}%`;
+  track.append(bar, tick);
+  const ellipse = el('div', 'workflow-ellipse');
+  const rx = Math.max(6, Math.min(18, 4 + (fill / 100) * 14));
+  ellipse.innerHTML = `<svg viewBox="0 0 48 28" aria-hidden="true"><ellipse cx="24" cy="14" rx="${rx.toFixed(1)}" ry="${(rx * 0.55).toFixed(1)}" class="workflow-ellipse-shape workflow-ellipse-shape--${status.tone}"/></svg>`;
+  row.append(track, ellipse);
+  return row;
+}
+
+function appendMaths(parent: HTMLElement, step: WorkflowStep, run: WorkflowRun): void {
+  const lines = run.liveLines ?? [];
+  const help = step.help ?? [];
+  if (!lines.length && !help.length) return;
+  const details = document.createElement('details');
+  details.className = 'workflow-maths';
+  details.dataset.testid = 'workflow-maths';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Survey maths';
+  details.append(summary);
+  for (const line of help) details.append(el('p', 'workflow-maths-line', line));
   const block = el('div', 'workflow-live');
   block.dataset.testid = 'workflow-live';
-  for (const line of run.liveLines) block.append(el('p', 'workflow-live-line', line));
-  parent.append(block);
+  for (const line of lines) block.append(el('p', 'workflow-live-line', line));
+  if (lines.length) details.append(block);
+  parent.append(details);
 }
 
 function renderPicker(progress: WorkflowProgress): HTMLElement {
@@ -482,13 +554,14 @@ function el(tag: string, className: string, text?: string): HTMLElement {
 function button(
   text: string,
   cmd: string,
-  opts: { primary?: boolean; disabled?: boolean; className?: string; testid?: string; workflow?: string; step?: string } = {},
+  opts: { primary?: boolean; disabled?: boolean; className?: string; testid?: string; workflow?: string; step?: string; title?: string } = {},
 ): HTMLButtonElement {
   const node = document.createElement('button');
   node.type = 'button';
   node.className = opts.className ?? ('workflow-btn' + (opts.primary ? ' workflow-primary' : ''));
   node.dataset.cmd = cmd;
   node.textContent = text;
+  if (opts.title) node.title = opts.title;
   if (opts.disabled) node.disabled = true;
   if (opts.testid) node.dataset.testid = opts.testid;
   if (opts.workflow) node.dataset.workflow = opts.workflow;

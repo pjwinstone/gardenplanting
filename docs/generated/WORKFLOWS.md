@@ -281,10 +281,9 @@ Tape one house edge, then walk the corners back to the start.
 
 ### 1. Datum
 
-This edge is your baseline. Two tape readings. Offsets are OK.
+Tape this house edge. Two readings.
 
-- Mark both ends of one house edge and tape it.
-- C1 and C2 stay until the loop is closed. They are the datum ends.
+- Offsets are OK. C1 and C2 stay until the loop is closed.
 
 Completes when: baseline.saved tape.
 
@@ -292,21 +291,24 @@ Opens: Mode BASELINE.
 
 ### 2. Leg
 
-Tape the next corner, then photograph it with the live control.
+Tape the next corner, then photograph it.
 
-- The next leg stays blocked until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and every tape MDB is at most 21.3 mm.
-- Add a cross-tie before the next leg when a tie is short.
-- A house mark seen from only one setup needs another photo from here. You will not see it again.
+- Move on only when the status is green.
 
 Completes when: traverse.phase leg.
 
 Opens: Mode ADD_POINT.
 
+Survey maths:
+
+- Next stays off until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and tape MDB is at most 21.3 mm.
+- A short tie asks for a named cross-tie. A mark seen from one setup has to be photographed from here.
+
 ### 3. Close
 
-Tape back to the start, then re-occupy it.
+Tape back to the start, then stand there again.
 
-- Close the loop: tape to the first mark, then stand there again and photograph the last mark and the second datum end with the first house mark.
+- Photograph the last mark and the second end.
 
 Completes when: traverse.phase close.
 
@@ -314,22 +316,26 @@ Opens: Mode ADD_POINT.
 
 ### 4. Closure review
 
-Read the misclosure before you adjust.
+Read the loop before you adjust.
+
+- The raw gap is not a test for a bad reading.
+
+Completes when: traverse.phase closure-review.
+
+Opens: —.
+
+Survey maths:
 
 - Along, across, and azimuth sit against their 1σ.
 - The position flag is a 2-D χ² test. The azimuth flag is a z-test.
 - χ² is compared with the rank of the duplicate misclosure.
 - The raw misclosure is not a blunder test.
 
-Completes when: traverse.phase closure-review.
-
-Opens: —.
-
 ### 5. Adjust
 
-Run Adjust. A single isolated blunder is named.
+Run Adjust.
 
-- The variance test names a single isolated blunder when one observation carries it.
+- One bad reading is named.
 
 Completes when: traverse.phase adjust.
 
