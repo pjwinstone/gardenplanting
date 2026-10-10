@@ -111,12 +111,24 @@ export interface SolverPhotoInput {
    * photo keeps its own scale, so a garden saved before shared fx still solves.
    */
   phoneId?: string;
-  /** Lens with `phoneId`. Defaults to `1x`. A different lens does not share fx. */
-  lens?: string;
   /**
-   * Photos with the same id share one 2D camera offset (pole lean and lens).
-   * The prior is `sigmaCentringM`, or 8 mm when that is omitted, and the
-   * per-ray centring term is not added as well. Absent: per-ray centring,
+   * Lens with `phoneId`. '1x', '1×' and '1.0x' are one key. Omitted: derived
+   * from `lensModel` / `focalLengthIn35mmFilm`. If that fails, this photo
+   * keeps a private scale and the solve flags `lens-unknown`. It does not
+   * join the 1× group.
+   */
+  lens?: string;
+  /** EXIF LensModel. Used when `phoneId` is set and `lens` is omitted. */
+  lensModel?: string;
+  /** EXIF FocalLengthIn35mmFilm. Same fallback as `lensModel`. */
+  focalLengthIn35mmFilm?: number;
+  /**
+   * Photos at one station with the same id share one 2D camera offset (pole
+   * lean and lens). The same id at another station does not: each station
+   * keeps its own offset, and the solve flags `setup-station`. The prior is
+   * `sigmaCentringM` when that is positive, or 8 mm when it is omitted. A
+   * value ≤ 0 is rejected (`centring-sigma`) and 8 mm is not substituted.
+   * The per-ray centring term is not added as well. Absent: per-ray centring,
    * unchanged.
    */
   cameraSetupId?: string;
@@ -147,11 +159,19 @@ export interface SolverBranchChoice {
   /** Station or free-point id. */
   id: string;
   /**
-   * Which circle intersection. For tapes to the datum ends the circles are
+   * Which intersection to keep. The index does not mean the same thing for
+   * every seed.
+   *
+   * Tape pair (two circles). For tapes to the datum ends the circles are
    * taken origin then axis, so 0 is the +Y side of origin→axis and 1 is −Y.
    * With BAS01 at the origin and BAS02 on +X, the peg side of the circle
    * sheet (right of BAS01→BAS02) is index 1. Bearings that contradict the
-   * index leave the station unset as `branch-conflict` instead of being overridden.
+   * index leave the station unset as `branch-conflict`.
+   *
+   * Tape plus one ray. 0 is the nearer crossing along the ray and 1 is the
+   * farther. That is not a side of origin→axis, and this path does not make
+   * a y-mirror. A station outside the tape circle can have two forward
+   * crossings. A station inside the circle, or at its centre, has one.
    */
   candidateIndex: 0 | 1;
 }
@@ -306,5 +326,15 @@ export interface SolveResult {
   focals: SolveFocal[];
   /** True when one fx parameter is shared by two or more photos. */
   fxSharedInSolve: boolean;
+  /** Lens, setup and seeding notes. Empty when nothing was flagged. */
+  warnings: SolveWarning[];
   datum: { originId: string; axisPointId: string; gardenSign: 1 | -1 };
+}
+
+export type SolveWarningCode = 'lens-unknown' | 'centring-sigma' | 'setup-station' | 'seeding-cap';
+
+export interface SolveWarning {
+  code: SolveWarningCode;
+  message: string;
+  photoIds?: string[];
 }

@@ -63,6 +63,8 @@ export function solveGardenDocument(doc: GardenDocument, extra?: Partial<SolveIn
       yawHeldRad: undefined,
       phoneId: photo.phoneId,
       lens: photo.lens,
+      lensModel: photo.originalFile?.nativeCapture?.lensModel ?? undefined,
+      focalLengthIn35mmFilm: photo.originalFile?.nativeCapture?.focalLength35mm ?? undefined,
       fxRelativeUncertainty: photo.fxRelativeUncertainty,
       cameraSetupId: photo.cameraSetupId,
     });

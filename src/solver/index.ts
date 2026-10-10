@@ -11,9 +11,11 @@
  * - A bubble with no gravity widens each ray by the tilt σ (default 0.5°):
  *   about ε·v/fx for roll and δ·u·v/(fx²+u²) for pitch.
  * - fx, when a relative σ is supplied, is a parameter with that prior. Photos
- *   that name the same phone and 1× lens share one scale and one prior.
- *   A photo with no phone keeps its own scale. Rays from a both-tapes station
- *   carry it. Depth and "four marks" are not a class.
+ *   that name the same phone and the same resolved lens share one scale and
+ *   one prior. The lens is named ('1x', '1×' and '1.0x' match) or read from
+ *   EXIF. A missing lens does not join 1×: that photo keeps a private scale
+ *   and is flagged. A photo with no phone keeps its own scale. Rays from a
+ *   both-tapes station carry it. Depth and "four marks" are not a class.
  * - A point is checked when every observation that moves it has an MDB-sized
  *   shift inside the class. r ≈ 0 is the only redundancy guard (a 1σ shift
  *   above 0.1 mm). A high variance factor withholds checked and plantable,
@@ -22,10 +24,12 @@
  *   residual, flagged or not, and the variance test then passes.
  * - ∂β/∂s uses the nominal focal length. The current fx would add a factor (1+s).
  * - A both-tapes station takes its side from the branch choice or from the
- *   bearing order in its own photo. Index 0 is +Y of origin→axis (BAS01 at
- *   the origin, BAS02 on +X, so the peg side is index 1). A branch that
- *   contradicts those bearings is unset as branch-conflict. The garden sign
- *   is only the distance-only fallback.
+ *   bearing order in its own photo. For a tape pair, index 0 is +Y of
+ *   origin→axis (BAS01 at the origin, BAS02 on +X, so the peg side is index
+ *   1). For one tape and one ray, index 0 is the nearer crossing along the
+ *   ray and index 1 is the farther. A branch that contradicts the tape-pair
+ *   bearings is unset as branch-conflict. The garden sign is only the
+ *   distance-only fallback.
  * - After a behind-camera rejection the normal equations are rebuilt and
  *   solved again, and the check runs once more after the last re-solve.
  * - reflected counts garden-sign fallback points, including a tape chain
@@ -69,4 +73,5 @@ export type {
   SolverDistanceInput,
   SolverDatumInput,
   SolveFocal,
+  SolveWarning,
 } from './types';

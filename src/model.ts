@@ -260,7 +260,10 @@ export interface Photo {
    * Absent on older gardens: each photo keeps its own scale.
    */
   phoneId?: string;
-  /** Lens with `phoneId`. Defaults to 1× in the solver when a phone is set. */
+  /**
+   * Lens with `phoneId`. '1×' and '1.0x' are the same key. Omitted: the solver
+   * reads EXIF on the original file. If that fails, the photo does not join 1×.
+   */
   lens?: string;
   /** Relative 1σ of fx, e.g. 0.02 from EXIF. Omitted: fx is not estimated. */
   fxRelativeUncertainty?: number;

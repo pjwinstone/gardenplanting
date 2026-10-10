@@ -49,6 +49,7 @@ import {
   tiltBearingSigma,
   wrap,
 } from './bearing';
+import { resolveLens } from './lens';
 import { ellipseFrom2x2, varianceFactorTest } from './stats';
 import type {
   EarlyWarning,
@@ -58,6 +59,7 @@ import type {
   SolveObservation,
   SolvePoint,
   SolveResult,
+  SolveWarning,
   SolverDistanceInput,
   SolverPhotoInput,
   UnsetCode,
@@ -256,9 +258,12 @@ function solveOnce(input: SolveInput): SolveResult {
   // Distances, stations, rays, then one tape plus one ray. Repeat until a
   // round places nothing new. One pass leaves a closed loop unfinished:
   // a corner fixed by rays has to exist before the next leg's two tapes.
+  // 16 rounds is a cap, not a proof the network is finished.
+  const seedRoundCap = 16;
   const branch = new Map((input.branchChoices ?? []).map((b) => [b.id, b.candidateIndex]));
   let placedMore = true;
-  for (let round = 0; placedMore && round < 16; round++) {
+  let seedRounds = 0;
+  for (; placedMore && seedRounds < seedRoundCap; seedRounds++) {
     const before = new Set<string>();
     for (const s of state.values()) {
       if (s.x != null && s.y != null) before.add(s.id);
@@ -514,6 +519,7 @@ function solveOnce(input: SolveInput): SolveResult {
       if (s.x != null && s.y != null && !before.has(s.id)) placedMore = true;
     }
   }
+  const seedingCapped = seedRounds >= seedRoundCap && placedMore;
 
   // A pure y-mirror has the same tape cost. Tests start there to see whether
   // every garden-sign point, including those chained by a later tape, is counted.
@@ -658,6 +664,7 @@ function solveOnce(input: SolveInput): SolveResult {
     inseparableObservationIds: [],
     skippedPhotos: [],
     ...publishFocals(built, adjusted),
+    warnings: collectWarnings(input, seedingCapped),
     reflected: wholeGardenReflection({
       axisX: state.get(axisId)?.x ?? input.datum.lengthM,
       gardenSign,
@@ -1117,8 +1124,9 @@ function initialYaw(
 /**
  * Yaw of one photo. A held yaw is used as given. Otherwise the station must
  * already be placed. One placed target fixes the yaw. Two placed targets are
- * enough as well — the photo does not need a three-mark resection — and the
- * second target checks the first. A frame with no placed target is not oriented.
+ * enough — the photo does not need a three-mark resection. Further targets
+ * are averaged into the same yaw. Nothing compares them, so a second target
+ * is not a check. A frame with no placed target is not oriented.
  */
 function orientedYaw(
   photo: SolverPhotoInput,
@@ -1141,6 +1149,8 @@ function orientedYaw(
  * One tape to a known point and one ray from an oriented photo.
  * A single forward intersection is the seed. Two forward intersections stay
  * two candidates unless the caller picked a branch. Nothing is averaged.
+ * Candidate 0 is the nearer crossing along the ray (smaller positive t) and
+ * candidate 1 is the farther. That is not the tape-pair side of origin→axis.
  */
 function placeFromTapeAndRay(
   state: Map<string, PointState>,
@@ -1183,7 +1193,9 @@ function placeFromTapeAndRay(
         const other = tape.raw.a === id ? tape.raw.b : tape.raw.a;
         const centre = markOf(other);
         if (!centre) continue;
-        const forward = intersectRayCircle(station, az, centre, tape.horizontalM).filter((h) => !h.behind);
+        const forward = intersectRayCircle(station, az, centre, tape.horizontalM)
+          .filter((h) => !h.behind)
+          .sort((a, b) => a.t - b.t);
         if (forward.length === 1) {
           unique = forward[0].point;
           ambiguous = null;
@@ -1233,10 +1245,58 @@ interface FxGroup {
   ready: boolean;
 }
 
-/** Shared scale for one phone and lens. No phone: the photo's own scale. */
+/** Shared scale for one phone and a resolved lens. No phone, or no lens: private. */
 function fxGroupKey(photo: SolverPhotoInput): string {
-  if (!photo.phoneId) return photo.id;
-  return `phone:${photo.phoneId}|${photo.lens ?? '1x'}`;
+  return resolveLens(photo).key;
+}
+
+/** Parameter id for one station's camera offset. The raw setup id is not global. */
+function setupKey(photo: SolverPhotoInput): string | null {
+  if (!photo.cameraSetupId) return null;
+  return `${photo.stationId}|${photo.cameraSetupId}`;
+}
+
+function collectWarnings(input: SolveInput, seedingCapped: boolean): SolveWarning[] {
+  const warnings: SolveWarning[] = [];
+  for (const photo of input.photos ?? []) {
+    if (!resolveLens(photo).lensUnknown) continue;
+    warnings.push({
+      code: 'lens-unknown',
+      photoIds: [photo.id],
+      message: `Photo ${photo.id} names phone ${photo.phoneId} but the lens is not known. It keeps a private fx scale.`,
+    });
+  }
+  const bySetup = new Map<string, { stations: Set<string>; badSigma: string[] }>();
+  for (const photo of input.photos ?? []) {
+    if (!photo.cameraSetupId) continue;
+    const row = bySetup.get(photo.cameraSetupId) ?? { stations: new Set<string>(), badSigma: [] };
+    row.stations.add(photo.stationId);
+    if (photo.sigmaCentringM != null && !(photo.sigmaCentringM > 0)) row.badSigma.push(photo.id);
+    bySetup.set(photo.cameraSetupId, row);
+  }
+  for (const [id, row] of bySetup) {
+    if (row.stations.size > 1) {
+      const stations = [...row.stations].join(' and ');
+      warnings.push({
+        code: 'setup-station',
+        message: `cameraSetupId ${id} is used at stations ${stations}. Each station keeps its own offset.`,
+      });
+    }
+    if (row.badSigma.length > 0) {
+      warnings.push({
+        code: 'centring-sigma',
+        photoIds: row.badSigma,
+        message: `cameraSetupId ${id} has a centring σ that is not positive. The setup offset is not applied, and 8 mm is not substituted.`,
+      });
+    }
+  }
+  if (seedingCapped) {
+    warnings.push({
+      code: 'seeding-cap',
+      message: 'Placement stopped after 16 rounds while a round was still placing points.',
+    });
+  }
+  return warnings;
 }
 
 function photoCarriesFx(photo: SolverPhotoInput, photos: SolverPhotoInput[]): boolean {
@@ -1292,7 +1352,8 @@ function assemble(
   const fxGroups: FxGroup[] = [];
   const fxByKey = new Map<string, FxGroup>();
   for (const photo of input.photos ?? []) {
-    const key = fxGroupKey(photo);
+    const decision = resolveLens(photo);
+    const key = decision.key;
     const mates = (input.photos ?? []).filter((p) => fxGroupKey(p) === key);
     const prior = mates.find((p) => p.fxRelativeUncertainty != null && p.fxRelativeUncertainty > 0)?.fxRelativeUncertainty;
     if (prior == null) continue;
@@ -1300,8 +1361,8 @@ function assemble(
     if (!group) {
       group = {
         key,
-        phoneId: photo.phoneId,
-        lens: photo.phoneId ? (photo.lens ?? '1x') : undefined,
+        phoneId: decision.phoneId,
+        lens: decision.lens,
         photoIds: [],
         sigma: prior,
         ready: false,
@@ -1325,14 +1386,22 @@ function assemble(
     });
   }
   const setupSigma = new Map<string, number>();
+  const setupPhotos = new Map<string, SolverPhotoInput[]>();
   for (const photo of input.photos ?? []) {
-    if (!photo.cameraSetupId) continue;
-    if (!ready(photo.stationId)) continue;
-    if (setupSigma.has(photo.cameraSetupId)) continue;
-    const sigma = photo.sigmaCentringM != null && photo.sigmaCentringM > 0 ? photo.sigmaCentringM : 0.008;
-    setupSigma.set(photo.cameraSetupId, sigma);
-    params.push({ owner: photo.cameraSetupId, kind: 'ox', setupId: photo.cameraSetupId });
-    params.push({ owner: photo.cameraSetupId, kind: 'oy', setupId: photo.cameraSetupId });
+    const key = setupKey(photo);
+    if (!key || !ready(photo.stationId)) continue;
+    const list = setupPhotos.get(key) ?? [];
+    list.push(photo);
+    setupPhotos.set(key, list);
+  }
+  for (const [key, photos] of setupPhotos) {
+    // ≤ 0 is not a prior. Do not silently replace it with 8 mm.
+    if (photos.some((p) => p.sigmaCentringM != null && !(p.sigmaCentringM > 0))) continue;
+    const stated = photos.find((p) => p.sigmaCentringM != null && p.sigmaCentringM > 0);
+    const sigma = stated?.sigmaCentringM ?? 0.008;
+    setupSigma.set(key, sigma);
+    params.push({ owner: photos[0].stationId, kind: 'ox', setupId: key });
+    params.push({ owner: photos[0].stationId, kind: 'oy', setupId: key });
   }
   const index = new Map<string, number>();
   params.forEach((p, i) => index.set(paramKey(p), i));
@@ -1375,9 +1444,10 @@ function assemble(
   const cameraAt = (x: number[], photo: SolverPhotoInput): Xy | null => {
     const c = coord(x, photo.stationId);
     if (!c) return null;
-    if (!photo.cameraSetupId) return c;
-    const ox = index.get(`ox:${photo.cameraSetupId}`);
-    const oy = index.get(`oy:${photo.cameraSetupId}`);
+    const key = setupKey(photo);
+    if (!key) return c;
+    const ox = index.get(`ox:${key}`);
+    const oy = index.get(`oy:${key}`);
     return {
       x: c.x + (ox == null ? 0 : x[ox]),
       y: c.y + (oy == null ? 0 : x[oy]),
@@ -1452,8 +1522,9 @@ function assemble(
     }
     const yawIndex = b.photo.yawHeldRad != null ? null : index.get(`yaw:${b.photo.id}`);
     const fxIndex = index.get(`fx:${fxGroupKey(b.photo)}`);
-    const oxIndex = b.photo.cameraSetupId ? index.get(`ox:${b.photo.cameraSetupId}`) : undefined;
-    const oyIndex = b.photo.cameraSetupId ? index.get(`oy:${b.photo.cameraSetupId}`) : undefined;
+    const key = setupKey(b.photo);
+    const oxIndex = key ? index.get(`ox:${key}`) : undefined;
+    const oyIndex = key ? index.get(`oy:${key}`) : undefined;
     obs.push({
       id: `${b.photo.id}:${b.pointId}`,
       kind: 'bearing',
@@ -1847,9 +1918,10 @@ function rejectBehindCamera(
     let camera = place(b.photo.stationId);
     const mark = place(b.pointId);
     if (!camera || !mark) continue;
-    if (b.photo.cameraSetupId) {
-      const ox = built.index.get(`ox:${b.photo.cameraSetupId}`);
-      const oy = built.index.get(`oy:${b.photo.cameraSetupId}`);
+    const key = setupKey(b.photo);
+    if (key) {
+      const ox = built.index.get(`ox:${key}`);
+      const oy = built.index.get(`oy:${key}`);
       camera = {
         x: camera.x + (ox == null ? 0 : adjusted.x[ox]),
         y: camera.y + (oy == null ? 0 : adjusted.x[oy]),
