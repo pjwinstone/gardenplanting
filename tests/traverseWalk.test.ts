@@ -575,6 +575,8 @@ describe('walk round the house', () => {
         },
       },
     }));
+    const libraryOnly = bare[0];
+    if (libraryOnly) delete libraryOnly.originalFile.nativeCapture;
     doc = { ...doc, photos: bare };
     doc = noteVerifiedPhotos(doc, bare.map((photo) => photo.id));
     for (const photo of doc.photos) {

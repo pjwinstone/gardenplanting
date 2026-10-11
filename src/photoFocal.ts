@@ -28,11 +28,33 @@ export function fxOverWidthFromIntrinsic(
   return fx / referenceWidth;
 }
 
+/** Make|Model|LensModel|FocalLength|FocalLengthIn35mmFilm|size. */
+function calibrationExif(photo: Photo): { lensModel?: string; focal35?: number } {
+  const key = photo.originalFile?.calibrationKey;
+  if (!key) return {};
+  const parts = key.split('|');
+  const lensModel = parts[2]?.trim() || undefined;
+  const focal35 = Number(parts[4]);
+  return {
+    lensModel,
+    focal35: Number.isFinite(focal35) && focal35 > 0 ? focal35 : undefined,
+  };
+}
+
+function lensAndFilm(photo: Photo): { lensModel?: string; focal35?: number } {
+  const native = photo.originalFile?.nativeCapture;
+  const fromKey = calibrationExif(photo);
+  return {
+    lensModel: native?.lensModel ?? fromKey.lensModel,
+    focal35: native?.focalLength35mm ?? fromKey.focal35,
+  };
+}
+
 function resolvedLens(photo: Photo): string | undefined {
   const named = photo.lens?.trim();
   if (named) return normaliseLensKey(named) ?? undefined;
-  const native = photo.originalFile?.nativeCapture;
-  return lensKeyFromExif(native?.lensModel ?? undefined, native?.focalLength35mm ?? undefined) ?? undefined;
+  const film = lensAndFilm(photo);
+  return lensKeyFromExif(film.lensModel, film.focal35) ?? undefined;
 }
 
 function phoneIdFor(photo: Photo): string | undefined {
@@ -64,6 +86,7 @@ export function stampPhotoFocals(doc: GardenDocument, photoIds?: string[]): Gard
     const lens = photo.lens ? (normaliseLensKey(photo.lens) ?? photo.lens) : resolvedLens(photo);
     const phoneId = phoneIdFor(photo);
     const native = photo.originalFile?.nativeCapture;
+    const film = lensAndFilm(photo);
     const mates = doc.photos.filter((other) =>
       other.id !== photo.id
       && other.fxOverWidth != null
@@ -76,7 +99,7 @@ export function stampPhotoFocals(doc: GardenDocument, photoIds?: string[]): Gard
     const calibrated = mates.map(focalOf).find((item) => item && !(item.fxRelativeUncertainty != null && item.fxRelativeUncertainty > 0));
     const shared = calibrated ?? mates.map(focalOf).find((item) => item);
     const intrinsic = fxOverWidthFromIntrinsic(native?.intrinsicMatrix, native?.intrinsicReferenceWidth);
-    const exif = native?.focalLength35mm != null ? fxOverWidthFrom35mm(native.focalLength35mm) : null;
+    const exif = film.focal35 != null ? fxOverWidthFrom35mm(film.focal35) : null;
     const chosen = shared
       ?? (intrinsic != null ? { fxOverWidth: intrinsic, fxRelativeUncertainty: undefined, phoneId, lens } : null)
       ?? (exif != null ? { fxOverWidth: exif, fxRelativeUncertainty: EXIF_FX_RELATIVE, phoneId, lens } : null);

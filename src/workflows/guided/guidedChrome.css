@@ -50,7 +50,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 8px 10px 6px;
+  padding: 6px 10px 4px;
 }
 
 .workflow-bar > .workflow-kicker,
@@ -186,9 +186,9 @@
 }
 
 .workflow-bar .workflow-status {
-  margin-top: 4px;
-  font-size: 17px;
-  line-height: 1.2;
+  margin-top: 2px;
+  font-size: 16px;
+  line-height: 1.15;
 }
 
 .workflow-bar .workflow-status--green { color: #b6f5c3; }
@@ -347,8 +347,8 @@
 }
 
 .workflow-bar .workflow-btn {
-  min-height: 40px;
-  padding: 6px 10px;
+  min-height: 36px;
+  padding: 4px 10px;
   font-size: 16px;
 }
 
@@ -544,47 +544,58 @@
 @media (max-height: 420px) and (orientation: landscape) {
   .workflow-bar,
   .workflow-sheet {
-    padding: 6px 8px;
+    padding: 4px 8px;
     border-radius: 10px;
   }
 
   .workflow-kicker {
     margin: 0;
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.1;
   }
 
   .workflow-bar .workflow-title,
   .workflow-sheet .workflow-title {
-    font-size: 16px;
+    font-size: 15px;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .workflow-bar .workflow-instruction {
+    margin-top: 1px;
+    font-size: 14px;
     line-height: 1.15;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .workflow-bar .workflow-instruction,
   .workflow-bar .workflow-status,
   .workflow-bar .workflow-headline,
   .workflow-bar .workflow-status-note {
-    margin-top: 2px;
-    font-size: 15px;
-    line-height: 1.2;
+    margin-top: 1px;
+    font-size: 14px;
+    line-height: 1.15;
     white-space: normal;
     overflow: visible;
     text-overflow: unset;
   }
 
+  .workflow-bar .workflow-meter-row { margin-top: 2px; }
+  .workflow-bar .workflow-meter { height: 8px; }
+
   .workflow-bar .workflow-actions,
   .workflow-sheet-actions {
-    margin-top: 4px;
-    gap: 6px;
+    margin-top: 2px;
+    gap: 4px;
   }
 
   .workflow-bar .workflow-btn,
   .workflow-sheet .workflow-btn {
-    min-height: 36px;
-    padding: 4px 10px;
-    font-size: 15px;
+    min-height: 32px;
+    padding: 2px 8px;
+    font-size: 14px;
   }
 }
