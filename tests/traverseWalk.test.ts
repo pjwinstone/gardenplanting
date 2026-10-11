@@ -324,8 +324,10 @@ describe('walk round the house', () => {
     const otherWorkflow = commitWorkflow(doc, { ...readProgress(doc), activeId: 'circle-field-test' });
     const unlocked = deletePointMeasurement(otherWorkflow, 'C1');
     expect(unlocked.reason ?? '').not.toMatch(/datum end/);
+    const traverse = doc.houseTraverse;
+    if (!traverse) throw new Error('missing walk');
     const closed = deletePointMeasurement(
-      { ...doc, houseTraverse: { ...doc.houseTraverse, status: 'closed' } },
+      { ...doc, houseTraverse: { ...traverse, status: 'closed' } },
       'C1',
     );
     expect(closed.reason ?? '').not.toMatch(/datum end/);
@@ -576,7 +578,13 @@ describe('walk round the house', () => {
       },
     }));
     const libraryOnly = bare[0];
-    if (libraryOnly) delete libraryOnly.originalFile.nativeCapture;
+    if (libraryOnly?.originalFile.nativeCapture) {
+      const capture: { focalLength35mm: number | null; lensModel: string | null; intrinsicMatrix: number[] | null } =
+        libraryOnly.originalFile.nativeCapture;
+      capture.focalLength35mm = null;
+      capture.lensModel = null;
+      capture.intrinsicMatrix = null;
+    }
     doc = { ...doc, photos: bare };
     doc = noteVerifiedPhotos(doc, bare.map((photo) => photo.id));
     for (const photo of doc.photos) {
