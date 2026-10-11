@@ -7,20 +7,28 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-import { emptyDocument, type GardenDocument, type PointKind } from '../src/model';
+import { emptyDocument, type GardenDocument, type Photo, type PointKind } from '../src/model';
 import { deletePointMeasurement } from '../src/layers';
 import type { SolveInput } from '../src/solver/types';
+import { saveBaselineLengthWorkflow } from '../src/workflows/establishBaseline';
 import { handleWorkflowCommand } from '../src/workflows/guided/guidedChrome';
-import { commitWorkflow, readProgress, startWorkflow, withWorkflowEvent } from '../src/workflows/guided/engine';
+import { advanceWorkflow, commitWorkflow, readProgress, startWorkflow, tickWorkflow, withWorkflowEvent } from '../src/workflows/guided/engine';
 import {
   blockedLine,
   classifyGate,
+  closeWalk,
   CROSS_TIE_PROMPT,
   GOOD_LEG,
   LOOP_CLOSES,
   nextTraverse,
+  noteTraverseDocument,
   RAW_GAP_NOTE,
+  restartHouseWalk,
+  saveWalkPhoto,
+  saveWalkTape,
   singleSetupWarning,
+  TAPE_MISTAKE_LINE,
+  walkView,
 } from '../src/workflows/guided/traverseWalk';
 import type { FieldStatus } from '../src/workflows/guided/types';
 import type { WorkflowEvent } from '../src/workflows/guided/types';
@@ -63,6 +71,8 @@ function gardenFromFixture(name: string): GardenDocument {
     kind: 'tape' as const,
     step: distance.step,
     role: distance.role,
+    runId: NOW,
+    recordedAt: NOW,
   }));
   doc.photos = (input.photos ?? []).map((photo) => ({
     id: photo.id,
@@ -81,6 +91,15 @@ function gardenFromFixture(name: string): GardenDocument {
     closing: photo.closing,
     phoneId: 'ph1',
     lens: '1x',
+    runId: NOW,
+    originalFile: {
+      fileName: `${photo.id}.jpg`,
+      size: 1,
+      quickXorHash: 'fixture',
+      uploadStatus: 'verified' as const,
+      capturedAt: NOW,
+      receivedAt: NOW,
+    },
   }));
   doc.setups = [{ id: 'walk', startedAt: NOW, liveRodIds: [] }];
   return doc;
@@ -107,11 +126,20 @@ function stepId(doc: GardenDocument): string | undefined {
 }
 
 function live(doc: GardenDocument): string {
-  return (readProgress(doc).runs['house-traverse']?.liveLines ?? []).join('\n');
+  return walkView(doc).lines.join('\n');
 }
 
 function status(doc: GardenDocument): FieldStatus | undefined {
-  return readProgress(doc).runs['house-traverse']?.fieldStatus;
+  return walkView(doc).status;
+}
+
+function expectHeadline(doc: GardenDocument, mark: string, low: number, high: number): void {
+  const mm = Math.round(status(doc)?.accuracyMm ?? NaN);
+  expect(status(doc)?.headline).toBe(`${mark} ± ${mm} mm (95%, target ± 100 mm)`);
+  expect(mm).toBeGreaterThanOrEqual(low);
+  expect(mm).toBeLessThanOrEqual(high);
+  expect(status(doc)?.targetMm).toBe(100);
+  expect(status(doc)?.note).toBe(TAPE_MISTAKE_LINE);
 }
 
 const noDom = { getAttribute: () => null };
@@ -172,11 +200,11 @@ describe('walk round the house', () => {
 
     doc = withWorkflowEvent(doc, { type: 'traverse.observe', step: 2, newestId: 'C4' }, NOW);
     const held = nextTraverse(doc, NOW);
-    expect(held.notice).toMatch(/cross-tie/i);
+    expect(held.notice).toMatch(/Re-tape|cross-tie/i);
     expect(status(held.doc)?.tone).toBe('amber');
     expect(status(held.doc)?.blocked).toBe(true);
-    expect(status(held.doc)?.line).toMatch(/^Add a cross-tie: tape \S+ → \S+$/);
-    expect(status(held.doc)?.headline).toMatch(/C4 ± \d+ mm \(target ± 21 mm\)/);
+    expect(status(held.doc)?.line).toMatch(/^Re-tape \S+ → \S+$/);
+    expectHeadline(held.doc, 'C4', 171, 171);
     expect(stepId(held.doc)).toBe('leg');
     expect(readProgress(held.doc).runs['house-traverse']?.steps.leg?.status).not.toBe('complete');
     expect(live(held.doc)).toMatch(/Add a cross-tie before the next leg/);
@@ -185,6 +213,7 @@ describe('walk round the house', () => {
     expect(status(doc)?.tone).toBe('green');
     expect(status(doc)?.blocked).toBe(false);
     expect(status(doc)?.line).toBe(GOOD_LEG);
+    expectHeadline(doc, 'C4', 15, 15);
     doc = withWorkflowEvent(doc, { type: 'traverse.close' }, NOW);
     expect(doc.houseTraverse?.closeRequested).toBe(true);
     move = nextTraverse(doc, NOW);
@@ -205,7 +234,8 @@ describe('walk round the house', () => {
     expect(stepId(ontoClose.doc)).toBe('close');
     const review = nextTraverse(ontoClose.doc, NOW);
     expect(stepId(review.doc)).toBe('closure-review');
-    const mis = review.doc.traverseMisclosure;
+    const mis = walkView(review.doc).misclosure;
+    expect(review.doc.traverseMisclosure).toBeUndefined();
     expect(mis?.rank).toBe(6);
     expect(mis?.chi2 ?? 1).toBeLessThan(1e-4);
     expect(mis?.rawMisclosureIsBlunderTest).toBe(false);
@@ -217,6 +247,8 @@ describe('walk round the house', () => {
     expect(Math.abs(millimetres[1] - 48.2)).toBeLessThan(1.5);
     const azimuth = text.match(/1σ ([0-9.]+)°/);
     expect(Math.abs(Number(azimuth?.[1]) - 0.493)).toBeLessThan(0.02);
+    expect(text).toMatch(/Variance factor/);
+    expect(text).toMatch(/dof /);
     expect(text).toMatch(/rank 6/);
     expect(text).toMatch(/position χ² pass/);
     expect(text).toMatch(/The raw misclosure is not a blunder test/);
@@ -264,7 +296,7 @@ describe('walk round the house', () => {
     expect(stepId(review.doc)).toBe('closure-review');
     expect(status(review.doc)?.tone).toBe('red');
     expect(status(review.doc)?.blocked).toBe(true);
-    expect(status(review.doc)?.line).toMatch(/Loop doesn't close — likely blunder at .+ \(re-tape .+ → .+\)/);
+    expect(status(review.doc)?.line).toBe("Loop doesn't close — likely blunder at C2–C3 (re-tape C2 → C3)");
     expect(status(review.doc)?.note).toBe(RAW_GAP_NOTE);
     expect(live(review.doc)).toMatch(/The raw misclosure is not a blunder test/);
     expect(handleWorkflowCommand('workflow-tick', review.doc, noDom).doc).toBeUndefined();
@@ -296,4 +328,123 @@ describe('walk round the house', () => {
     expect(closed.reason ?? '').not.toMatch(/datum end/);
     expect(closed.reason).toMatch(/baseline end/);
   });
+
+  it('does not pass an empty gate', () => {
+    expect(classifyGate([], []).ok).toBe(false);
+    let doc = begin(gardenFromFixture('loop4ct-steps.json'));
+    doc = nextTraverse(doc, NOW).doc;
+    expect(status(doc)?.tone).not.toBe('green');
+    expect(status(doc)?.blocked).toBe(true);
+    expect(status(doc)?.line).toBe('Tape the new corner before the next leg.');
+  });
+
+  it('tags tapes and photos through the save handlers, and closes from the button', () => {
+    let doc = emptyDocument('Handlers');
+    const started = startWorkflow(readProgress(doc), 'house-traverse', NOW);
+    doc = commitWorkflow(doc, started.progress);
+    const saved = saveBaselineLengthWorkflow(doc, 4, 0, 0, true);
+    expect(saved.ok).toBe(true);
+    const baseline = saved.doc.baselines[0];
+    doc = withWorkflowEvent(saved.doc, {
+      type: 'baseline.saved',
+      endA: baseline.a,
+      endB: baseline.b,
+      endAId: baseline.a,
+      endBId: baseline.b,
+      kind: 'tape',
+      offsetAMm: 0,
+      offsetBMm: 0,
+      lengthM: 4,
+    }, NOW);
+    expect(doc.houseTraverse?.runId).toBe(NOW);
+    expect(doc.houseTraverse?.markOrder).toEqual([baseline.a, baseline.b]);
+    doc = nextTraverse(doc, NOW).doc;
+    expect(stepId(doc)).toBe('leg');
+    doc = saveWalkTape(doc, { a: baseline.b, b: 'HSE03', lengthM: 3, role: 'leg' }, NOW);
+    const tape = doc.lines.find((line) => line.a === baseline.b && line.b === 'HSE03');
+    expect(tape?.runId).toBe(NOW);
+    expect(tape?.step).toBe(0);
+    expect(tape?.role).toBe('leg');
+    expect(tape?.recordedAt).toBe(NOW);
+    expect(doc.houseTraverse?.newestId).toBe('HSE03');
+    const photo: Photo = {
+      id: 'ph-real',
+      setupId: 'walk',
+      stationId: baseline.b,
+      width: 200,
+      height: 150,
+      fxOverWidth: 0.8,
+      clicks: [
+        { pointId: baseline.a, px: 40, py: 70 },
+        { pointId: 'HSE03', px: 150, py: 70 },
+      ],
+      phoneId: 'ph1',
+      lens: '1x',
+      originalFile: {
+        fileName: 'ph-real.jpg',
+        size: 12,
+        quickXorHash: 'hash',
+        uploadStatus: 'verified',
+        capturedAt: NOW,
+        receivedAt: NOW,
+      },
+    };
+    doc = saveWalkPhoto(doc, photo);
+    const savedPhoto = doc.photos.find((item) => item.id === 'ph-real');
+    expect(savedPhoto?.runId).toBe(NOW);
+    expect(savedPhoto?.step).toBe(0);
+    expect(savedPhoto?.role).toBe('leg');
+    expect(savedPhoto?.stationId).toBe(baseline.b);
+    doc = withWorkflowEvent(doc, {
+      type: 'photo.uploaded',
+      photoIds: ['ph-real'],
+      stationId: baseline.b,
+      pointLabel: 'HSE03',
+      objectName: 'House',
+      photoCount: 1,
+    }, NOW);
+    expect(doc.photos.find((item) => item.id === 'ph-real')?.runId).toBe(NOW);
+    const closed = handleWorkflowCommand('workflow-close-loop', doc, noDom);
+    expect(closed.doc?.houseTraverse?.closeRequested).toBe(true);
+    expect(closeWalk(doc, NOW).houseTraverse?.closeRequested).toBe(true);
+    expect(readProgress(doc).runs['house-traverse']?.fieldStatus).toBeUndefined();
+  });
+
+  it('re-checks after Back, and Start over releases the datum lock', () => {
+    let doc = begin(gardenFromFixture('loop4ct-steps.json'));
+    doc = nextTraverse(doc, NOW).doc;
+    doc = withWorkflowEvent(doc, { type: 'traverse.observe', step: 2, newestId: 'C4' }, NOW);
+    expect(status(doc)?.blocked).toBe(true);
+    const backed = handleWorkflowCommand('workflow-back', doc, noDom);
+    expect(backed.doc).toBeDefined();
+    expect(stepId(backed.doc!)).toBe('datum');
+    expect(readProgress(backed.doc!).runs['house-traverse']?.fieldStatus).toBeUndefined();
+    const returned = nextTraverse(backed.doc!, NOW);
+    expect(stepId(returned.doc)).toBe('leg');
+    expect(status(returned.doc)?.blocked).toBe(true);
+    const repaired = withWorkflowEvent(returned.doc, { type: 'traverse.observe', step: 3, newestId: 'C4' }, NOW);
+    expect(status(repaired)?.blocked).toBe(false);
+    expect(status(repaired)?.tone).toBe('green');
+    const restarted = restartHouseWalk(repaired, '2026-10-10T13:00:00.000Z');
+    expect(restarted.houseTraverse).toBeUndefined();
+    expect(restarted.pastTraverses?.length).toBe(1);
+    const freed = deletePointMeasurement(restarted, 'C1');
+    expect(freed.reason ?? '').not.toMatch(/datum end/);
+    expect(freed.reason).toMatch(/baseline end/);
+  }, 120_000);
+
+  it('refuses Tick anyway and Next on a later step that has not passed', () => {
+    let doc = begin(gardenFromFixture('loop4ct-steps.json'));
+    doc = nextTraverse(doc, NOW).doc;
+    doc = withWorkflowEvent(doc, { type: 'traverse.observe', step: 2, newestId: 'C4' }, NOW);
+    noteTraverseDocument(doc);
+    const later = tickWorkflow(readProgress(doc), 'adjust', undefined, NOW);
+    expect(later.changed).toBe(false);
+    expect(later.notice).toMatch(/Read the closure/);
+    const review = tickWorkflow(readProgress(doc), 'closure-review', undefined, NOW);
+    expect(review.changed).toBe(false);
+    const moved = advanceWorkflow(readProgress(doc), NOW);
+    expect(moved.changed).toBe(false);
+    expect(readProgress(doc).runs['house-traverse']?.currentStepId).toBe('leg');
+  }, 120_000);
 });

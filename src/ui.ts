@@ -81,6 +81,7 @@ import {
   workflowNoteChange,
 } from './workflows/guided/guidedChrome';
 import { hydrateWorkflowProgress, readProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
+import { saveWalkTape } from './workflows/guided/traverseWalk';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
   appendPhotoToPoint,
@@ -2714,7 +2715,19 @@ async function onShellClick(e: Event): Promise<void> {
       openMenuSection('house');
       return;
     }
-    const next = addHouseCornerWorkflow(state.doc, edge, offset);
+    let next = addHouseCornerWorkflow(state.doc, edge, offset);
+    const added = next.lines.filter((line) => !state.doc.lines.some((old) => old.id === line.id));
+    for (const line of added) {
+      if (line.lengthM == null) continue;
+      next = saveWalkTape(next, {
+        id: line.id,
+        a: line.a,
+        b: line.b,
+        lengthM: line.lengthM,
+        sigmaM: line.sigmaM,
+        role: 'leg',
+      });
+    }
     setDoc(next, null);
     setState({ menuOpen: true, menuFocus: 'house', openErrorLog: false });
     speakCoachLine(next.session.lastAction ?? 'Corner added.', next.session.speakSteps);

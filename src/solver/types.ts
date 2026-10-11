@@ -360,6 +360,12 @@ export interface SolveResult {
    * no y row. Null when any id is unset or the normal matrix has no inverse.
    */
   jointCofactor: (pointIds: string[]) => number[][] | null;
+  /**
+   * Correlation of two observation residuals, from the a-priori cofactor.
+   * ρ = qvv_ij / √(qvv_ii qvv_jj), with qvv_ij = −j_iᵀ Q j_j.
+   * Null when either observation is unused or has no residual variance.
+   */
+  residualCorrelation: (idA: string, idB: string) => number | null;
   droppedObservationIds: string[];
   /** Flagged observations that were not isolated enough to drop. */
   inseparableObservationIds: string[];

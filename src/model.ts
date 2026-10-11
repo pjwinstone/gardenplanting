@@ -100,6 +100,10 @@ export interface Line {
   step?: number;
   /** Leg, cross-tie, station tape, or a repeated closing tape. */
   role?: 'leg' | 'cross' | 'station' | 'repeat';
+  /** Walk run this tape belongs to. Absent on older tapes. */
+  runId?: string;
+  /** When this tape was saved. Earlier than the run start, it does not count. */
+  recordedAt?: string;
 }
 
 /** Known-length control between two marks. Default field use: one house edge. */
@@ -288,6 +292,8 @@ export interface Photo {
   role?: 'occupy' | 'leg' | 'close';
   /** Closing re-occupation. A `-close-` id is not enough. */
   closing?: boolean;
+  /** Walk run this photo belongs to. Absent on older photos. */
+  runId?: string;
   sigmaPx?: number;
   sigmaCentringM?: number;
   gravity?: { x: number; y: number; z: number };
@@ -314,6 +320,10 @@ export interface Setup {
  */
 export interface Traverse {
   id: string;
+  /** Workflow run this walk belongs to. A new run does not reuse an older walk. */
+  runId?: string;
+  /** When that run started. Tapes and photos from before this do not count. */
+  startedAt?: string;
   phoneId?: string;
   lens?: string;
   /** Datum ends first, then each new mark. */
@@ -330,6 +340,9 @@ export interface Traverse {
 /** One taped leg of the walk. */
 export interface TraverseLeg {
   id: string;
+  /** Walk run this leg belongs to. */
+  runId?: string;
+  startedAt?: string;
   from: string;
   to: string;
   step: number;
@@ -342,6 +355,9 @@ export interface TraverseLeg {
 /** Camera occupation on a leg. Not the rod `Setup`. */
 export interface TraverseSetup {
   id: string;
+  /** Walk run this occupation belongs to. */
+  runId?: string;
+  startedAt?: string;
   stationId: string;
   step: number;
   poleHeightM?: number;
@@ -423,6 +439,8 @@ export interface GardenDocument {
   workflowProgress?: import('./workflows/guided/types').WorkflowProgress;
   /** Walk round the house. Optional. Older readers ignore it. */
   houseTraverse?: Traverse;
+  /** Walks replaced by Start over. The live walk is `houseTraverse`. */
+  pastTraverses?: Traverse[];
   traverseLegs?: TraverseLeg[];
   traverseSetups?: TraverseSetup[];
   traverseMisclosure?: TraverseMisclosure;

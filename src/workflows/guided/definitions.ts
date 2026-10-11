@@ -310,10 +310,10 @@ export const houseTraverse: WorkflowDefinition = {
     {
       id: 'leg',
       title: 'Leg',
-      instruction: 'Tape the next corner, then photograph it.',
-      detail: ['Move on only when the status is green.'],
+      instruction: 'Tape the next corner. Photograph it in the app at 1×.',
+      detail: ['On iOS use the in-app camera. Move on when the status is green.'],
       help: [
-        'Next stays off until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and tape MDB is at most 21.3 mm.',
+        'Check again stays on this leg until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and tape MDB is at most 21.3 mm.',
         'A short tie asks for a named cross-tie. A mark seen from one setup has to be photographed from here.',
       ],
       complete: { on: 'traverse.phase', phase: 'leg' },
@@ -323,7 +323,7 @@ export const houseTraverse: WorkflowDefinition = {
       id: 'close',
       title: 'Close',
       instruction: 'Tape back to the start, then stand there again.',
-      detail: ['Photograph the last mark and the second end.'],
+      detail: ['Photograph at 1× with the in-app camera on iOS.'],
       complete: { on: 'traverse.phase', phase: 'close' },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },

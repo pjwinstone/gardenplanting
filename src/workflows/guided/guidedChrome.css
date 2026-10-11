@@ -46,6 +46,10 @@
   overflow: auto;
 }
 
+.workflow-bar {
+  max-height: 240px;
+}
+
 .workflow-sheet,
 .workflow-picker {
   background: #fffdf8;
@@ -53,6 +57,19 @@
   border-color: #1a3a2a;
   overflow: auto;
   padding-bottom: 12px;
+}
+
+.workflow-sheet {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: calc(100dvh - var(--wf-safe-top, 0px) - var(--wf-safe-bottom, 0px) - 16px);
+}
+
+.workflow-sheet-body {
+  overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .workflow-kicker {
@@ -251,6 +268,16 @@
   align-items: center;
   gap: 8px;
   margin-top: 10px;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: inherit;
+  padding-top: 6px;
+}
+
+.workflow-sheet-actions {
+  position: static;
+  flex: 0 0 auto;
 }
 
 .workflow-actions .workflow-primary,
@@ -451,6 +478,25 @@
     row-gap: 2px;
     padding: 4px 8px;
     border-radius: 10px;
+    max-height: 110px;
+  }
+
+  .workflow-bar .workflow-status,
+  .workflow-bar .workflow-headline,
+  .workflow-bar .workflow-meter-row,
+  .workflow-bar .workflow-status-note,
+  .workflow-bar .workflow-maths {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+
+  .workflow-bar .workflow-headline,
+  .workflow-bar .workflow-status,
+  .workflow-bar .workflow-status-note {
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .workflow-bar .workflow-kicker {

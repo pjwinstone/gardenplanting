@@ -12,7 +12,7 @@ import type {
 } from './model';
 import { fitCircle, fitRectangle, fitTriangleOutline } from './geometryFit';
 import { placeholderThumb } from './model';
-import { datumRemovalBlock } from './workflows/guided/traverseWalk';
+import { datumRemovalBlock, noteWalkPhoto } from './workflows/guided/traverseWalk';
 import {
   photoHasBaselineEnds,
   stationFromBaselineSighting,
@@ -368,7 +368,7 @@ export function addPhotoMeasurement(
       selectedPhotoId: photoId,
     },
   };
-  return { doc: next, point };
+  return { doc: noteWalkPhoto(next, photoId), point };
 }
 
 /** @deprecated alias — prefer addPhotoMeasurement */

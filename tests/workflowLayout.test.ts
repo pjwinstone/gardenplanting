@@ -84,5 +84,8 @@ describe('workflow chrome layout', () => {
     expect(css).toContain('orientation: landscape');
     expect(css).toContain('text-overflow: ellipsis');
     expect(css).toContain('white-space: nowrap');
+    expect(css).toContain('grid-column: 1 / -1');
+    expect(css).toContain('max-height: 110px');
+    expect(css).toContain('max-height: 240px');
   });
 });

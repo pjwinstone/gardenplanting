@@ -554,6 +554,14 @@ export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toI
   if (initial.run.finishedAt) return { progress, notice: `${initial.def.title} is already finished.`, changed: false };
   const ticked = tickManualCurrent(progress, now);
   const pair = activePair(ticked) ?? initial;
+  const held = workflowStepGate?.(ticked, pair.run.currentStepId) ?? null;
+  if (held) {
+    return {
+      progress: ticked,
+      notice: held,
+      changed: progressJson(progress) !== progressJson(ticked),
+    };
+  }
   const index = pair.def.steps.findIndex((step) => step.id === pair.run.currentStepId);
   const at = index < 0 ? 0 : index;
   if (at >= pair.def.steps.length - 1) return doneWorkflow(ticked, now);
@@ -572,7 +580,13 @@ export function backWorkflow(progress: WorkflowProgress, now = new Date().toISOS
   const index = pair.def.steps.findIndex((step) => step.id === pair.run.currentStepId);
   if (index <= 0) return { progress, changed: false };
   const prev = pair.def.steps[index - 1];
-  const run: WorkflowRun = { ...pair.run, currentStepId: prev.id, updatedAt: now };
+  const run: WorkflowRun = {
+    ...pair.run,
+    currentStepId: prev.id,
+    updatedAt: now,
+    fieldStatus: undefined,
+    liveLines: undefined,
+  };
   return {
     progress: { ...progress, runs: { ...progress.runs, [pair.def.id]: run } },
     changed: true,
@@ -610,6 +624,8 @@ export function doneWorkflow(progress: WorkflowProgress, now = new Date().toISOS
 }
 
 export function tickWorkflow(progress: WorkflowProgress, stepId: string, note?: string, now = new Date().toISOString()): WorkflowMove {
+  const held = workflowStepGate?.(progress, stepId) ?? null;
+  if (held) return { progress, notice: held, changed: false };
   const next = applyWorkflowEvent(progress, { type: 'manual.tick', stepId, note }, now);
   const changed = progressJson(progress) !== progressJson(next);
   return { progress: next, changed };
@@ -672,6 +688,31 @@ function photoTimeMs(value: string | undefined): number | undefined {
 }
 
 /**
+ * A photo counts for this run only after the OneDrive upload checked out,
+ * with both capture and receive times at or after the run start, and only
+ * if no step has already consumed it. A missing time does not count.
+ */
+export function photoIsUploadFresh(photo: Photo, startedAt: string, taken: ReadonlySet<string>): boolean {
+  const start = photoTimeMs(startedAt);
+  if (start === undefined || taken.has(photo.id)) return false;
+  if (photo.originalFile?.uploadStatus !== 'verified') return false;
+  if ((photo.originalFile.usabilityNote ?? '').includes('Not usable')) return false;
+  const captured = photoTimeMs(photo.originalFile?.capturedAt) ?? photoTimeMs(photo.exifDateTimeOriginal);
+  const received = photoTimeMs(photo.originalFile?.receivedAt);
+  if (captured === undefined || received === undefined) return false;
+  return captured >= start && received >= start;
+}
+
+/** A workflow can refuse Tick and Next for a step that has not passed. */
+let workflowStepGate: ((progress: WorkflowProgress, stepId: string) => string | null) | null = null;
+
+export function setWorkflowStepGate(
+  gate: ((progress: WorkflowProgress, stepId: string) => string | null) | null,
+): void {
+  workflowStepGate = gate;
+}
+
+/**
  * Photos that can tick a station step in this run.
  * Verified means the OneDrive upload checked out. There is no marker detector.
  * A photo counts only when it was captured and received at or after the run
@@ -692,14 +733,8 @@ export function countUploadedPhotosForStep(
     for (const photoId of state.consumedPhotoIds ?? []) taken.add(photoId);
   }
   const photoIds = doc.photos.filter((photo) => {
-    if (taken.has(photo.id)) return false;
     if (!photoOnStation(doc, photo, stationId)) return false;
-    if (photo.originalFile?.uploadStatus !== 'verified') return false;
-    if ((photo.originalFile.usabilityNote ?? '').includes('Not usable')) return false;
-    const captured = photoTimeMs(photo.originalFile?.capturedAt) ?? photoTimeMs(photo.exifDateTimeOriginal);
-    const received = photoTimeMs(photo.originalFile?.receivedAt);
-    if (captured === undefined || received === undefined) return false;
-    return captured >= start && received >= start;
+    return photoIsUploadFresh(photo, run.startedAt, taken);
   }).map((photo) => photo.id);
   return { count: photoIds.length, photoIds };
 }

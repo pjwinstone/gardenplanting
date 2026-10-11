@@ -744,6 +744,7 @@ function solveOnce(input: SolveInput): SolveResult {
         .map((s) => ({ x: s.x as number, y: s.y as number, fromGardenSign: s.sidedByGardenSign === true })),
     }),
     jointCofactor: (pointIds: string[]) => jointCofactorOf(pointIds, built, adjusted, state, held, originId, axisId),
+    residualCorrelation: (idA: string, idB: string) => residualCorrelationOf(idA, idB, built, adjusted),
     datum: { originId, axisPointId: axisId, gardenSign },
   };
 }
@@ -778,6 +779,35 @@ function jointCofactorOf(
     }
   }
   return c;
+}
+
+/** A-priori residual correlation. qvv_ij = δ_ij σ² − j_iᵀ Q j_j. */
+function residualCorrelationOf(idA: string, idB: string, built: Built, adjusted: LmResult): number | null {
+  const q = adjusted.q;
+  if (!q) return null;
+  const a = built.obs.find((item) => item.id === idA);
+  const b = built.obs.find((item) => item.id === idB);
+  if (!a || !b) return null;
+  if (a.live && !a.live()) return null;
+  if (b.live && !b.live()) return null;
+  const ja = a.jacobian(adjusted.x);
+  const jb = b.jacobian(adjusted.x);
+  const quad = (left: number[], right: number[]) => {
+    let sum = 0;
+    for (let i = 0; i < left.length; i++) {
+      let qj = 0;
+      for (let k = 0; k < right.length; k++) qj += (q[i]?.[k] ?? 0) * right[k];
+      sum += left[i] * qj;
+    }
+    return sum;
+  };
+  const vii = a.sigma * a.sigma - quad(ja, ja);
+  const vjj = b.sigma * b.sigma - quad(jb, jb);
+  if (!(vii > 1e-18) || !(vjj > 1e-18)) return null;
+  if (idA === idB) return 1;
+  const rho = -quad(ja, jb) / Math.sqrt(vii * vjj);
+  if (!Number.isFinite(rho)) return null;
+  return Math.max(-1, Math.min(1, rho));
 }
 
 interface SidePick {

@@ -147,13 +147,13 @@ export interface FieldStatus {
   tone: FieldTone;
   line: string;
   headline?: string;
-  /** 1σ figure, millimetres. */
+  /** 95% semi-major, millimetres. */
   accuracyMm?: number;
-  /** Target 1σ, millimetres. */
+  /** Class tolerance at 95%, millimetres. Plantable 100, station 200. */
   targetMm?: number;
   /** Plain sentence under the headline. */
   note?: string;
-  /** Next stays disabled. Tick anyway is refused. */
+  /** Next does not advance. The button reads Check again. Tick anyway is refused. */
   blocked: boolean;
 }
 
