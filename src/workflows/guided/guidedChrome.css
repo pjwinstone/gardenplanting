@@ -49,14 +49,39 @@
 .workflow-bar {
   display: flex;
   flex-direction: column;
-  max-height: 240px;
   overflow: hidden;
 }
 
+.workflow-bar > .workflow-kicker,
+.workflow-bar > .workflow-title,
+.workflow-bar > .workflow-instruction,
+.workflow-bar > .workflow-status-block,
+.workflow-bar > .workflow-actions,
+.workflow-sheet > .workflow-kicker,
+.workflow-sheet > .workflow-title,
+.workflow-sheet > .workflow-instruction,
+.workflow-sheet > .workflow-status-block,
+.workflow-sheet > .workflow-sheet-actions {
+  flex-shrink: 0;
+}
+
+.workflow-status-block {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.workflow-status,
+.workflow-headline,
+.workflow-status-note,
+.workflow-instruction {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .workflow-bar-body {
-  overflow: auto;
+  flex: 0 1 auto;
   min-height: 0;
-  flex: 1 1 auto;
+  overflow: auto;
 }
 
 .workflow-sheet,
@@ -470,61 +495,22 @@
   }
 }
 
-/* Short landscape phones (844×390). One line of title, instruction truncated. Budget ≤ 110px. */
+/* Short landscape phones (844×390). The status wraps; it is not clipped to 110px. */
 @media (max-height: 420px) and (orientation: landscape) {
-  .workflow-bar {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    align-items: center;
-    column-gap: 8px;
-    row-gap: 2px;
-    padding: 4px 8px;
+  .workflow-bar,
+  .workflow-sheet {
+    padding: 6px 8px;
     border-radius: 10px;
-    max-height: 110px;
-    overflow: hidden;
   }
 
-  .workflow-bar-body {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    min-width: 0;
-  }
-
-  .workflow-bar .workflow-status,
-  .workflow-bar .workflow-headline,
-  .workflow-bar .workflow-meter-row,
-  .workflow-bar .workflow-status-note,
-  .workflow-bar .workflow-maths {
-    grid-column: 1 / -1;
-    min-width: 0;
-  }
-
-  .workflow-bar .workflow-headline,
-  .workflow-bar .workflow-status,
-  .workflow-bar .workflow-status-note {
-    margin: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .workflow-bar .workflow-kicker {
-    display: contents;
+  .workflow-kicker {
     margin: 0;
     font-size: 13px;
     line-height: 1.1;
   }
 
-  .workflow-bar .workflow-kicker > span {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .workflow-bar .workflow-title {
-    grid-column: 2;
-    grid-row: 1;
-    margin: 0;
+  .workflow-bar .workflow-title,
+  .workflow-sheet .workflow-title {
     font-size: 16px;
     line-height: 1.15;
     white-space: nowrap;
@@ -532,49 +518,28 @@
     text-overflow: ellipsis;
   }
 
-  .workflow-bar .workflow-kicker > .workflow-btn {
-    grid-column: 3;
-    grid-row: 1;
-  }
-
   .workflow-bar .workflow-instruction,
-  .workflow-bar .workflow-notice,
-  .workflow-bar .workflow-paused,
-  .workflow-bar .workflow-actions {
-    grid-column: 1 / -1;
+  .workflow-bar .workflow-status,
+  .workflow-bar .workflow-headline,
+  .workflow-bar .workflow-status-note {
+    margin-top: 2px;
+    font-size: 15px;
+    line-height: 1.2;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
   }
 
-  .workflow-bar .workflow-instruction {
-    grid-row: 2;
-    margin: 0;
-    font-size: 14px;
-    line-height: 1.15;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .workflow-bar .workflow-tick-line,
-  .workflow-bar .workflow-auto {
-    display: none;
-  }
-
-  .workflow-bar .workflow-notice {
-    margin: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .workflow-bar .workflow-actions {
-    grid-row: 3;
-    margin-top: 0;
+  .workflow-bar .workflow-actions,
+  .workflow-sheet-actions {
+    margin-top: 4px;
     gap: 6px;
   }
 
-  .workflow-bar .workflow-btn {
-    min-height: 32px;
-    padding: 2px 10px;
+  .workflow-bar .workflow-btn,
+  .workflow-sheet .workflow-btn {
+    min-height: 36px;
+    padding: 4px 10px;
     font-size: 15px;
   }
 }

@@ -65,9 +65,9 @@ describe('workflow chrome layout', () => {
     expect(menu.h).toBe(44);
   });
 
-  it('keeps a landscape phone bar within 110px at 844×390', () => {
-    const barHeight = 104;
-    expect(barHeight).toBeLessThanOrEqual(LANDSCAPE_BAR_MAX_PX);
+  it('lets a landscape status bar grow and still clear the menu at 844×390', () => {
+    const barHeight = 260;
+    expect(barHeight).toBeGreaterThan(LANDSCAPE_BAR_MAX_PX);
     const rects = workflowChromeRects({
       width: 844,
       height: 390,
@@ -76,7 +76,8 @@ describe('workflow chrome layout', () => {
       sheetHeight: 320,
       thumbWidth: 88,
     });
-    expect(rects.bar.h).toBeLessThanOrEqual(LANDSCAPE_BAR_MAX_PX);
+    expect(rects.bar.h).toBeGreaterThan(LANDSCAPE_BAR_MAX_PX);
+    expect(rects.bar.y + rects.bar.h).toBeLessThanOrEqual(rects.menu.y - 12);
     expect(rectsIntersect(rects.bar, rects.menu)).toBe(false);
     expect(gapBetween(rects.bar, rects.menu)).toBeGreaterThanOrEqual(12);
     const css = readFileSync(new URL('../src/workflows/guided/guidedChrome.css', import.meta.url), 'utf8');
@@ -84,8 +85,8 @@ describe('workflow chrome layout', () => {
     expect(css).toContain('orientation: landscape');
     expect(css).toContain('text-overflow: ellipsis');
     expect(css).toContain('white-space: nowrap');
-    expect(css).toContain('grid-column: 1 / -1');
-    expect(css).toContain('max-height: 110px');
-    expect(css).toContain('max-height: 240px');
+    expect(css).toContain('white-space: normal');
+    expect(css).not.toContain('max-height: 110px');
+    expect(css).not.toContain('max-height: 240px');
   });
 });

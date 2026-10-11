@@ -278,9 +278,11 @@ function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: Workflow
   kicker.append(sunButton());
   bar.append(kicker);
   bar.append(el('h2', 'workflow-title', done && step.doneTitle ? step.doneTitle : step.title));
+  bar.append(el('p', 'workflow-instruction', done && step.doneInstruction ? step.doneInstruction : step.instruction));
+  const statusBlock = el('div', 'workflow-status-block');
+  appendStatus(statusBlock, view);
+  bar.append(statusBlock);
   const body = el('div', 'workflow-bar-body');
-  body.append(el('p', 'workflow-instruction', done && step.doneInstruction ? step.doneInstruction : step.instruction));
-  appendStatus(body, view);
   if (done && state?.completedBy === 'auto') {
     const line = el('div', 'workflow-tick-line');
     line.innerHTML = tickSvg();
@@ -291,7 +293,7 @@ function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: Workflow
   }
   if (notice && notice !== view.status?.line) body.append(el('p', 'workflow-notice', notice));
   appendMaths(body, step, view);
-  bar.append(body);
+  if (body.childElementCount) bar.append(body);
   const actions = el('div', 'workflow-actions');
   const back = button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 });
   const details = button('Details', 'workflow-expand');
@@ -360,14 +362,16 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun, view: WalkView):
   const sheet = el('section', 'workflow-sheet');
   sheet.dataset.testid = 'workflow-sheet';
   sheet.setAttribute('aria-label', step.title);
-  const body = el('div', 'workflow-sheet-body');
   const kicker = el('div', 'workflow-kicker');
   kicker.append(el('span', '', `${def.title} · ${counter(def, run)}`));
   kicker.append(sunButton());
-  body.append(kicker);
-  body.append(el('h2', 'workflow-title', step.title));
-  appendStatus(body, view);
-  body.append(el('p', 'workflow-instruction', step.instruction));
+  sheet.append(kicker);
+  sheet.append(el('h2', 'workflow-title', step.title));
+  sheet.append(el('p', 'workflow-instruction', step.instruction));
+  const statusBlock = el('div', 'workflow-status-block');
+  appendStatus(statusBlock, view);
+  sheet.append(statusBlock);
+  const body = el('div', 'workflow-sheet-body');
   if (step.diagram) {
     const host = el('div', 'workflow-diagram-host');
     host.innerHTML = diagramSvg(step.diagram);
