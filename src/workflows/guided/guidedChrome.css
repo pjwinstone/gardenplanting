@@ -47,7 +47,16 @@
 }
 
 .workflow-bar {
+  display: flex;
+  flex-direction: column;
   max-height: 240px;
+  overflow: hidden;
+}
+
+.workflow-bar-body {
+  overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .workflow-sheet,
@@ -268,16 +277,9 @@
   align-items: center;
   gap: 8px;
   margin-top: 10px;
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
+  flex: 0 0 auto;
   background: inherit;
   padding-top: 6px;
-}
-
-.workflow-sheet-actions {
-  position: static;
-  flex: 0 0 auto;
 }
 
 .workflow-actions .workflow-primary,
@@ -473,12 +475,20 @@
   .workflow-bar {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
     align-items: center;
     column-gap: 8px;
     row-gap: 2px;
     padding: 4px 8px;
     border-radius: 10px;
     max-height: 110px;
+    overflow: hidden;
+  }
+
+  .workflow-bar-body {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
   }
 
   .workflow-bar .workflow-status,

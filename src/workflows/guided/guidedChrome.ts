@@ -278,18 +278,20 @@ function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: Workflow
   kicker.append(sunButton());
   bar.append(kicker);
   bar.append(el('h2', 'workflow-title', done && step.doneTitle ? step.doneTitle : step.title));
-  appendStatus(bar, view);
-  bar.append(el('p', 'workflow-instruction', done && step.doneInstruction ? step.doneInstruction : step.instruction));
+  const body = el('div', 'workflow-bar-body');
+  body.append(el('p', 'workflow-instruction', done && step.doneInstruction ? step.doneInstruction : step.instruction));
+  appendStatus(body, view);
   if (done && state?.completedBy === 'auto') {
     const line = el('div', 'workflow-tick-line');
     line.innerHTML = tickSvg();
     line.append(document.createTextNode(autoSentence(step)));
-    bar.append(line);
+    body.append(line);
   } else if (done) {
-    bar.append(el('p', 'workflow-auto', 'Ticked by you.'));
+    body.append(el('p', 'workflow-auto', 'Ticked by you.'));
   }
-  if (notice && notice !== view.status?.line) bar.append(el('p', 'workflow-notice', notice));
-  appendMaths(bar, step, view);
+  if (notice && notice !== view.status?.line) body.append(el('p', 'workflow-notice', notice));
+  appendMaths(body, step, view);
+  bar.append(body);
   const actions = el('div', 'workflow-actions');
   const back = button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 });
   const details = button('Details', 'workflow-expand');
