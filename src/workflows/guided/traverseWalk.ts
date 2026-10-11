@@ -8,6 +8,8 @@
  */
 
 import type { GardenDocument, Line, Photo, Traverse, TraverseLeg, TraverseMisclosure, TraverseSetup } from '../../model';
+import { housePolygon } from '../../model';
+import { stampPhotoFocals } from '../../photoFocal';
 import { solve } from '../../solver/adjust';
 import { closureReport } from '../../solver/closure';
 import { sliceTraverseStep, solveTraverseStep, type IncrementalStepReport, type IncrementalTie } from '../../solver/incremental';
@@ -148,8 +150,7 @@ export function legHeadline(markId: string, semiMajorM: number): string {
 
 /** Tick anyway cannot complete a step whose gate is blocking. The engine calls the same check. */
 export function gatedTickRefusal(doc: GardenDocument, stepId: string): string | null {
-  noteTraverseDocument(doc);
-  return stepGateImpl(readProgress(doc), stepId);
+  return stepGateImpl(readProgress(doc), stepId, doc);
 }
 
 /** House marks clicked from one camera setup in the revealed prefix. */
@@ -172,12 +173,12 @@ export function singleSetupWarning(doc: GardenDocument, throughStep: number): st
   return `Re-shoot ${once[0]} from here; you will not see it again.`;
 }
 
-/** C1 and C2 stay while this run's loop is open. A new run does not keep the old lock. */
+/** Datum ends stay while this house run is the one on screen and it matches the walk. */
 export function datumRemovalBlock(doc: GardenDocument, pointId: string): string | null {
   const traverse = doc.houseTraverse;
   if (!traverse || traverse.status === 'closed') return null;
   const run = houseRun(doc);
-  if (run && traverse.runId !== run.startedAt) return null;
+  if (!run || traverse.runId !== run.startedAt) return null;
   const [a, b] = traverse.markOrder;
   if (pointId !== a && pointId !== b) return null;
   return `${pointId} stays until the loop is closed. It is a datum end.`;
@@ -254,8 +255,19 @@ function photoInput(photo: Photo, stationId: string, phoneId: string, lens: stri
   };
 }
 
+/** The newest corner and the two datum ends, while this house run is active. */
+export function walkMarkIds(doc: GardenDocument): string[] | null {
+  const traverse = doc.houseTraverse;
+  const run = houseRun(doc);
+  if (!traverse || !run || traverse.runId !== run.startedAt || traverse.markOrder.length < 2) return null;
+  const ids = traverse.markOrder.slice(0, 2);
+  const newest = traverse.newestId
+    ?? [...(housePolygon(doc)?.pointIds ?? [])].reverse().find((id) => !ids.includes(id));
+  if (newest && !ids.includes(newest)) ids.push(newest);
+  return ids;
+}
+
 export function nextTraverse(doc: GardenDocument, now = new Date().toISOString()): TraverseMove {
-  noteTraverseDocument(doc);
   const progress = readProgress(doc);
   const run = progress.activeId === 'house-traverse' ? progress.runs['house-traverse'] : undefined;
   if (!run || run.finishedAt) return { doc, notice: 'Start a workflow first.', changed: false };
@@ -276,11 +288,9 @@ export function nextTraverse(doc: GardenDocument, now = new Date().toISOString()
       return { doc: current, notice: review.status.line, changed: current !== doc };
     }
   }
-  noteTraverseDocument(current);
-  const move = advanceWorkflow(readProgress(current), now);
+  const move = advanceWorkflow(readProgress(current), now, current);
   let next = move.changed ? commitWorkflow(current, move.progress) : current;
   next = refreshArrived(next, now);
-  noteTraverseDocument(next);
   const arrived = readProgress(next).runs['house-traverse'];
   const arrivedView = walkView(next);
   const notice = arrived?.currentStepId === 'close' || arrived?.currentStepId === 'closure-review'
@@ -306,11 +316,9 @@ function nextLeg(doc: GardenDocument, now: string): TraverseMove {
     return { doc, notice: LEG_CHECKED, changed: false };
   }
   const ticked = applyPhase(doc, 'leg', now);
-  noteTraverseDocument(ticked);
-  const move = advanceWorkflow(readProgress(ticked), now);
+  const move = advanceWorkflow(readProgress(ticked), now, ticked);
   let next = move.changed ? commitWorkflow(ticked, move.progress) : ticked;
   next = refreshArrived(next, now);
-  noteTraverseDocument(next);
   return { doc: next, notice: walkView(next).status?.line, link: move.link, changed: true };
 }
 
@@ -741,18 +749,22 @@ function reviewView(doc: GardenDocument): WalkView {
   return { lines: built.lines, status: built.status, misclosure: built.misclosure };
 }
 
+function isBaselinePair(doc: GardenDocument, a: string, b: string): boolean {
+  if (!a || !b) return false;
+  return doc.baselines.some((item) =>
+    (item.a === a && item.b === b) || (item.a === b && item.b === a));
+}
+
 function foldTraverse(doc: GardenDocument, event: WorkflowEvent, now: string): GardenDocument {
   if (readProgress(doc).activeId !== 'house-traverse') return doc;
-  noteTraverseDocument(doc);
   if (event.type === 'baseline.saved' && event.kind === 'tape') return ensureTraverse(doc, event);
   if (event.type === 'traverse.observe') return observe(doc, event);
   if (event.type === 'traverse.close') return requestClose(doc);
   if (event.type === 'tape.entered') {
-    return saveWalkTape(doc, {
-      a: event.endAId || event.endA,
-      b: event.endBId || event.endB,
-      lengthM: event.lengthM,
-    }, now);
+    const a = event.endAId || event.endA;
+    const b = event.endBId || event.endB;
+    if (isBaselinePair(doc, a, b)) return doc;
+    return saveWalkTape(doc, { a, b, lengthM: event.lengthM }, now);
   }
   if (event.type === 'photo.uploaded') return noteVerifiedPhotos(doc, event.photoIds);
   return doc;
@@ -873,8 +885,21 @@ export function saveWalkTape(doc: GardenDocument, tape: WalkTapeInput, now = new
   if (!run || (run.currentStepId !== 'leg' && run.currentStepId !== 'close')) return doc;
   const traverse = doc.houseTraverse;
   if (!traverse?.runId || traverse.runId !== run.startedAt || traverse.status === 'closed') return doc;
+  if (isBaselinePair(doc, tape.a, tape.b)) return doc;
   const role = tape.role ?? ((traverse.markOrder.includes(tape.a) && traverse.markOrder.includes(tape.b)) ? 'cross' : 'leg');
   const fresh = role === 'leg' ? [tape.b, tape.a].find((id) => id && !traverse.markOrder.includes(id)) : undefined;
+  if (tape.step == null && role === 'leg' && fresh && traverse.observedStep != null) {
+    const view = computeLeg(doc);
+    if (!view?.status || view.status.line === LEG_UNSETTLED) {
+      return {
+        ...doc,
+        session: {
+          ...doc.session,
+          lastAction: 'This corner is not settled. Stay on it before you tape the next one.',
+        },
+      };
+    }
+  }
   const step = tape.step ?? (
     role === 'cross' || !fresh
       ? (traverse.observedStep ?? 0)
@@ -930,8 +955,8 @@ export function saveWalkPhoto(doc: GardenDocument, photo: Photo): GardenDocument
   return noteVerifiedPhotos({ ...doc, photos: nextPhotos }, [photo.id]);
 }
 
-function noteVerifiedPhotos(doc: GardenDocument, photoIds: string[]): GardenDocument {
-  let next = doc;
+export function noteVerifiedPhotos(doc: GardenDocument, photoIds: string[]): GardenDocument {
+  let next = stampPhotoFocals(doc, photoIds);
   for (const photoId of photoIds) {
     next = noteWalkPhoto(next, photoId);
     const photo = next.photos.find((item) => item.id === photoId);
@@ -939,6 +964,7 @@ function noteVerifiedPhotos(doc: GardenDocument, photoIds: string[]): GardenDocu
     const run = houseRun(next);
     if (!photo || !traverse || !run || photo.step == null || !traverse.newestId) continue;
     if (!photoIsUploadFresh(photo, run.startedAt, consumedIds(run))) continue;
+    if (traverse.observedStep != null && photo.step < traverse.observedStep) continue;
     next = observe(next, { type: 'traverse.observe', step: photo.step, newestId: traverse.newestId });
   }
   return next;
@@ -946,7 +972,6 @@ function noteVerifiedPhotos(doc: GardenDocument, photoIds: string[]): GardenDocu
 
 /** The Close the loop control. */
 export function closeWalk(doc: GardenDocument, now = new Date().toISOString()): GardenDocument {
-  noteTraverseDocument(doc);
   return withWorkflowEvent(doc, { type: 'traverse.close' }, now);
 }
 
@@ -984,30 +1009,24 @@ export function restartHouseWalk(doc: GardenDocument, now = new Date().toISOStri
   return releaseStaleWalk(commitWorkflow(doc, move.progress));
 }
 
-let noted: GardenDocument | undefined;
-
-export function noteTraverseDocument(doc: GardenDocument): void {
-  noted = doc;
-}
-
-function stepGateImpl(progress: WorkflowProgress, stepId: string): string | null {
+function stepGateImpl(progress: WorkflowProgress, stepId: string, doc: GardenDocument | undefined): string | null {
   if (progress.activeId !== 'house-traverse') return null;
   const run = progress.runs['house-traverse'];
   if (!run || run.finishedAt) return null;
   if (run.steps[stepId]?.status === 'complete') return null;
-  if (!noted) return 'This step is not ready.';
+  if (!doc) return 'This step is not ready.';
   if (stepId === 'datum') return 'Tape the house edge first.';
   if (stepId === 'leg') {
-    const view = computeLeg(noted);
+    const view = computeLeg(doc);
     if (!view?.status || view.status.blocked) return view?.status?.line ?? LEG_NOT_TAPED;
     return null;
   }
   if (stepId === 'close') {
-    const view = closeView(noted);
+    const view = closeView(doc);
     return view.status?.blocked ? view.status.line : null;
   }
   if (stepId === 'closure-review') {
-    const view = reviewView(noted);
+    const view = reviewView(doc);
     if (view.misclosure && !view.status?.blocked) return null;
     return view.status?.line ?? 'The closure is not settled.';
   }

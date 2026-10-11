@@ -323,7 +323,7 @@ export const houseTraverse: WorkflowDefinition = {
       id: 'close',
       title: 'Close',
       instruction: 'Tape back to the start, then stand there again.',
-      detail: ['Photograph at 1× with the in-app camera on iOS.'],
+      detail: ['On iOS, photograph at 1× with the in-app camera.'],
       complete: { on: 'traverse.phase', phase: 'close' },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },

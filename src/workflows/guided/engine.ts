@@ -539,22 +539,22 @@ export function stepIsManualOnly(step: WorkflowStep): boolean {
   return 'on' in step.complete && step.complete.on === 'manual';
 }
 
-function tickManualCurrent(progress: WorkflowProgress, now: string): WorkflowProgress {
+function tickManualCurrent(progress: WorkflowProgress, now: string, doc?: GardenDocument): WorkflowProgress {
   const pair = activePair(progress);
   if (!pair || pair.run.finishedAt) return progress;
   const step = pair.def.steps.find((item) => item.id === pair.run.currentStepId);
   if (!step || !stepIsManualOnly(step)) return progress;
   if (pair.run.steps[step.id]?.status === 'complete') return progress;
-  return tickWorkflow(progress, step.id, pair.run.steps[step.id]?.note, now).progress;
+  return tickWorkflow(progress, step.id, pair.run.steps[step.id]?.note, now, doc).progress;
 }
 
-export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toISOString()): WorkflowMove {
+export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toISOString(), doc?: GardenDocument): WorkflowMove {
   const initial = activePair(progress);
   if (!initial) return { progress, notice: 'Start a workflow first.', changed: false };
   if (initial.run.finishedAt) return { progress, notice: `${initial.def.title} is already finished.`, changed: false };
-  const ticked = tickManualCurrent(progress, now);
+  const ticked = tickManualCurrent(progress, now, doc);
   const pair = activePair(ticked) ?? initial;
-  const held = workflowStepGate?.(ticked, pair.run.currentStepId) ?? null;
+  const held = workflowStepGate?.(ticked, pair.run.currentStepId, doc) ?? null;
   if (held) {
     return {
       progress: ticked,
@@ -623,8 +623,14 @@ export function doneWorkflow(progress: WorkflowProgress, now = new Date().toISOS
   };
 }
 
-export function tickWorkflow(progress: WorkflowProgress, stepId: string, note?: string, now = new Date().toISOString()): WorkflowMove {
-  const held = workflowStepGate?.(progress, stepId) ?? null;
+export function tickWorkflow(
+  progress: WorkflowProgress,
+  stepId: string,
+  note?: string,
+  now = new Date().toISOString(),
+  doc?: GardenDocument,
+): WorkflowMove {
+  const held = workflowStepGate?.(progress, stepId, doc) ?? null;
   if (held) return { progress, notice: held, changed: false };
   const next = applyWorkflowEvent(progress, { type: 'manual.tick', stepId, note }, now);
   const changed = progressJson(progress) !== progressJson(next);
@@ -703,11 +709,11 @@ export function photoIsUploadFresh(photo: Photo, startedAt: string, taken: Reado
   return captured >= start && received >= start;
 }
 
-/** A workflow can refuse Tick and Next for a step that has not passed. */
-let workflowStepGate: ((progress: WorkflowProgress, stepId: string) => string | null) | null = null;
+/** A workflow can refuse Tick and Next for a step that has not passed. The document is the garden being ticked. */
+let workflowStepGate: ((progress: WorkflowProgress, stepId: string, doc: GardenDocument | undefined) => string | null) | null = null;
 
 export function setWorkflowStepGate(
-  gate: ((progress: WorkflowProgress, stepId: string) => string | null) | null,
+  gate: ((progress: WorkflowProgress, stepId: string, doc: GardenDocument | undefined) => string | null) | null,
 ): void {
   workflowStepGate = gate;
 }

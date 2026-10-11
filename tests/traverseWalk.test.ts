@@ -21,7 +21,7 @@ import {
   GOOD_LEG,
   LOOP_CLOSES,
   nextTraverse,
-  noteTraverseDocument,
+  noteVerifiedPhotos,
   RAW_GAP_NOTE,
   restartHouseWalk,
   saveWalkPhoto,
@@ -303,15 +303,15 @@ describe('walk round the house', () => {
     expect(stepId(nextTraverse(review.doc, NOW).doc)).toBe('closure-review');
   }, 120_000);
 
-  it('refuses to remove C1 or C2 while the loop is open', () => {
-    const doc = emptyDocument();
+  it('refuses to remove C1 or C2 while this house run is open', () => {
+    let doc = emptyDocument();
     doc.points = [
       { id: 'C1', kind: 'HSE' },
       { id: 'C2', kind: 'HSE' },
       { id: 'C3', kind: 'HSE' },
     ];
     doc.baselines = [{ id: 'datum', a: 'C1', b: 'C2', lengthM: 13, kind: 'tape' }];
-    doc.houseTraverse = { id: 't', markOrder: ['C1', 'C2'], status: 'open' };
+    doc = begin(doc);
     const blocked = deletePointMeasurement(doc, 'C1');
     expect(blocked.reason).toMatch(/datum end/);
     expect(blocked.reason).not.toMatch(/baseline end/);
@@ -321,6 +321,9 @@ describe('walk round the house', () => {
     const free = deletePointMeasurement(doc, 'C3');
     expect(free.reason ?? '').not.toMatch(/datum end/);
     expect(free.doc.points.some((point) => point.id === 'C3')).toBe(false);
+    const otherWorkflow = commitWorkflow(doc, { ...readProgress(doc), activeId: 'circle-field-test' });
+    const unlocked = deletePointMeasurement(otherWorkflow, 'C1');
+    expect(unlocked.reason ?? '').not.toMatch(/datum end/);
     const closed = deletePointMeasurement(
       { ...doc, houseTraverse: { ...doc.houseTraverse, status: 'closed' } },
       'C1',
@@ -437,14 +440,156 @@ describe('walk round the house', () => {
     let doc = begin(gardenFromFixture('loop4ct-steps.json'));
     doc = nextTraverse(doc, NOW).doc;
     doc = withWorkflowEvent(doc, { type: 'traverse.observe', step: 2, newestId: 'C4' }, NOW);
-    noteTraverseDocument(doc);
-    const later = tickWorkflow(readProgress(doc), 'adjust', undefined, NOW);
+    const later = tickWorkflow(readProgress(doc), 'adjust', undefined, NOW, doc);
     expect(later.changed).toBe(false);
     expect(later.notice).toMatch(/Read the closure/);
-    const review = tickWorkflow(readProgress(doc), 'closure-review', undefined, NOW);
+    const review = tickWorkflow(readProgress(doc), 'closure-review', undefined, NOW, doc);
     expect(review.changed).toBe(false);
-    const moved = advanceWorkflow(readProgress(doc), NOW);
+    const moved = advanceWorkflow(readProgress(doc), NOW, doc);
     expect(moved.changed).toBe(false);
     expect(readProgress(doc).runs['house-traverse']?.currentStepId).toBe('leg');
+  }, 120_000);
+
+  it('does not fold the baseline tape into the walk, and stays on an unsettled corner', () => {
+    let doc = emptyDocument('Baseline');
+    const started = startWorkflow(readProgress(doc), 'house-traverse', NOW);
+    doc = commitWorkflow(doc, started.progress);
+    const saved = saveBaselineLengthWorkflow(doc, 4, 0, 0, true);
+    expect(saved.ok).toBe(true);
+    const baseline = saved.doc.baselines[0];
+    doc = withWorkflowEvent(saved.doc, {
+      type: 'baseline.saved',
+      endA: baseline.a,
+      endB: baseline.b,
+      endAId: baseline.a,
+      endBId: baseline.b,
+      kind: 'tape',
+      offsetAMm: 0,
+      offsetBMm: 0,
+      lengthM: 4,
+    }, NOW);
+    doc = nextTraverse(doc, NOW).doc;
+    const before = doc.lines.length;
+    doc = withWorkflowEvent(doc, {
+      type: 'tape.entered',
+      endA: baseline.a,
+      endB: baseline.b,
+      endAId: baseline.a,
+      endBId: baseline.b,
+      lengthM: 4,
+    }, NOW);
+    expect(doc.lines).toHaveLength(before);
+    expect(doc.lines.some((line) => line.role === 'cross' && line.a === baseline.a && line.b === baseline.b)).toBe(false);
+    doc = saveWalkTape(doc, { a: baseline.b, b: 'HSE03', lengthM: 5.2, role: 'leg' }, NOW);
+    expect(doc.houseTraverse?.observedStep).toBe(0);
+    expect(status(doc)?.line).toBe('The leg is not settled.');
+    const stayed = saveWalkTape(doc, { a: 'HSE03', b: 'HSE04', lengthM: 4, role: 'leg' }, NOW);
+    expect(stayed.houseTraverse?.observedStep).toBe(0);
+    expect(stayed.session.lastAction).toMatch(/not settled/);
+    expect(stayed.lines.some((line) => line.b === 'HSE04' && line.runId)).toBe(false);
+  });
+
+  it('counts a verified photo once focal length and mark ids are on it', () => {
+    const input = JSON.parse(readFileSync(join(root, 'fixtures/traverse/loop4ct-steps.json'), 'utf8')) as { input: SolveInput };
+    let doc = emptyDocument('Upload');
+    const ids = new Set<string>([input.input.datum.originId, input.input.datum.axisPointId]);
+    for (const distance of input.input.distances ?? []) {
+      ids.add(distance.a);
+      ids.add(distance.b);
+    }
+    for (const photo of input.input.photos ?? []) {
+      ids.add(photo.stationId);
+      for (const click of photo.clicks) ids.add(click.pointId);
+    }
+    doc.points = [...ids].map((id) => ({ id, kind: id.startsWith('S') ? 'OCC' as const : 'HSE' as const, label: id }));
+    doc.baselines = [{
+      id: 'datum',
+      a: input.input.datum.originId,
+      b: input.input.datum.axisPointId,
+      lengthM: input.input.datum.lengthM,
+      sigmaM: input.input.datum.sigmaM,
+      kind: 'tape',
+    }];
+    doc = begin(doc);
+    doc = nextTraverse(doc, NOW).doc;
+    for (const distance of input.input.distances ?? []) {
+      doc = saveWalkTape(doc, {
+        id: distance.id,
+        a: distance.a,
+        b: distance.b,
+        lengthM: distance.slopeM,
+        sigmaM: distance.sigmaM,
+        role: distance.role,
+        step: distance.step,
+        newestId: distance.role === 'leg' ? (distance.b === 'C1' ? 'C4' : distance.b) : undefined,
+      }, NOW);
+    }
+    const bare = (input.input.photos ?? []).map((photo) => ({
+      id: photo.id,
+      setupId: 'walk',
+      stationId: photo.stationId,
+      width: photo.width,
+      height: photo.height,
+      clicks: photo.clicks.map((click) => ({ pointId: click.pointId, px: click.px, py: click.py })),
+      step: photo.step,
+      role: photo.role,
+      closing: photo.closing,
+      gravity: photo.gravity,
+      sigmaPx: photo.sigmaPx,
+      sigmaCentringM: photo.sigmaCentringM,
+      originalFile: {
+        fileName: `${photo.id}.jpg`,
+        size: 1,
+        quickXorHash: 'fixture',
+        uploadStatus: 'verified' as const,
+        capturedAt: NOW,
+        receivedAt: NOW,
+        calibrationKey: 'Apple|iPhone|back camera|6.9|27|4032x3024',
+        nativeCapture: {
+          source: 'library' as const,
+          deviceType: 'iPhone',
+          videoZoomFactor: 1,
+          lensPosition: null,
+          focusLocked: true,
+          exposureLocked: true,
+          geometricDistortionCorrectionSupported: null,
+          geometricDistortionCorrectionEnabled: null,
+          contentAwareDistortionCorrectionSupported: null,
+          contentAwareDistortionCorrectionEnabled: null,
+          photoQualityPrioritization: null,
+          autoRedEyeReductionEnabled: null,
+          stabilization: null,
+          focalLengthMm: 6.9,
+          focalLength35mm: 27,
+          lensModel: 'iPhone back camera',
+          intrinsicMatrix: null,
+          intrinsicReferenceWidth: null,
+          intrinsicReferenceHeight: null,
+          motionInterpolated: false,
+          gravity: photo.gravity ?? null,
+          width: photo.width,
+          height: photo.height,
+          requestedWidth: null,
+          requestedHeight: null,
+          orientation: 1,
+        },
+      },
+    }));
+    doc = { ...doc, photos: bare };
+    doc = noteVerifiedPhotos(doc, bare.map((photo) => photo.id));
+    for (const photo of doc.photos) {
+      expect(photo.fxOverWidth).toBeCloseTo(0.75, 5);
+      expect(photo.runId).toBe(NOW);
+      expect(photo.lens).toBe('1x');
+    }
+    expect(doc.photos.every((photo) => photo.phoneId === doc.photos[0]?.phoneId)).toBe(true);
+    expect({
+      tone: status(doc)?.tone,
+      line: status(doc)?.line,
+      step: doc.houseTraverse?.observedStep,
+      newest: doc.houseTraverse?.newestId,
+      photos: doc.photos.length,
+      withFx: doc.photos.filter((photo) => photo.fxOverWidth != null && photo.step != null).length,
+    }).toEqual({ tone: 'green', line: GOOD_LEG, step: 3, newest: 'C4', photos: doc.photos.length, withFx: doc.photos.length });
   }, 120_000);
 });

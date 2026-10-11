@@ -308,7 +308,7 @@ Survey maths:
 
 Tape back to the start, then stand there again.
 
-- Photograph at 1× with the in-app camera on iOS.
+- On iOS, photograph at 1× with the in-app camera.
 
 Completes when: traverse.phase close.
 

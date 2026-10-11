@@ -81,7 +81,7 @@ import {
   workflowNoteChange,
 } from './workflows/guided/guidedChrome';
 import { hydrateWorkflowProgress, readProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
-import { saveWalkTape } from './workflows/guided/traverseWalk';
+import { noteVerifiedPhotos, saveWalkTape, walkMarkIds } from './workflows/guided/traverseWalk';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
   appendPhotoToPoint,
@@ -194,7 +194,7 @@ export interface UiState {
   markPhotoId: string | null;
 }
 
-type MarkRole = 'A' | 'B' | 'TARGET';
+type MarkRole = string;
 
 type MarkDraft = {
   photoId: string;
@@ -734,7 +734,7 @@ function statusFromDraft(
   };
 }
 
-function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
+export function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
   const photos = state.doc.photos.map((p) => {
     if (p.id !== update.photoId) return p;
     return {
@@ -773,12 +773,14 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
     }
     return;
   }
-  const withPhotos = {
+  let withPhotos: GardenDocument = {
     ...state.doc,
     photos,
     photosManifest: state.doc.photosManifest ?? photosManifestLink(),
   };
-  setDoc(update.status === 'verified' ? workflowAfterUploadedPhoto(withPhotos, update.photoId) : withPhotos, null);
+  withPhotos = noteVerifiedPhotos(withPhotos, [update.photoId]);
+  if (update.status === 'verified') withPhotos = workflowAfterUploadedPhoto(withPhotos, update.photoId);
+  setDoc(withPhotos, null);
   if (update.status === 'queued') {
     setCloudMessage(`Photo ${update.fileName} queued for OneDrive.`);
   } else if (update.status === 'uploading') {
@@ -883,24 +885,34 @@ async function openPhotoMark(photoId: string): Promise<void> {
     /* keep stored size */
   }
 
+  const roles = markRoles(state.doc);
+  const walk = walkMarkIds(state.doc);
   const existing: PhotoClick[] = (photo.clicks ?? []).map((c) => {
+    if (walk) {
+      if (walk.includes(c.pointId)) return c;
+      if (c.pointId === 'A' && walk[0]) return { ...c, pointId: walk[0] };
+      if (c.pointId === 'B' && walk[1]) return { ...c, pointId: walk[1] };
+      if (bl && c.pointId === bl.a && walk[0]) return { ...c, pointId: walk[0] };
+      if (bl && c.pointId === bl.b && walk[1]) return { ...c, pointId: walk[1] };
+      return c;
+    }
     if (bl && c.pointId === bl.a) return { ...c, pointId: 'A' };
     if (bl && c.pointId === bl.b) return { ...c, pointId: 'B' };
     if (c.pointId !== 'A' && c.pointId !== 'B') return { ...c, pointId: 'TARGET' };
     return { ...c };
   });
-  const hasA = existing.some((c) => c.pointId === 'A');
-  const hasB = existing.some((c) => c.pointId === 'B');
-  const assignRole: MarkRole = !hasA ? 'A' : !hasB ? 'B' : 'TARGET';
+  const assignRole: MarkRole = roles.find((role) => !existing.some((c) => c.pointId === role)) ?? roles[roles.length - 1];
 
   markDraft = {
     photoId,
     clicks: existing,
     assignRole,
     suggestions: [],
-    hint: bl
-      ? `Mark baseline ${bl.a} (A) then ${bl.b} (B). This point = camera station.`
-      : 'Establish a baseline before marking ends.',
+    hint: walk
+      ? `Mark ${walk.join(', ')}. The newest corner is ${walk[walk.length - 1]}.`
+      : bl
+        ? `Mark baseline ${bl.a} (A) then ${bl.b} (B). This point = camera station.`
+        : 'Establish a baseline before marking ends.',
     busy: true,
   };
   setState({
@@ -940,24 +952,27 @@ function closePhotoMark(): void {
   setState({ markPhotoId: null });
 }
 
+function markRoles(doc: GardenDocument): string[] {
+  return walkMarkIds(doc) ?? ['A', 'B', 'TARGET'];
+}
+
 function placeMarkAt(px: number, py: number): void {
   if (!markDraft) return;
   const role = markDraft.assignRole;
   const clicks = markDraft.clicks.filter((c) => c.pointId !== role);
   clicks.push({ pointId: role, px, py });
-  const hasA = clicks.some((c) => c.pointId === 'A');
-  const hasB = clicks.some((c) => c.pointId === 'B');
-  let nextRole: MarkRole = 'TARGET';
-  if (!hasA) nextRole = 'A';
-  else if (!hasB) nextRole = 'B';
+  const roles = markRoles(state.doc);
+  const nextRole = roles.find((item) => !clicks.some((c) => c.pointId === item)) ?? roles[roles.length - 1];
+  const walk = walkMarkIds(state.doc);
   markDraft = {
     ...markDraft,
     clicks,
     assignRole: nextRole,
-    hint:
-      role === 'TARGET'
+    hint: walk
+      ? `Placed ${role}. Next: ${nextRole}.`
+      : role === 'TARGET'
         ? 'Extra mark saved — a separate object point needs a second sighting or tape distance.'
-        : hasA && hasB
+        : clicks.some((c) => c.pointId === 'A') && clicks.some((c) => c.pointId === 'B')
           ? 'A and B set — Confirm to place the camera station (or mark an optional target).'
           : `Placed ${role}. Next: ${nextRole}.`,
   };
@@ -967,7 +982,8 @@ function placeMarkAt(px: number, py: number): void {
 function confirmPhotoMarks(): void {
   if (!markDraft) return;
   const draft = markDraft;
-  const result = applyPhotoMarks(state.doc, draft.photoId, draft.clicks);
+  const marked = applyPhotoMarks(state.doc, draft.photoId, draft.clicks);
+  const result = { ...marked, doc: noteVerifiedPhotos(marked.doc, [draft.photoId]) };
   markDraft = null;
   const photo = result.doc.photos.find((item) => item.id === draft.photoId);
   const point = result.doc.points.find((item) => item.id === photo?.addPointId);
@@ -2114,7 +2130,7 @@ function applyWorkflowLink(link: WorkflowLink): void {
   window.open(`https://github.com/pjwinstone/gardenplanting/raw/main/docs/markers/${file}`, '_blank', 'noopener');
 }
 
-async function onShellClick(e: Event): Promise<void> {
+export async function onShellClick(e: Event): Promise<void> {
   const target = (e.target as HTMLElement | null)?.closest?.('[data-cmd]') as HTMLElement | null;
   if (!target) return;
   const cmd = target.getAttribute('data-cmd');
@@ -2728,9 +2744,38 @@ async function onShellClick(e: Event): Promise<void> {
         role: 'leg',
       });
     }
+    const refused = added.find((line) => line.lengthM != null && !next.lines.find((item) => item.id === line.id)?.runId);
+    const walking = readProgress(next).activeId === 'house-traverse'
+      && (readProgress(next).runs['house-traverse']?.currentStepId === 'leg'
+        || readProgress(next).runs['house-traverse']?.currentStepId === 'close');
     setDoc(next, null);
+    if (walking && refused) {
+      surfaceFail(next.session.lastAction ?? 'This corner is not settled. Stay on it before you tape the next one.', 'house');
+      return;
+    }
     setState({ menuOpen: true, menuFocus: 'house', openErrorLog: false });
     speakCoachLine(next.session.lastAction ?? 'Corner added.', next.session.speakSteps);
+    return;
+  }
+  if (cmd === 'tape-between-marks') {
+    const panel = target.closest('.step-panel');
+    const a = (panel?.querySelector('[data-field=tie-a]') as HTMLSelectElement | null)?.value ?? '';
+    const b = (panel?.querySelector('[data-field=tie-b]') as HTMLSelectElement | null)?.value ?? '';
+    const length = Number((panel?.querySelector('[data-field=tie-length]') as HTMLInputElement | null)?.value);
+    if (!a || !b || a === b || !(length > 0)) {
+      surfaceFail('Choose two different marks and a length in metres.', 'house');
+      openMenuSection('house');
+      return;
+    }
+    const next = saveWalkTape(state.doc, { a, b, lengthM: length, role: 'cross' });
+    const saved = next.lines.some((line) => line.runId && ((line.a === a && line.b === b) || (line.a === b && line.b === a)));
+    setDoc(next, null);
+    if (!saved) {
+      surfaceFail(next.session.lastAction ?? 'That tape was not added to this walk.', 'house');
+      return;
+    }
+    setState({ menuOpen: true, menuFocus: 'house', openErrorLog: false });
+    speakCoachLine(next.session.lastAction ?? `Taped ${a} to ${b}.`, next.session.speakSteps);
     return;
   }
   if (cmd === 'close-house') {
@@ -3266,7 +3311,7 @@ function buildPhotoMarkOverlay(doc: GardenDocument): HTMLElement {
   overlay.appendChild(stage);
 
   const roles = el('div', { className: 'photo-mark__roles' });
-  for (const role of ['A', 'B', 'TARGET'] as MarkRole[]) {
+  for (const role of markRoles(doc)) {
     const label = role === 'TARGET' ? 'Target' : role;
     roles.appendChild(
       el('button', {
@@ -3753,6 +3798,22 @@ function buildHouseForm(doc: GardenDocument): HTMLElement {
         attrs: { type: 'button', 'data-cmd': 'add-house-corner' },
       }),
     );
+    const marks = walkMarkIds(doc) ?? housePolygon(doc)?.pointIds ?? [];
+    if (marks.length >= 2) {
+      panel.appendChild(el('p', { text: 'Tape between two marks. This is a cross-tie, not the next corner.' }));
+      const tie = el('div', { className: 'step-form' });
+      tie.appendChild(markSelect('From', 'tie-a', marks));
+      tie.appendChild(markSelect('To', 'tie-b', marks, marks[1]));
+      tie.appendChild(numField('Length (m)', 'tie-length', ''));
+      panel.appendChild(tie);
+      panel.appendChild(
+        el('button', {
+          className: 'btn btn--util',
+          text: 'Tape between two marks',
+          attrs: { type: 'button', 'data-cmd': 'tape-between-marks', 'data-testid': 'tape-between-marks' },
+        }),
+      );
+    }
     if (n >= 3) {
       panel.appendChild(
         el('button', {
@@ -5279,6 +5340,21 @@ function menuFocusAfterMode(mode: string): MenuSection {
     default:
       return 'recommend';
   }
+}
+
+function markSelect(label: string, field: string, marks: string[], selected?: string): HTMLElement {
+  const wrap = el('label', { className: 'field' });
+  wrap.appendChild(el('span', { text: label }));
+  const select = el('select', { attrs: { 'data-field': field, 'aria-label': label } }) as HTMLSelectElement;
+  for (const id of marks) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = id;
+    if (id === selected) opt.selected = true;
+    select.appendChild(opt);
+  }
+  wrap.appendChild(select);
+  return wrap;
 }
 
 function numField(label: string, field: string, value: string): HTMLElement {
