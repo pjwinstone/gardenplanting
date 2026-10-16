@@ -1,13 +1,16 @@
 import type { GardenDocument } from '../../model';
 import { addPhotoMeasurement } from '../../layers';
+import { tokensAt } from '../petri/engine';
 import { addPointNet } from '../petri/loadNet';
-import { enabledTransitions, fireTransition, newPetriRun } from '../petri/engine';
+import { enabledTransitions, fireTransition, newPetriRun, transitionEnabled } from '../petri/engine';
 import { clearPetriRun, readPetriRun, writePetriRun } from '../petri/persist';
 import type { PetriRunState, PetriTransition } from '../petri/types';
 import {
   emptyAddPointContext,
   type AddPointWorkflowContext,
+  type FixOptionId,
 } from './context';
+import { listFixOptionsForLayer } from './fixOptions';
 import { computeMeasurementStrength } from './strength';
 import { commitAddPointDraft } from './commit';
 
@@ -45,16 +48,30 @@ export function patchAddPointWorkflowContext(
   persist();
 }
 
-export function currentUserTransition(): PetriTransition | undefined {
-  const users = enabledTransitions(addPointNet, run.marking, ctx, 'user');
-  return users[0];
+const STRENGTH_USER_IDS = new Set(['accept_amber', 'redo_red', 'add_measurement_grey']);
+
+export function currentUserTransition(doc: GardenDocument): PetriTransition | undefined {
+  const env = { doc };
+  const users = enabledTransitions(addPointNet, run.marking, ctx, 'user', env);
+  if (users.length) return users[0];
+  if (tokensAt(run.marking, 'strength') > 0) {
+    for (const id of STRENGTH_USER_IDS) {
+      const t = addPointNet.transitions.find((x) => x.id === id);
+      if (t && transitionEnabled(t, run.marking, ctx, env)) return t;
+    }
+  }
+  return undefined;
 }
 
 function afterTransition(
   doc: GardenDocument,
   transitionId: string,
 ): { doc: GardenDocument; error?: string } {
-  if (transitionId === 'compute_strength') {
+  if (transitionId === 'list_fix_options' && ctx.layerRule) {
+    ctx = { ...ctx, fixOptions: listFixOptionsForLayer(ctx.layerRule) };
+    persist();
+  }
+  if (transitionId === 'adjust') {
     const result = computeMeasurementStrength(doc, ctx);
     ctx = {
       ...ctx,
@@ -64,9 +81,8 @@ function afterTransition(
       strengthDetail: result.detail,
     };
     persist();
-    return { doc };
   }
-  if (transitionId === 'commit_to_garden') {
+  if (transitionId === 'keep_green' || transitionId === 'accept_amber') {
     const committed = commitAddPointDraft(doc, ctx);
     ctx = emptyAddPointContext();
     run = newPetriRun(addPointNet);
@@ -76,8 +92,6 @@ function afterTransition(
   if (transitionId === 'redo_red') {
     ctx = {
       ...ctx,
-      pendingPhotoId: undefined,
-      tapeLengthM: undefined,
       strength: undefined,
       residualMm: undefined,
       acceptedAmber: false,
@@ -85,7 +99,7 @@ function afterTransition(
     };
     persist();
   }
-  if (transitionId === 'add_more_grey') {
+  if (transitionId === 'add_measurement_grey') {
     ctx = {
       ...ctx,
       strength: undefined,
@@ -94,16 +108,21 @@ function afterTransition(
     };
     persist();
   }
+  if (transitionId === 'side_choice') {
+    ctx = { ...ctx, sideResolved: true };
+    persist();
+  }
   return { doc };
 }
 
 function syncAppTransitions(doc: GardenDocument): GardenDocument {
+  const env = { doc };
   let nextDoc = doc;
   for (;;) {
-    const apps = enabledTransitions(addPointNet, run.marking, ctx, 'app');
+    const apps = enabledTransitions(addPointNet, run.marking, ctx, 'app', env);
     if (!apps.length) break;
     const t = apps[0]!;
-    const fired = fireTransition(run, addPointNet, t.id, ctx);
+    const fired = fireTransition(run, addPointNet, t.id, ctx, env);
     if (fired.error) break;
     run = fired.run;
     persist();
@@ -117,13 +136,25 @@ export function fireAddPointUserTransition(
   doc: GardenDocument,
   transitionId: string,
 ): { doc: GardenDocument; run: PetriRunState; error?: string } {
-  const fired = fireTransition(run, addPointNet, transitionId, ctx);
+  const env = { doc };
+  const fired = fireTransition(run, addPointNet, transitionId, ctx, env);
   if (fired.error) return { doc, run, error: fired.error };
   run = fired.run;
   persist();
   let nextDoc = afterTransition(doc, transitionId).doc;
   nextDoc = syncAppTransitions(nextDoc);
   return { doc: nextDoc, run };
+}
+
+export function selectFixOption(optionId: FixOptionId): void {
+  const choice = ctx.fixOptions?.find((o) => o.id === optionId);
+  ctx = {
+    ...ctx,
+    fixOptionId: optionId,
+    twoSolutions: choice?.twoSolutions ?? false,
+    sideResolved: choice?.twoSolutions ? false : true,
+  };
+  persist();
 }
 
 export function attachDraftFromPhoto(

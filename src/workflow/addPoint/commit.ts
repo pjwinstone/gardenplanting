@@ -45,7 +45,9 @@ export function commitAddPointDraft(
   let next: GardenDocument = {
     ...doc,
     points: doc.points.map((p) =>
-      p.id === id ? { ...p, kind, layerId, fixed: ctx.fixOption === 'baseline_end' } : p,
+      p.id === id
+        ? { ...p, kind, layerId, fixed: ctx.layerRule === 'baseline' }
+        : p,
     ),
     session: {
       ...doc.session,
@@ -57,7 +59,7 @@ export function commitAddPointDraft(
 
   next = setStickyPanel(next, { stickyLayerId: layerId });
 
-  if (ctx.fixOption === 'baseline_end') {
+  if (ctx.layerRule === 'baseline') {
     const bl = preferredBaseline(next);
     const pt = next.points.find((p) => p.id === id);
     if (bl && pt) {

@@ -34,7 +34,17 @@ await page.screenshot({
   fullPage: false,
 });
 
-await page.click('[data-testid="tools-open-add-point"]');
+await page.click('[data-cmd="load-synthetic"]');
+await page.waitForFunction(() => !document.querySelector('[data-testid="menu-drawer"]'), {
+  timeout: 8000,
+});
+await new Promise((r) => setTimeout(r, 400));
+
+await page.click('[data-testid="hamburger"]');
+await page.waitForSelector('[data-testid="menu-drawer"]', { timeout: 5000 });
+await page.$eval('[data-testid="menu-acc-tools"] > summary', (el) => el.click());
+await page.$eval('[data-testid="menu-acc-recommend"] > summary', (el) => el.click());
+await page.click('[data-testid="recommend-add-point"]');
 await page.waitForSelector('[data-testid="petri-add-point"]', { timeout: 8000 });
 await page.screenshot({
   path: join(OUT, 'petri-pick-layer-portrait.png'),
@@ -44,7 +54,7 @@ await page.screenshot({
 await page.click('[data-cmd="petri-pick-layer"][data-layer-rule="baseline"]');
 await page.waitForFunction(
   () => document.querySelector('[data-cmd="petri-pick-fix"]'),
-  { timeout: 5000 },
+  { timeout: 8000 },
 );
 await page.screenshot({
   path: join(OUT, 'petri-pick-fix-portrait.png'),

@@ -1,34 +1,46 @@
+import type { GardenDocument } from '../../model';
 import type { AddPointWorkflowContext } from '../addPoint/context';
+import { countExistingBaselinePoints } from '../addPoint/baselinePoints';
 
-export type GuardName = string;
-
-export type GuardFn = (ctx: AddPointWorkflowContext) => boolean;
-
-export const GUARDS: Record<GuardName, GuardFn> = {
-  always: () => true,
-  has_layer_rule: (ctx) => Boolean(ctx.layerRule),
-  needs_side_choice: (ctx) =>
-    ctx.fixOption === 'free_point' || ctx.fixOption === 'camera_station',
-  side_not_required: (ctx) => ctx.fixOption === 'baseline_end',
-  has_side_or_skipped: (ctx) =>
-    ctx.fixOption === 'baseline_end' ||
-    ctx.side != null ||
-    Boolean(ctx.sideAnchorPointId),
-  has_measurement: (ctx) =>
-    Boolean(ctx.tapeLengthM != null && ctx.tapeLengthM > 0) ||
-    Boolean(ctx.pendingPhotoId) ||
-    Boolean(ctx.draftPointId),
-  strength_is_green: (ctx) => ctx.strength === 'green',
-  strength_is_amber: (ctx) => ctx.strength === 'amber',
-  strength_is_red: (ctx) => ctx.strength === 'red',
-  strength_is_grey: (ctx) => ctx.strength === 'grey' || ctx.strength == null,
-  ready_to_commit: (ctx) =>
-    Boolean(ctx.draftPointId) && (ctx.strength === 'green' || Boolean(ctx.acceptedAmber)),
+export type GuardEnv = {
+  doc?: GardenDocument;
 };
 
-export function guardPasses(name: string | undefined, ctx: AddPointWorkflowContext): boolean {
-  if (!name) return true;
-  const fn = GUARDS[name];
-  if (!fn) return false;
-  return fn(ctx);
+export type GuardFn = (ctx: AddPointWorkflowContext, env: GuardEnv) => boolean;
+
+/** Predicates keyed by transition id from add-point.net.yaml */
+export const TRANSITION_GUARDS: Record<string, GuardFn> = {
+  choose_layer: () => true,
+  list_fix_options: (_ctx, env) => {
+    const n = env.doc ? countExistingBaselinePoints(env.doc) : 0;
+    return n >= 2;
+  },
+  pick_fix_option: (ctx) => Boolean(ctx.fixOptionId),
+  detect_two_solutions: (ctx) => Boolean(ctx.twoSolutions && !ctx.sideResolved),
+  side_choice: () => true,
+  take_measurements: (ctx) =>
+    Boolean(ctx.fixOptionId) && (!ctx.twoSolutions || ctx.sideResolved === true),
+  adjust: (ctx) =>
+    Boolean(ctx.tapeLengthM && ctx.tapeLengthM > 0) ||
+    Boolean(ctx.pendingPhotoId) ||
+    Boolean(ctx.draftPointId),
+  raise_baseline_warning: (ctx, env) => {
+    if (ctx.layerRule === 'baseline') return false;
+    if (!ctx.baselineWarning) return false;
+    return Boolean(env.doc);
+  },
+  keep_green: (ctx) => ctx.strength === 'green',
+  accept_amber: (ctx) => ctx.strength === 'amber',
+  redo_red: (ctx) => ctx.strength === 'red',
+  add_measurement_grey: (ctx) => ctx.strength === 'grey' || ctx.strength == null,
+};
+
+export function guardPasses(
+  transitionId: string,
+  ctx: AddPointWorkflowContext,
+  env: GuardEnv = {},
+): boolean {
+  const fn = TRANSITION_GUARDS[transitionId];
+  if (!fn) return true;
+  return fn(ctx, env);
 }

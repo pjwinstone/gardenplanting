@@ -1,4 +1,4 @@
-import { guardPasses } from './guards';
+import { guardPasses, type GuardEnv } from './guards';
 import type { AddPointWorkflowContext } from '../addPoint/context';
 import type {
   Marking,
@@ -28,9 +28,10 @@ export function transitionEnabled(
   t: PetriTransition,
   marking: Marking,
   ctx: AddPointWorkflowContext,
+  env: GuardEnv = {},
 ): boolean {
   if (!hasEnoughTokens(marking, t.inputs)) return false;
-  return guardPasses(t.guard, ctx);
+  return guardPasses(t.id, ctx, env);
 }
 
 export function enabledTransitions(
@@ -38,10 +39,11 @@ export function enabledTransitions(
   marking: Marking,
   ctx: AddPointWorkflowContext,
   kind?: 'user' | 'app',
+  env: GuardEnv = {},
 ): PetriTransition[] {
   return net.transitions.filter((t) => {
     if (kind && t.kind !== kind) return false;
-    return transitionEnabled(t, marking, ctx);
+    return transitionEnabled(t, marking, ctx, env);
   });
 }
 
@@ -50,11 +52,12 @@ export function fireTransition(
   net: PetriNetDoc,
   transitionId: string,
   ctx: AddPointWorkflowContext,
+  env: GuardEnv = {},
   at = new Date().toISOString(),
 ): { run: PetriRunState; error?: string } {
   const t = net.transitions.find((x) => x.id === transitionId);
   if (!t) return { run, error: `Unknown transition ${transitionId}` };
-  if (!transitionEnabled(t, run.marking, ctx)) {
+  if (!transitionEnabled(t, run.marking, ctx, env)) {
     return { run, error: `Transition ${transitionId} is not enabled` };
   }
 
@@ -85,28 +88,10 @@ export function fireTransition(
 
 export function newPetriRun(net: PetriNetDoc): PetriRunState {
   return {
-    activity: net.activity,
-    version: net.version,
+    activity: net.id,
+    version: net.revision,
     marking: initialMarking(net),
     log: [],
     context: {},
   };
-}
-
-/** Fire app transitions in stable net order until none remain enabled. */
-export function autoFireAppTransitions(
-  run: PetriRunState,
-  net: PetriNetDoc,
-  ctx: AddPointWorkflowContext,
-  at = new Date().toISOString(),
-): PetriRunState {
-  let current = run;
-  for (;;) {
-    const apps = enabledTransitions(net, current.marking, ctx, 'app');
-    if (!apps.length) break;
-    const next = fireTransition(current, net, apps[0]!.id, ctx, at);
-    if (next.error) break;
-    current = next.run;
-  }
-  return current;
 }

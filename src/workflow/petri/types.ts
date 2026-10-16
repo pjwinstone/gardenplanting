@@ -2,6 +2,7 @@ export type TransitionKind = 'user' | 'app';
 
 export interface PetriPlace {
   id: string;
+  label?: string;
 }
 
 export interface PetriTransition {
@@ -9,15 +10,16 @@ export interface PetriTransition {
   inputs: Record<string, number>;
   outputs: Record<string, number>;
   kind: TransitionKind;
-  screen: string;
   label: string;
-  guard?: string;
-  glossary?: string[];
+  /** Prose guard from YAML (documentation); runtime uses transition id in guards.ts */
+  guardNote?: string;
+  does?: string;
 }
 
 export interface PetriNetDoc {
-  activity: string;
-  version: number;
+  id: string;
+  title: string;
+  revision: number;
   places: PetriPlace[];
   initial: Record<string, number>;
   transitions: PetriTransition[];

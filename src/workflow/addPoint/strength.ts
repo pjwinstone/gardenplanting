@@ -29,7 +29,7 @@ export function computeMeasurementStrength(
   doc: GardenDocument,
   ctx: AddPointWorkflowContext,
 ): StrengthResult {
-  const toleranceMm = toleranceForFix(ctx.layerRule, ctx.fixOption);
+  const toleranceMm = toleranceForFix(ctx.layerRule, undefined);
   const pointId = ctx.draftPointId;
 
   if (!pointId) {

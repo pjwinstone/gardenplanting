@@ -593,7 +593,7 @@ async function applyNewPointThumb(
         setDoc(attached.doc, attached.error);
         return;
       }
-      const fired = fireAddPointUserTransition(attached.doc, 'capture_measurement');
+      const fired = fireAddPointUserTransition(attached.doc, 'take_measurements');
       if (fired.error) {
         surfaceFail(fired.error, 'add-point');
         setDoc(fired.doc, fired.error);
@@ -1172,7 +1172,8 @@ function applyPetriChromeResult(patch: {
 }): void {
   if (patch.error) surfaceFail(patch.error, 'add-point');
   const last = getAddPointPetriRun().log[getAddPointPetriRun().log.length - 1];
-  const committed = last?.transitionId === 'commit_to_garden';
+  const committed =
+    last?.transitionId === 'keep_green' || last?.transitionId === 'accept_amber';
   if (patch.doc) setDoc(patch.doc, null);
   if (patch.close || committed) {
     closePetriAddPointFlow();
@@ -2639,7 +2640,7 @@ async function onShellClick(e: Event): Promise<void> {
   if (cmd === 'inspect-point') {
     const pointId = target.getAttribute('data-point-id');
     if (!pointId) return;
-    if (state.petriAddPointOpen && petriPlanTapForSide(pointId)) {
+    if (state.petriAddPointOpen && petriPlanTapForSide(pointId, state.doc)) {
       setState({});
       return;
     }

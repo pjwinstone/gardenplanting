@@ -4,7 +4,9 @@ import glossaryYaml from '../../workflow/glossary.yaml?raw';
 export interface GlossaryTerm {
   id: string;
   term: string;
-  definition: string;
+  short: string;
+  long: string;
+  category?: string;
 }
 
 interface GlossaryDoc {
@@ -33,6 +35,22 @@ export function allGlossaryTerms(): GlossaryTerm[] {
   return [...byId.values()];
 }
 
+export function glossaryTooltip(id: string): string {
+  const g = glossaryById(id);
+  if (!g) return '';
+  return g.short;
+}
+
+export function glossaryHelpBlock(id: string): string {
+  const g = glossaryById(id);
+  if (!g) return '';
+  return `${g.short} ${g.long}`;
+}
+
+/** Menu accordion: term + long help (not edited — from glossary.yaml). */
 export function glossaryPairsForMenu(): Array<[string, string]> {
-  return allGlossaryTerms().map((t) => [t.term, t.definition]);
+  return allGlossaryTerms()
+    .filter((t) => t.category !== 'workflow-model')
+    .slice(0, 40)
+    .map((t) => [t.term, t.long]);
 }
