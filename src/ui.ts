@@ -4891,7 +4891,7 @@ function buildMenuDrawer(
   petriToggle.appendChild(petriCheck);
   petriToggle.appendChild(
     el('span', {
-      text: 'Petri + Point workflow (trial — default off until field test)',
+      text: 'Petri + Point workflow (default on — turn off for legacy + Point dialog)',
     }),
   );
   toolsBody.appendChild(petriToggle);

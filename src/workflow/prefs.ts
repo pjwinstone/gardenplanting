@@ -1,17 +1,19 @@
 export const PETRI_ADD_POINT_KEY = 'garden-survey:petri-add-point';
 
+/** Default ON when unset (fresh install). Explicit `0` selects legacy + Point dialog. */
 export function petriAddPointEnabled(): boolean {
   try {
-    return localStorage.getItem(PETRI_ADD_POINT_KEY) === '1';
+    const v = localStorage.getItem(PETRI_ADD_POINT_KEY);
+    if (v === '0') return false;
+    return true;
   } catch {
-    return false;
+    return true;
   }
 }
 
 export function setPetriAddPointEnabled(on: boolean): void {
   try {
-    if (on) localStorage.setItem(PETRI_ADD_POINT_KEY, '1');
-    else localStorage.removeItem(PETRI_ADD_POINT_KEY);
+    localStorage.setItem(PETRI_ADD_POINT_KEY, on ? '1' : '0');
   } catch {
     /* ignore */
   }
