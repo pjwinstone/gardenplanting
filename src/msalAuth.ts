@@ -252,18 +252,27 @@ export async function signOut(): Promise<{ ok: boolean; error?: string }> {
     notifyAuth();
     return { ok: true };
   }
-  if (!pca) return { ok: true };
+  const redirectUri = readMsalEnv()?.redirectUri;
+  const account = getAccount();
+  if (pca) {
+    try {
+      await pca.clearCache(account ? { account } : undefined);
+    } catch (e) {
+      console.warn('Garden Planting: MSAL clearCache during sign-out', e);
+    }
+  }
+  lastInit = { configured: msalConfigured(), signedIn: false, fromRedirect: false };
+  notifyAuth();
+  if (!pca || !account) return { ok: true };
   try {
-    const account = getAccount();
-    const redirectUri = readMsalEnv()?.redirectUri;
     await pca.logoutRedirect({
-      account: account ?? undefined,
+      account,
       postLogoutRedirectUri: redirectUri,
     });
-    return { ok: true };
   } catch (e) {
-    return { ok: false, error: plainAuthError(e) };
+    console.warn('Garden Planting: MSAL logoutRedirect failed after local sign-out', e);
   }
+  return { ok: true };
 }
 
 /**
