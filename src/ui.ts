@@ -42,11 +42,11 @@ import {
 import { appBuild, appVersion, buildMenuTitle, buildStamp } from './buildInfo';
 import { STAGE2_FIELD_STEPS } from './stage2Checklist';
 import {
-  clearErrorLog,
   getErrorLog,
   hasUnseenErrors,
   logError,
-  markErrorsSeen,
+  isErrorLogEntrySeen,
+  toggleErrorLogEntrySeen,
   subscribeErrorLog,
   unseenErrorCount,
 } from './errorLog';
@@ -1032,7 +1032,7 @@ function openMenuSection(section: MenuSection): void {
     openErrorLog: section === 'error-log',
     refuseMessage: state.refuseMessage,
   });
-  // Error log: do not auto-acknowledge — tap a red error line (or Mark seen).
+  // Error log: do not auto-acknowledge — tap a line to toggle seen.
 }
 
 function openPointDialog(mode: 'add' | 'inspect'): void {
@@ -1933,6 +1933,16 @@ export function mount(root: HTMLElement): void {
   // Stable event delegation — survives innerHTML re-renders.
   shell.addEventListener('click', onShellClick);
   shell.addEventListener('change', onShellChange);
+  shell.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const target = (e.target as HTMLElement | null)?.closest?.(
+      '[data-cmd="toggle-error-log-entry"]',
+    ) as HTMLElement | null;
+    if (!target) return;
+    e.preventDefault();
+    const id = target.getAttribute('data-entry-id');
+    if (id) toggleErrorLogEntrySeen(id);
+  });
 
   const render = () => {
     shell.innerHTML = '';
@@ -2218,18 +2228,9 @@ async function onShellClick(e: Event): Promise<void> {
     openMenuSection('error-log');
     return;
   }
-  if (cmd === 'clear-error-log') {
-    clearErrorLog();
-    setState({ openErrorLog: true, menuOpen: true });
-    return;
-  }
-  if (cmd === 'mark-errors-seen') {
-    markErrorsSeen();
-    return;
-  }
-  if (cmd === 'acknowledge-error') {
-    // Tap a red error line → clear ☰ / concertina red warning; keep entries.
-    markErrorsSeen();
+  if (cmd === 'toggle-error-log-entry') {
+    const id = target.getAttribute('data-entry-id');
+    if (id) toggleErrorLogEntrySeen(id);
     return;
   }
   if (cmd === 'load-synthetic') {
@@ -4826,22 +4827,6 @@ function buildMenuDrawer(
     className: 'menu-acc__body menu-drawer__errors',
     attrs: { 'data-testid': 'error-log', id: 'error-log' },
   });
-  const errHead = el('div', { className: 'menu-drawer__row' });
-  errHead.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: 'Mark seen',
-      attrs: { type: 'button', 'data-cmd': 'mark-errors-seen' },
-    }),
-  );
-  errHead.appendChild(
-    el('button', {
-      className: 'btn btn--util',
-      text: 'Clear',
-      attrs: { type: 'button', 'data-cmd': 'clear-error-log' },
-    }),
-  );
-  errBody.appendChild(errHead);
   const entries = getErrorLog();
   if (!entries.length) {
     errBody.appendChild(
@@ -4851,20 +4836,33 @@ function buildMenuDrawer(
     const list = el('ul', { className: 'error-log__list' });
     for (const entry of entries) {
       const isError = (entry.severity ?? 'error') === 'error';
+      const seen = isErrorLogEntrySeen(entry.id);
       const item = el('li', {
         className:
-          'error-log__item' +
-          (isError ? ' error-log__item--error' : ' error-log__item--info'),
-        attrs: isError
-          ? {
-              'data-cmd': 'acknowledge-error',
-              'data-testid': 'error-log-entry',
-              role: 'button',
-              tabindex: '0',
-              title: 'Tap to clear menu warning',
-              'aria-label': 'Acknowledge error and clear menu warning',
-            }
-          : { 'data-testid': 'error-log-entry-info' },
+          'error-log__item error-log__item--tap' +
+          (isError
+            ? seen
+              ? ' error-log__item--error-seen'
+              : ' error-log__item--error'
+            : seen
+              ? ' error-log__item--info-seen'
+              : ' error-log__item--info'),
+        attrs: {
+          'data-cmd': 'toggle-error-log-entry',
+          'data-entry-id': entry.id,
+          'data-testid': isError ? 'error-log-entry' : 'error-log-entry-info',
+          role: 'button',
+          tabindex: '0',
+          title: seen ? 'Tap to mark unseen' : 'Tap to acknowledge',
+          'aria-pressed': seen ? 'true' : 'false',
+          'aria-label': isError
+            ? seen
+              ? 'Acknowledged error — tap to mark unseen'
+              : 'Unacknowledged error — tap to acknowledge'
+            : seen
+              ? 'Acknowledged message — tap to mark unseen'
+              : 'Message — tap to acknowledge',
+        },
       });
       const when = new Date(entry.at).toLocaleString();
       item.appendChild(

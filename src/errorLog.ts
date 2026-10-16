@@ -17,13 +17,14 @@ export interface ErrorLogEntry {
 
 const STORAGE_KEY = 'garden-survey:error-log';
 const SEEN_KEY = 'garden-survey:error-log-seen-id';
+const SEEN_IDS_KEY = 'garden-survey:error-log-seen-ids';
 const MAX_ENTRIES = 80;
 
 type Listener = () => void;
 const listeners: Listener[] = [];
 
 let entries: ErrorLogEntry[] = loadEntries();
-let lastSeenId: string | null = loadSeenId();
+let seenIds: Set<string> = loadSeenIds();
 let installed = false;
 
 export function subscribeErrorLog(fn: Listener): () => void {
@@ -96,11 +97,33 @@ function loadEntries(): ErrorLogEntry[] {
   }
 }
 
-function loadSeenId(): string | null {
+function loadSeenIds(): Set<string> {
   try {
-    return localStorage.getItem(SEEN_KEY);
+    const raw = localStorage.getItem(SEEN_IDS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        return new Set(parsed.filter((id): id is string => typeof id === 'string'));
+      }
+    }
+    const legacy = localStorage.getItem(SEEN_KEY);
+    if (!legacy) return new Set();
+    const idx = entries.findIndex((e) => e.id === legacy);
+    const ids = new Set<string>();
+    if (idx < 0) {
+      for (const e of entries) ids.add(e.id);
+    } else {
+      for (const e of entries.slice(idx)) ids.add(e.id);
+    }
+    try {
+      localStorage.setItem(SEEN_IDS_KEY, JSON.stringify([...ids]));
+      localStorage.removeItem(SEEN_KEY);
+    } catch {
+      /* ignore quota */
+    }
+    return ids;
   } catch {
-    return null;
+    return new Set();
   }
 }
 
@@ -112,10 +135,10 @@ function persist(): void {
   }
 }
 
-function persistSeen(): void {
+function persistSeenIds(): void {
   try {
-    if (lastSeenId) localStorage.setItem(SEEN_KEY, lastSeenId);
-    else localStorage.removeItem(SEEN_KEY);
+    if (seenIds.size) localStorage.setItem(SEEN_IDS_KEY, JSON.stringify([...seenIds]));
+    else localStorage.removeItem(SEEN_IDS_KEY);
   } catch {
     /* ignore */
   }
@@ -125,52 +148,37 @@ export function getErrorLog(): ErrorLogEntry[] {
   return entries.map(withSeverity);
 }
 
-function latestUnseenErrorId(): string | null {
-  const err = entries.map(withSeverity).find((e) => e.severity === 'error');
-  return err?.id ?? null;
+export function isErrorLogEntrySeen(id: string): boolean {
+  return seenIds.has(id);
+}
+
+/** Tap a log line — toggle seen (acknowledged) state for that entry. */
+export function toggleErrorLogEntrySeen(id: string): void {
+  if (!entries.some((e) => e.id === id)) return;
+  if (seenIds.has(id)) seenIds.delete(id);
+  else seenIds.add(id);
+  persistSeenIds();
+  notify();
 }
 
 /** Unseen **error** lines only — info never keeps the hamburger red. */
 export function hasUnseenErrors(): boolean {
-  const latest = latestUnseenErrorId();
-  if (!latest) return false;
-  if (!lastSeenId) return true;
-  // Seen marker is the newest entry id at acknowledge time; any newer error counts.
-  const ids = entries.map((e) => e.id);
-  const seenIdx = ids.indexOf(lastSeenId);
-  if (seenIdx < 0) return true;
   return entries
-    .slice(0, seenIdx)
     .map(withSeverity)
-    .some((e) => e.severity === 'error');
+    .some((e) => e.severity === 'error' && !seenIds.has(e.id));
 }
 
 export function unseenErrorCount(): number {
-  if (!entries.length) return 0;
-  if (!lastSeenId) {
-    return entries.map(withSeverity).filter((e) => e.severity === 'error').length;
-  }
-  const idx = entries.findIndex((e) => e.id === lastSeenId);
-  const window = idx < 0 ? entries : entries.slice(0, idx);
-  return window.map(withSeverity).filter((e) => e.severity === 'error').length;
-}
-
-/** Acknowledge warning — clears ☰ red; keeps log entries. */
-export function markErrorsSeen(): void {
-  if (!entries.length) {
-    lastSeenId = null;
-  } else {
-    lastSeenId = entries[0].id;
-  }
-  persistSeen();
-  notify();
+  return entries
+    .map(withSeverity)
+    .filter((e) => e.severity === 'error' && !seenIds.has(e.id)).length;
 }
 
 export function clearErrorLog(): void {
   entries = [];
-  lastSeenId = null;
+  seenIds = new Set();
   persist();
-  persistSeen();
+  persistSeenIds();
   notify();
 }
 
