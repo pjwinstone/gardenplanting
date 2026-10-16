@@ -19,7 +19,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
-    "@types/node": "^22.15.0",
+    "@types/node": "^26.6.5",
     "fake-indexeddb": "^6.2.5",
     "puppeteer": "^24.15.0",
     "tsx": "^4.20.3",
