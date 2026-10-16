@@ -1,13 +1,37 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   PETRI_ADD_POINT_KEY,
   petriAddPointEnabled,
   setPetriAddPointEnabled,
 } from '../src/workflow/prefs';
 
+function memoryLocalStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => {
+      map.set(key, value);
+    },
+    removeItem: (key) => {
+      map.delete(key);
+    },
+    clear: () => {
+      map.clear();
+    },
+    key: (index) => [...map.keys()][index] ?? null,
+    get length() {
+      return map.size;
+    },
+  };
+}
+
 describe('petri add point prefs', () => {
   beforeEach(() => {
-    localStorage.removeItem(PETRI_ADD_POINT_KEY);
+    vi.stubGlobal('localStorage', memoryLocalStorage());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('defaults to ON when no stored setting', () => {
