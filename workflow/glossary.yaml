@@ -1,0 +1,77 @@
+# Source of truth for on-screen words in the Petri + Point workflow.
+terms:
+  - id: add_point
+    term: "+ Point"
+    definition: Add a measured mark on the garden plan using tape and/or photo observations.
+  - id: survey_layer
+    term: Survey layer
+    definition: Baseline, railway, flower bed, or tree — sets which tolerances and fix rules apply.
+  - id: layer_baseline
+    term: Baseline
+    definition: Control along a known-length segment; points feed the active baseline ends list.
+  - id: layer_railway
+    term: Railway
+    definition: Track centreline (184 mm gauge); corridor checks use the railway tolerance.
+  - id: layer_flower_bed
+    term: Flower bed
+    definition: Soft landscape edge; looser tolerance than structure or baseline.
+  - id: layer_tree
+    term: Tree
+    definition: Woody plant stake; widest tolerance and optional offset from the trunk.
+  - id: fix_option
+    term: Fix option
+    definition: How this point is constrained — free point, baseline end, or camera station.
+  - id: fix_free
+    term: Free point
+    definition: Place on the plan from photo/tape without locking to a baseline end.
+  - id: fix_baseline_end
+    term: Baseline end
+    definition: Mark is one end of the active baseline (updates baseline geometry when accepted).
+  - id: fix_camera_station
+    term: Camera station
+    definition: The phone position solved from baseline ends marked in the photo.
+  - id: side_choice
+    term: Side
+    definition: Which side of the baseline or edge the point lies on — tap the plan to choose.
+  - id: measurement
+    term: Measurement
+    definition: Tape distance and/or photo marks that locate this point.
+  - id: tape
+    term: Tape
+    definition: Hand-taped distance in metres (default σ 20 mm).
+  - id: photo
+    term: Photo
+    definition: Survey image with marks on known control and the target.
+  - id: measurement_strength
+    term: Measurement strength
+    definition: Green within tolerance, amber marginal, red over tolerance, grey not checked yet.
+  - id: strength_green
+    term: Green
+    definition: Residual within the layer tolerance — safe to commit.
+  - id: strength_amber
+    term: Amber
+    definition: Marginal — you may accept with a note or add another measurement.
+  - id: strength_red
+    term: Red
+    definition: Over tolerance — redo or add measurements before trusting this point.
+  - id: strength_grey
+    term: Grey
+    definition: Strength not computed yet — add a measurement or wait for solver support.
+  - id: accept_continue
+    term: Accept and continue
+    definition: Keep an amber point with your note; it still enters the garden document.
+  - id: add_measurement
+    term: Add measurement
+    definition: Capture another tape or photo for this point without discarding prior work.
+  - id: redo_measurement
+    term: Redo measurement
+    definition: Drop the last measurement attempt and capture again.
+  - id: residual
+    term: Residual
+    definition: Difference between observed and fitted geometry, in millimetres.
+  - id: tolerance
+    term: Tolerance
+    definition: Maximum residual allowed for green strength on this survey layer (mm).
+  - id: plan_tap
+    term: Plan tap
+    definition: Tap the garden plan to pick a side or anchor point for this measurement.
