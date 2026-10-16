@@ -151,6 +151,19 @@ import {
   type GardenCopyChoice,
   type GardenReconcileResult,
 } from './gardenCloudSave';
+import { glossaryPairsForMenu } from './workflow/glossary';
+import { petriAddPointEnabled, setPetriAddPointEnabled } from './workflow/prefs';
+import {
+  attachDraftFromPhoto,
+  fireAddPointUserTransition,
+  getAddPointPetriRun,
+  resetPetriAddPointSession,
+} from './workflow/addPoint/session';
+import {
+  handleAddPointPetriDomEvent,
+  petriPlanTapForSide,
+  renderAddPointPetriChrome,
+} from './workflow/addPoint/addPointChrome';
 export type View = 'survey' | 'tags';
 
 /** One hamburger accordion open at a time (point dialogue is separate, on-plan). */
@@ -191,6 +204,8 @@ export interface UiState {
   pendingPointThumb: string | null;
   /** Photo open in full-screen mark / tag-suggest overlay. */
   markPhotoId: string | null;
+  /** Petri-net + Point trial workflow (settings toggle). */
+  petriAddPointOpen: boolean;
 }
 
 type MarkRole = 'A' | 'B' | 'TARGET';
@@ -566,6 +581,36 @@ async function applyNewPointThumb(
       height = nat.height;
     } catch {
       /* keep defaults in measurement */
+    }
+    if (state.petriAddPointOpen) {
+      const attached = attachDraftFromPhoto(state.doc, {
+        thumbnailDataUrl: thumb,
+        width,
+        height,
+      });
+      if (attached.error) {
+        surfaceFail(attached.error, 'add-point');
+        setDoc(attached.doc, attached.error);
+        return;
+      }
+      const fired = fireAddPointUserTransition(attached.doc, 'take_measurements');
+      if (fired.error) {
+        surfaceFail(fired.error, 'add-point');
+        setDoc(fired.doc, fired.error);
+        return;
+      }
+      const photoId = fired.doc.session.selectedPhotoId;
+      setDoc(fired.doc, null);
+      setState({
+        petriAddPointOpen: true,
+        menuOpen: false,
+        openErrorLog: false,
+        pendingPointThumb: null,
+      });
+      if (original) await queueCapturedOriginal(original, pixels);
+      if (photoId) void openPhotoMark(photoId);
+      setState({});
+      return;
     }
     const result = workflowAddPoint(state.doc, {
       thumbnailDataUrl: thumb,
@@ -1023,6 +1068,7 @@ let state: UiState = {
   pointDialog: null,
   pendingPointThumb: null,
   markPhotoId: null,
+  petriAddPointOpen: false,
 };
 
 function openMenuSection(section: MenuSection): void {
@@ -1062,9 +1108,91 @@ function closePointDialog(): void {
   });
 }
 
+function startPetriAddPointFlow(): void {
+  const legal = new Set(legalActions(state.doc));
+  if (
+    legal.has('add_point') &&
+    state.doc.session.mode !== 'ADD_POINT' &&
+    state.doc.session.mode !== 'ADD_POINT_EXTRA_YAW'
+  ) {
+    const probe = canTransition(state.doc, 'add_point');
+    if (probe.ok) {
+      const { doc: next, result } = applyTransition(state.doc, 'add_point');
+      if (result.ok) {
+        resetPetriAddPointSession();
+        setState({
+          doc: {
+            ...next,
+            session: { ...next.session, inspectingPointId: undefined },
+          },
+          refuseMessage: null,
+          menuOpen: false,
+          pointDialog: null,
+          petriAddPointOpen: true,
+          openErrorLog: false,
+          pendingPointThumb: null,
+        });
+        speakCoachLine('Petri + Point — pick the survey layer first.', next.session.speakSteps);
+        return;
+      }
+    }
+  }
+  resetPetriAddPointSession();
+  const base =
+    state.doc.session.inspectingPointId != null
+      ? {
+          ...state.doc,
+          session: { ...state.doc.session, inspectingPointId: undefined },
+        }
+      : state.doc;
+  const doc =
+    base.session.mode === 'ADD_POINT' || base.session.mode === 'ADD_POINT_EXTRA_YAW'
+      ? base
+      : { ...base, session: { ...base.session, mode: 'ADD_POINT' as const } };
+  setState({
+    doc,
+    pointDialog: null,
+    petriAddPointOpen: true,
+    menuOpen: false,
+    openErrorLog: false,
+    refuseMessage: null,
+    pendingPointThumb: null,
+  });
+}
+
+function closePetriAddPointFlow(): void {
+  setState({ petriAddPointOpen: false, pendingPointThumb: null });
+}
+
+function applyPetriChromeResult(patch: {
+  doc?: GardenDocument;
+  close?: boolean;
+  launchCamera?: boolean;
+  error?: string;
+}): void {
+  if (patch.error) surfaceFail(patch.error, 'add-point');
+  const last = getAddPointPetriRun().log[getAddPointPetriRun().log.length - 1];
+  const committed =
+    last?.transitionId === 'keep_green' || last?.transitionId === 'accept_amber';
+  if (patch.doc) setDoc(patch.doc, null);
+  if (patch.close || committed) {
+    closePetriAddPointFlow();
+    if (patch.doc && committed) {
+      speakCoachLine(patch.doc.session.lastAction ?? 'Point committed.', patch.doc.session.speakSteps);
+    }
+    return;
+  }
+  if (patch.launchCamera) launchNewPointCamera();
+  setState({});
+}
+
 /** Enter ADD_POINT when legal, then open the on-plan dialogue with sticky defaults.
  *  `launchCamera` (default true) opens the rear camera in the same user gesture. */
 function startAddPointDialog(opts: { launchCamera?: boolean } = {}): void {
+  if (petriAddPointEnabled()) {
+    startPetriAddPointFlow();
+    return;
+  }
   const launchCamera = opts.launchCamera !== false;
   const legal = new Set(legalActions(state.doc));
   if (
@@ -2125,6 +2253,20 @@ async function onShellClick(e: Event): Promise<void> {
   if (!cmd) return;
   e.preventDefault();
 
+  if (cmd.startsWith('petri-')) {
+    handleAddPointPetriDomEvent(target, state.doc, applyPetriChromeResult);
+    return;
+  }
+  if (cmd === 'toggle-petri-add-point') {
+    const input = target as HTMLInputElement;
+    if (input.type === 'checkbox') {
+      setPetriAddPointEnabled(input.checked);
+      if (!input.checked && state.petriAddPointOpen) closePetriAddPointFlow();
+      else setState({});
+    }
+    return;
+  }
+
   if (cmd.startsWith('workflow-')) {
     const result = handleWorkflowCommand(cmd, state.doc, target);
     if (result.doc) {
@@ -2498,6 +2640,10 @@ async function onShellClick(e: Event): Promise<void> {
   if (cmd === 'inspect-point') {
     const pointId = target.getAttribute('data-point-id');
     if (!pointId) return;
+    if (state.petriAddPointOpen && petriPlanTapForSide(pointId, state.doc)) {
+      setState({});
+      return;
+    }
     const pt = state.doc.points.find((p) => p.id === pointId);
     if (!pt) return;
     // Seed sticky panel from this point's measurement history
@@ -3038,6 +3184,13 @@ function onShellChange(e: Event): void {
     });
     return;
   }
+  if (cmd === 'toggle-petri-add-point') {
+    const checked = (t as HTMLInputElement).checked;
+    setPetriAddPointEnabled(checked);
+    if (!checked && state.petriAddPointOpen) closePetriAddPointFlow();
+    else setState({});
+    return;
+  }
   if (cmd === 'select-chrome-mode') {
     selectChromeMode(t.value);
     return;
@@ -3140,7 +3293,11 @@ function buildSurveyView(): HTMLElement {
 
   // Refuse banner stays under the floating + Point dialog (never covers Close / A±).
   // Persist/quota must not use refuseMessage — see handleLocalPersistFailure.
-  if (state.refuseMessage && !state.pointDialog) {
+  if (state.petriAddPointOpen) {
+    wrap.appendChild(renderAddPointPetriChrome(doc));
+  }
+
+  if (state.refuseMessage && !state.pointDialog && !state.petriAddPointOpen) {
     wrap.appendChild(
       el('div', {
         className: 'refuse refuse--overlay',
@@ -4721,6 +4878,24 @@ function buildMenuDrawer(
   );
   toolsBody.appendChild(tools);
 
+  toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'Settings' }));
+  const petriToggle = el('label', { className: 'field menu-acc__toggle' });
+  const petriCheck = el('input', {
+    attrs: {
+      type: 'checkbox',
+      'data-cmd': 'toggle-petri-add-point',
+      'data-testid': 'toggle-petri-add-point',
+    },
+  }) as HTMLInputElement;
+  petriCheck.checked = petriAddPointEnabled();
+  petriToggle.appendChild(petriCheck);
+  petriToggle.appendChild(
+    el('span', {
+      text: 'Petri + Point workflow (default on — turn off for legacy + Point dialog)',
+    }),
+  );
+  toolsBody.appendChild(petriToggle);
+
   toolsBody.appendChild(el('h4', { className: 'menu-acc__sub', text: 'All mode actions' }));
   const allList = el('div', { className: 'menu-drawer__actions' });
   for (const action of ALL_ACTIONS) {
@@ -4892,25 +5067,7 @@ function buildMenuDrawer(
     className: 'menu-acc__body glossary',
     attrs: { 'data-testid': 'glossary' },
   });
-  const glossary: Array<[string, string]> = [
-    ['+ Point', 'New measurement — opens the camera; photo places the point.'],
-    ['+ Item', 'New named thing on the current layer.'],
-    ['+ Layer', 'New grouping plane in this garden.'],
-    ['+ Photo', 'Another photo on the **current** point (yaw / same station).'],
-    ['− Photo', 'Remove the selected photo (keep ≥1, or delete the point).'],
-    ['− Point / Item / Layer', 'Delete that level (confirm when destructive).'],
-    ['Baseline', 'Control segment used for measurements.'],
-    ['Garden', 'This survey document (single garden for now).'],
-    ['Layer', 'Grouping plane for items (e.g. walkway, bed).'],
-    ['Item', 'Named thing you measure points on.'],
-    ['Geometry', 'Shape hint for the item (square, circle, …).'],
-    [
-      'Photo',
-      'Survey photos: shoot in Camera.app (12 MP, HEIF Max and ProRAW off, location off), then Library at Actual Size. Take photo is aim-only / camera-path (no lens data). The original file is queued for upload. The live view is an aiming preview.',
-    ],
-    ['Pinch / pan', 'Zooms and pans the garden plan only; dialogs and ☰ stay fixed.'],
-    ['Menu', 'Idle mode when no workflow dialog is open.'],
-  ];
+  const glossary: Array<[string, string]> = glossaryPairsForMenu();
   const dl = el('dl', { className: 'glossary__list' });
   for (const [term, def] of glossary) {
     dl.appendChild(el('dt', { className: 'glossary__term', text: term }));

@@ -1,0 +1,1814 @@
+# glossary.yaml — single source of truth for Garden Planting terms.
+#
+# Purpose
+#   - Agents read this file for stable ids and aliases when drafting nets, UI, or reviews.
+#   - The app can show `short` as a tap-to-explain tooltip and `long` on a help screen.
+#   - Paul is not a surveyor or Petri-net expert: keep short/long in plain English.
+#
+# Schema (each entry under `terms:`)
+#   id          string   kebab-case, stable forever (do not rename; add aliases instead)
+#   term        string   preferred display name on screen
+#   short       string   one plain sentence, ~20 words max (tooltip)
+#   long        string   2–4 plain sentences (help panel)
+#   category    enum     survey | measurement | quality-check | workflow-model | app-screen
+#   aliases     list     other names (legacy only; prefer `term`)
+#   code_names  list     identifiers in src/ or survey.net.yaml
+#   related     list     other term ids (must resolve)
+#   units / example / shown_on — optional
+#
+# File-level:
+#   reviewed_by — Geometry & Maths Advisor reviews applied to this glossary
+#
+# Naming (Paul + Geometry & Maths Advisor, 15 Oct 2026)
+#   - Baseline / Point / Camera position (not Datum / Mark / Station).
+#   - Camera position replaces camera-location and camera-setup (legacy aliases).
+#   - Traverse = activity; Path = object; Closure primary on measurement layer only.
+#   - Baseline layer has NO loop / NO Closure. Close/closing-gap = measurement layer.
+#   - Geometric checks are soft observations with sigma; frame axes are hard constraints.
+#   - chi-squared-test is preferred; chi-squared-closure id kept as legacy stub.
+#   - closing-gap = measured misclosure; closing-uncertainty = propagated σ;
+#     Closure: gap ≤ 1.96σ (1D) or inside 2.45 ellipse (2D).
+#   - tape-measurement (not tape-reading);
+#     repeat-tape / cross-tie are aliases of tape-measurement.
+#   - quality-check replaces user-facing gate / walk gate.
+#   - measurement-strength (named-reading is a legacy alias); grey = unchecked.
+#   - focal-length stays; fx is code shorthand.
+#   - Plurals add s. Many baselines; one default baseline pins the frame.
+#
+# See also: advisor-review-2.md, constraints.example.yaml
+
+version: 1
+title: Garden Planting glossary
+revision: 10
+reviewed_by:
+- agent: geometry-maths-advisor
+  agent_id: e7e34885-32ba-4339-98a1-0479c57450a9
+  reviews:
+  - id: 1
+    note: Layer/frame/check vocabulary (partly superseded by review 2 on baseline loops).
+  - id: 2
+    date: '2026-10-15'
+    file: advisor-review-2.md
+    note: No-loop baseline layer; soft geometric checks; constraint YAML; closure is measurement-layer
+      only.
+terms:
+- id: baseline
+  term: Baseline
+  short: A taped control edge on the baseline layer that helps pin the garden frame.
+  long: A baseline is two baseline points with a taped length. The default baseline pins the frame (point
+    1 at the origin, point 2 with Y = 0). A garden may store many baselines; extras reinforce the baseline
+    layer as soft observations — there is no baseline loop and no Closure on this layer. If the default
+    is unavailable, choose another from existing points or measure a new one.
+  category: survey
+  aliases:
+  - datum
+  - house edge
+  - control edge
+  code_names:
+  - Baseline
+  - baseline.saved
+  - baselines
+  - baseline_ready
+  - measure_new_baseline
+  - use_default_baseline
+  - choose_other_baseline
+  - set_datum
+  - datum_held
+  - isHouseEdge
+  related:
+  - default-baseline
+  - baseline-point
+  - baseline-layer
+  - frame
+  - point
+  - tape-measurement
+  - geometric-check
+  units: m
+  example: Saved baselines include Baseline 1 (C1–C2, default) and Baseline 2 (C3–C4 on the side).
+  shown_on:
+  - measure_new_baseline
+  - use_default_baseline
+  - choose_other_baseline
+  - set_default_baseline
+  - baseline
+- id: baseline-layer
+  term: Baseline layer
+  short: 'The control layer: baselines, baseline points, and the garden frame — not a loop.'
+  long: The baseline layer holds baselines and their points and pins the garden frame. It has no loop
+    and no Closure. Geometric checks here are soft observations with sigma; the only hard constraints
+    are the frame (default baseline point 1 at the origin, point 2 with Y = 0). Sub-layers and measurement
+    work must never move baseline points.
+  category: survey
+  aliases:
+  - control layer
+  - control
+  code_names:
+  - control
+  - baselines
+  related:
+  - baseline
+  - baseline-point
+  - frame
+  - measurement-layer
+  - geometric-check
+  - default-baseline
+  example: Default baseline C1–C2 pins the frame; further baselines reinforce control without closing
+    a loop.
+- id: baseline-point
+  term: Baseline point
+  short: A point that is an end of a baseline on the baseline layer.
+  long: Baseline points are the two ends of a baseline (origin and axis). The default baseline’s first
+    point is the frame origin; the second has Y = 0. Measurement-layer work must not move them.
+  category: survey
+  aliases:
+  - control point
+  - datum end
+  code_names:
+  - BL
+  - Baseline.a
+  - Baseline.b
+  related:
+  - baseline
+  - baseline-layer
+  - point
+  - frame
+  - default-baseline
+  example: Baseline 1 › Point A is a baseline point at the frame origin.
+- id: frame
+  term: Frame
+  short: The single 2D garden coordinate system pinned by the default baseline.
+  long: 'There is one horizontal frame for the garden. Hard constraints only: default baseline point 1
+    at the origin, point 2 on the +X axis (Y = 0). +Y is the garden side. Layers do not have their own
+    frames; they share these coordinates.'
+  category: survey
+  aliases:
+  - coordinate frame
+  - garden frame
+  - datum frame
+  code_names:
+  - frame
+  - origin
+  - axis
+  related:
+  - baseline-layer
+  - default-baseline
+  - baseline-point
+  - point
+  units: m
+  example: With default baseline C1–C2, C1 is (0,0) and C2 is (L, 0) in the frame.
+- id: default-baseline
+  term: Default baseline
+  short: The baseline that pins the garden frame origin and +X axis when it is available.
+  long: Among saved baselines, one is the default. Its first point is the frame origin and its second
+    lies on +X (Y = 0). When you start work the app uses it if available; otherwise you choose or measure
+    another and may set that as default.
+  category: survey
+  aliases:
+  - default
+  - preferred baseline
+  code_names:
+  - isDefault
+  - use_default_baseline
+  - set_default_baseline
+  related:
+  - baseline
+  - baseline-layer
+  - baseline-point
+  - frame
+  - point
+  example: Baseline 1 (C1–C2) is the default; after Point A is removed the app asks you to choose another.
+  shown_on:
+  - use_default_baseline
+  - choose_other_baseline
+  - set_default_baseline
+  - baseline
+- id: point
+  term: Point
+  short: A named spot in the garden that belongs to a parent such as a baseline or a path.
+  long: A point is always under a parent object — a baseline or a path. On screen the breadcrumb ends
+    at the point, such as Baseline 1 › Point A. Kind is ground or camera-position. Camera positions sit
+    on the object being traversed. Prefer Point on every screen — Mark is legacy only.
+  category: survey
+  aliases:
+  - mark
+  - corner
+  - house corner
+  - plantable point
+  code_names:
+  - Point
+  - Mark
+  - markOrder
+  - newestId
+  - HSE
+  - C1
+  - C2
+  - H1
+  - H2
+  - marks
+  - kind
+  related:
+  - measured-point
+  - baseline
+  - path
+  - leg
+  - tolerance-class
+  - camera-position
+  - baseline-point
+  - checked
+  example: Baseline 1 › Point A is the origin end of the default baseline.
+  shown_on:
+  - baseline
+  - leg
+  - close
+  - choose_other_baseline
+- id: garden-object
+  term: Garden object
+  short: A named thing you survey, such as a bed, path, or house outline.
+  long: A garden object lives on the measurement layer (or a sub-layer). It has a geometry type (point,
+    line, circle, rectangle, and so on) and refers to points. You traverse its outline to gather measured
+    points; Closure rates that outline when finished.
+  category: survey
+  aliases:
+  - object
+  - feature
+  - Item
+  code_names:
+  - GardenObject
+  - geometryType
+  - measuredPointIds
+  related:
+  - measurement-layer
+  - sub-layer
+  - object-outline
+  - point
+  - path
+  - geometric-check
+  example: Flower bed ‘Roses’ is a garden object whose outline points are measured on the bed sub-layer.
+- id: object-outline
+  term: Object outline
+  short: The loop of points around a garden object that you finish and then run Closure on.
+  long: An object outline is the ordered boundary of a measurement-layer object. Closing that outline
+    (the Close act) triggers Closure. Baseline layer has no outline loop.
+  category: survey
+  aliases:
+  - outline
+  - object loop
+  - boundary loop
+  code_names:
+  - pointOrder
+  - outline
+  related:
+  - garden-object
+  - close
+  - closure
+  - measurement-layer
+  - path
+- id: measured-point
+  term: Measured point
+  short: One measurement or estimate of a point, for example from a tape or a photo solve.
+  long: A point can have many measured points underneath it. Each measured point is one observation or
+    solve of that point’s position — from a tape, a photo, or an adjust. The app will later pick a best
+    measured point to show as the point’s position; the rule for that choice is not fixed yet.
+  category: survey
+  aliases:
+  - measurement of a point
+  - estimate
+  - observation of a point
+  code_names:
+  - MeasuredPoint
+  - source
+  related:
+  - point
+  - tape-measurement
+  - photo-click
+  - adjust
+  - uncertainty-ellipse
+  units: m
+  example: Point A has a tape measured point and a photo measured point; both sit under Point A.
+  shown_on:
+  - baseline
+  - leg
+  - closure
+  - adjust
+- id: path
+  term: Path
+  short: An ordered set of points you can traverse (for example the walk round the house).
+  long: 'A path is a saved object: an ordered set of points. You traverse a path by moving the camera
+    location around those points and recording measured points. Camera locations used while traversing
+    are points on that same path (parentType path). Name is still provisional for UI copy.'
+  category: survey
+  aliases:
+  - ordered points
+  - house path
+  code_names:
+  - Path
+  - pointIds
+  - house-traverse
+  related:
+  - point
+  - camera-position
+  - traverse
+  - baseline
+  - leg
+  - measured-point
+  example: The walk round the house is a path whose points are the house corners in order.
+  shown_on:
+  - baseline
+  - leg
+  - close
+  - closure
+- id: measurement-layer
+  term: Measurement layer
+  short: Where object outlines are measured and where Closure applies after you finish a loop.
+  long: The measurement layer holds garden objects and their outlines (paths, beds, rails, and so on).
+    Close, Closure, and closing gap belong here only — not on the baseline layer. Sub-layers inherit measurement
+    rules and never alter baseline points. Absolute closing-gap caps can differ by sub-layer.
+  category: survey
+  aliases:
+  - features layer
+  - object layer
+  code_names:
+  - features
+  - layerId
+  related:
+  - baseline-layer
+  - sub-layer
+  - garden-object
+  - object-outline
+  - closure
+  - close
+  - path
+- id: sub-layer
+  term: Sub-layer
+  short: A named kind of measurement work such as railway, flower beds, or trees.
+  long: Sub-layers sit under the measurement layer and share its rules. They may set their own absolute
+    closing-gap or accuracy caps (for example railway tighter than flower beds). They never change baseline-layer
+    points.
+  category: survey
+  aliases:
+  - feature layer id
+  - layer kind
+  code_names:
+  - layerId
+  - boundary
+  - structure
+  - walkway
+  - bed
+  - survey
+  related:
+  - measurement-layer
+  - railway
+  - flower-beds
+  - trees
+  - garden-object
+  - tolerance-class
+- id: railway
+  term: Railway
+  short: A measurement sub-layer for rail or edging; suggested 95% cap about 30 mm.
+  long: Railway is a measurement sub-layer. Suggested 95% accuracy about 30 mm, plus straightness or curvature
+    geometric checks. Paul decides final caps. Closing gap versus closing uncertainty, if used, follows
+    measurement-layer Closure.
+  category: survey
+  aliases:
+  - rail
+  - edging
+  code_names:
+  - railway
+  related:
+  - sub-layer
+  - measurement-layer
+  - geometric-check
+  - tolerance-class
+  - closure
+- id: flower-beds
+  term: Flower beds
+  short: A measurement sub-layer for beds; suggested 95% and closing gap about 100 mm.
+  long: 'Flower beds are a measurement sub-layer. Suggested plantable-class style caps: about 100 mm at
+    95%, and closing gap within closing uncertainty and ≤ 100 mm absolute when an outline is closed. Paul
+    decides final numbers.'
+  category: survey
+  aliases:
+  - beds
+  - bed
+  code_names:
+  - bed
+  - BED
+  related:
+  - sub-layer
+  - measurement-layer
+  - garden-object
+  - closure
+  - tolerance-class
+- id: trees
+  term: Trees
+  short: A measurement sub-layer for tree centres; suggested 95% about 150 mm, no Closure.
+  long: Trees are surveyed as centre points on a measurement sub-layer. Suggested 95% about 150 mm. No
+    outline Closure — a tree is not a loop.
+  category: survey
+  aliases:
+  - tree
+  - tree centre
+  code_names:
+  - trees
+  related:
+  - sub-layer
+  - measurement-layer
+  - point
+  - tolerance-class
+- id: camera-position
+  term: Camera position
+  short: A point where the phone stood for survey photos; the live one is the current camera position.
+  long: A camera position is a Point with kind camera-position on the object being traversed (parentType
+    path or baseline). The one you are using now is the current camera position. Its accuracy class stays
+    200 mm. Prefer Camera position on screen — Camera location, Camera setup, Station, S*, and occupy
+    are legacy names.
+  category: survey
+  aliases:
+  - camera location
+  - camera setup
+  - station
+  - photo station
+  - occupy
+  - current camera position
+  code_names:
+  - cameraPosition
+  - camera-location
+  - cameraSetupId
+  - stationId
+  - OCC
+  - S1
+  - STATION_CLASS_M
+  - TraverseSetup
+  related:
+  - point
+  - path
+  - baseline
+  - traverse
+  - photo-click
+  - ray
+  - tolerance-class
+  - frame
+  example: Stand about 5 m off the side wall at the current camera position and photograph Points A, B,
+    H1, H2.
+  shown_on:
+  - leg
+  - close
+  - closure
+- id: traverse
+  term: Traverse
+  short: The activity of moving the camera location around an object’s points and measuring as you go.
+  long: 'Traverse is a verb, not a thing you store. You traverse an object (a path or a baseline): move
+    the current camera location around that object’s points and record measured points. Walk round the
+    house is one traverse of a path. Prefer saying traverse a path / traverse a baseline — not “a traverse”
+    as if it were a saved object.'
+  category: survey
+  aliases:
+  - walk
+  - walk round
+  - walk round the house
+  - house traverse
+  - traversing
+  code_names:
+  - TraverseRun
+  - houseTraverse
+  - traverseWalk
+  - WalkRun
+  related:
+  - path
+  - baseline
+  - point
+  - camera-position
+  - measured-point
+  - leg
+  - closure
+  example: 'Traverse the house path: start from the default baseline, then leg point to point until close.'
+  shown_on:
+  - baseline
+  - leg
+  - close
+  - closure
+  - adjust
+- id: leg
+  term: Leg
+  short: Legacy walk step — prefer traversing an object and recording measured points.
+  long: 'Leg is deprecated as a primary glossary term. Prefer: traverse an object, move the camera position,
+    and add measured points and ties. The starter net may still use a Leg transition id until the engine
+    is rebuilt.'
+  category: survey
+  aliases:
+  - corner hop
+  - next corner
+  - deprecated leg
+  code_names:
+  - record_leg
+  - leg
+  - TraverseLeg
+  - role:leg
+  - GOOD_LEG
+  related:
+  - traverse
+  - camera-position
+  - measured-point
+  - tie
+  - path
+  - object-outline
+  - quality-check
+  example: From Point B, tape to Point C and photograph it at 1×.
+  shown_on:
+  - leg
+- id: close
+  term: Close
+  short: The act of finishing a measurement-layer outline, which then triggers Closure.
+  long: Close means only that you have finished an object outline on the measurement layer (taped back
+    and took the last photo). That triggers Closure. The baseline layer has no Close — it has no loop.
+  category: survey
+  aliases:
+  - closing
+  - close the loop
+  - finish the loop
+  code_names:
+  - close
+  - closingReady
+  - CLOSE_HOLD
+  - role:close
+  - closing
+  related:
+  - closure
+  - object-outline
+  - measurement-layer
+  - traverse
+  - tape-measurement
+  example: Tape the last point back to Point A and photograph — that closes the loop and starts Closure.
+  shown_on:
+  - close
+  - closure
+- id: closure
+  term: Closure
+  short: 'App process after a measurement-layer outline is finished: accurate, acceptable, or redo.'
+  long: 'Closure runs only on the measurement layer after you Close an object outline. It compares the
+    closing gap (measured sample) with the closing uncertainty (propagated σ): accept when gap ≤ 1.96
+    × uncertainty (1D) or the gap vector is inside the 2.45 (ELLIPSE_95) ellipse (2D), plus any absolute
+    sub-layer cap. Outcomes: accurate (green — carry on), acceptable with Accept and continue noted (amber),
+    or needs further measurement (red/amber). Baseline layer has no Closure.'
+  category: survey
+  aliases:
+  - closure review
+  - loop check
+  - close check
+  code_names:
+  - ClosureReport
+  - closureReport
+  - closureVerdict
+  - check_closure
+  - LOOP_CLOSES
+  related:
+  - close
+  - object-outline
+  - measurement-layer
+  - sub-layer
+  - accept-and-continue
+  - green
+  - amber
+  - red
+  - chi-squared-test
+  - measurement-strength
+  - adjust
+  - closing-gap
+  - closing-uncertainty
+  example: Closure is green — accurate, carry on to Adjust. Or amber with Accept and continue noted.
+  shown_on:
+  - closure
+  - check_closure
+- id: closing-gap
+  term: Closing gap
+  short: The misclosure actually measured when a measurement-layer outline is finished — one sample, in
+    mm.
+  long: 'The closing gap is the misclosure you actually measured when the outline closed: one sample that
+    looks like a gap (along, across, and optionally twist). It lives on the measurement layer only. Unit
+    is millimetres. Prefer Closing gap for the measured sample; Closing uncertainty is the expected size
+    of that gap from the adjust.'
+  category: survey
+  aliases:
+  - raw gap
+  - misclosure
+  - raw misclosure
+  code_names:
+  - TraverseMisclosure
+  - alongM
+  - acrossM
+  - azimuthRad
+  - RAW_GAP_NOTE
+  - duplicateMisclosure
+  related:
+  - closing-uncertainty
+  - closure
+  - measurement-layer
+  - chi-squared-test
+  - measurement-strength
+  units: mm
+  example: Closing gap along 40 mm, across 15 mm — the measured sample this time.
+  shown_on:
+  - closure
+- id: closing-uncertainty
+  term: Closing uncertainty
+  short: The propagated standard deviation of the closing gap — how large a gap you should expect.
+  long: 'Closing uncertainty is the expected size of the closing gap from the adjust (propagated standard
+    deviation), not the measured sample itself. Usually in millimetres. Closure accepts when the closing
+    gap ≤ 1.96 × closing uncertainty for a 1D quantity, or when the gap vector lies inside the 2.45 (ELLIPSE_95)
+    ellipse for a 2D position. Measurement layer only. Sub-layer caps (awaiting Paul): railway 30 mm,
+    flower beds 100 mm, trees 150 mm centre only (no Closure).'
+  category: survey
+  aliases:
+  - expected gap
+  - gap sigma
+  - propagated misclosure σ
+  code_names:
+  - closingUncertainty
+  - ELLIPSE_95
+  - Qm
+  related:
+  - closing-gap
+  - closure
+  - chi-squared-test
+  - measurement-layer
+  - sub-layer
+  - uncertainty-ellipse
+  - railway
+  - flower-beds
+  - trees
+  units: mm
+  example: Closing uncertainty 25 mm (1σ); measured closing gap 40 mm → 40 ≤ 1.96×25, so OK in 1D.
+  shown_on:
+  - closure
+- id: adjust
+  term: Adjust
+  short: One least-squares solve over observations and soft checks in the garden frame.
+  long: Adjust runs a single LSQ over baseline observations, measurement observations, and expanded geometric
+    checks. It reports a global variance χ² test, w-tests, measurement-strength flags, and ellipses. After
+    Closure is accurate (or accepted) on a measurement outline, Adjust settles point positions.
+  category: survey
+  aliases:
+  - adjustment
+  - network adjust
+  code_names:
+  - adjust
+  - ADJUST
+  - adjust.ts
+  related:
+  - observation
+  - geometric-check
+  - chi-squared-test
+  - w-test
+  - data-snooping
+  - closure
+  - frame
+  - measurement-strength
+  shown_on:
+  - adjust
+- id: tape-measurement
+  term: Tape measurement
+  short: A length between two points from a tape; say tape measurements for one or many.
+  long: 'A tape measurement is an observation: two point ids, a length in metres, and a sigma. “Tape measurements”
+    means one or many. A repeat is just another tape measurement of the same span with its own id. A cross-tie
+    is a tape measurement between two baseline points (or other check span); the app explains its purpose
+    when you take it. Prefer Tape measurement on screen — tape reading, repeat tape, and cross-tie are
+    legacy names.'
+  category: measurement
+  aliases:
+  - tape reading
+  - tape
+  - distance
+  - line
+  - repeat tape
+  - repeat
+  - second pull
+  - cross-tie
+  - cross
+  - tie tape
+  - named cross-tie
+  - tape-reading
+  - repeat-tape
+  code_names:
+  - Line
+  - lengthM
+  - saveWalkTape
+  - role
+  - role:leg
+  - role:cross
+  - role:repeat
+  - role:station
+  - SIGMA.tapeM
+  - tape-reading
+  - repeat-tape
+  related:
+  - observation
+  - tie
+  - baseline
+  - baseline-point
+  - leg
+  - mdb
+  - redundancy
+  - point
+  units: m
+  example: Type 6.42 m for the tape measurement from C2 to C3.
+  shown_on:
+  - baseline
+  - leg
+  - close
+  - closure
+- id: photo-click
+  term: Photo click
+  short: A tap on a point in a survey photo so the app knows where that point is in the frame.
+  long: You photograph a ground point or camera position at 1× in the app, then click each visible point
+    on the image. Those clicks, plus the camera position and focal length, give rays the solver uses with
+    the tapes.
+  category: measurement
+  aliases:
+  - click
+  - photo
+  - still
+  code_names:
+  - Photo
+  - PhotoClick
+  - noteWalkPhoto
+  - role:leg
+  - role:close
+  - occupy
+  related:
+  - camera-position
+  - focal-length
+  - ray
+  - leg
+  example: Photograph Point C, then click Points B, C, H1, and H2 on the picture.
+  shown_on:
+  - leg
+  - close
+- id: ray
+  term: Ray
+  short: The line of sight from the camera position through a clicked point in a photo.
+  long: Each photo click becomes a ray. Points seen from two different camera setups can be fixed by intersecting
+    rays. The walk gate checks ray redundancy (r at least 0.13) on the ties that are present.
+  category: measurement
+  aliases:
+  - line of sight
+  - bearing ray
+  code_names:
+  - kind:ray
+  - tieRayRedundancy
+  - RAY_R_MIN
+  - MIN_RAY_RANGE_M
+  related:
+  - photo-click
+  - camera-position
+  - redundancy
+  - observation
+  - tie
+  units: dimensionless (r)
+  shown_on:
+  - leg
+- id: focal-length
+  term: Focal length
+  short: How “zoomed” the camera lens is; the app stores it as fx relative to image width.
+  long: 'Survey photos must be at 1×. The solver uses fx (as fxOverWidth) with a stated uncertainty. Sources
+    are preferred in order: a CAL record, the phone’s native matrix, EXIF, then a default guess. Wrong
+    zoom or a missing fx makes positions smear. In code, fx is the shorthand for this quantity.'
+  category: measurement
+  aliases:
+  - fx
+  - focal
+  - lens scale
+  code_names:
+  - fxOverWidth
+  - fxRelativeUncertainty
+  - stampPhotoFocals
+  - FX_RELATIVE_MAX
+  - lens
+  related:
+  - photo-click
+  - camera-position
+  - uncertainty-ellipse
+  units: dimensionless (fx / width)
+  example: A 1× wide shot at 4032×3024 with native fx; do not use 2× zoom.
+  shown_on:
+  - leg
+  - close
+- id: green
+  term: Green
+  short: Checked and agreeing on measurement strength — you can move on.
+  long: 'Green on a measurement means measurement strength with |w| ≤ 1.96 and r ≥ 0.3 (checked and agreeing).
+    On a step, green also means the quality checks passed so you can continue (for Closure: accurate /
+    carry on). Grey unchecked is never green.'
+  category: quality-check
+  aliases:
+  - good
+  - pass
+  code_names:
+  - tone:green
+  - gateOk
+  - GOOD_LEG
+  - LOOP_CLOSES
+  related:
+  - amber
+  - red
+  - leg
+  - closure
+  - tolerance-class
+  - quality-check
+  - measurement-strength
+  - grey
+  shown_on:
+  - leg
+  - close
+  - closure
+- id: quality-check
+  term: Quality check
+  short: The pass marks a step must meet — redundancy, MDB, and accuracy class — giving green, amber,
+    or red.
+  long: 'A quality check is the set of pass marks for a survey step: for example ray r ≥ 0.13, tape MDB
+    ≤ 21.3 mm, and the accuracy class for the point. The result tone is green, amber, or red. Prefer Quality
+    check on screen — gate and walk gate are legacy names.'
+  category: quality-check
+  aliases:
+  - gate
+  - walk gate
+  - leg gate
+  - pass marks
+  code_names:
+  - classifyGate
+  - gateOk
+  - RAY_R_MIN
+  - CROSS_TAPE_R_MIN
+  - TAPE_MDB_MAX_MM
+  related:
+  - green
+  - amber
+  - red
+  - redundancy
+  - mdb
+  - tolerance-class
+  - ray
+  - checked
+  - leg
+  example: 'Quality check on the leg: ray r 0.18, tape MDB 18 mm, 95% 85 mm → green.'
+  shown_on:
+  - leg
+  - closure
+- id: amber
+  term: Amber
+  short: Weakly checked or moderately off on measurement strength — do not ignore it.
+  long: Amber on a measurement means measurement strength with weak check (r 0.13–0.3, tapes also MDB
+    ≤ 21 mm) or |w| between 1.96 and 3.29; r < 0.13 is amber regardless. On a step, amber may allow Accept
+    and continue with a note, or call for more measurement.
+  category: quality-check
+  aliases:
+  - warning
+  - caution
+  code_names:
+  - tone:amber
+  - blocked:true
+  - classifyGate
+  related:
+  - green
+  - red
+  - accept-and-continue
+  - redundancy
+  - mdb
+  - quality-check
+  - measurement-strength
+  - grey
+  shown_on:
+  - leg
+  - close
+  - closure
+- id: red
+  term: Red
+  short: Strong disagreement on measurement strength (|w| > 3.29) — stop and fix.
+  long: Red on a measurement means measurement strength with |w| > 3.29. On a step, red also covers hard
+    fails (solve did not converge, point seen from only one setup, and so on). Red always blocks; there
+    is no accept path.
+  category: quality-check
+  aliases:
+  - fail
+  - blocked
+  code_names:
+  - tone:red
+  - LEG_UNSETTLED
+  - blockedLine
+  related:
+  - green
+  - amber
+  - measurement-strength
+  - camera-position
+  - quality-check
+  - grey
+  shown_on:
+  - leg
+  - close
+  - closure
+- id: grey
+  term: Grey
+  short: Unchecked — almost no spare check on this measurement; never treated as green.
+  long: 'Grey means measurement strength with r < 0.01 (unchecked). The UI says “unchecked: add a tape
+    or photo to check this”. Grey is never green. A baseline point fixed only by unchecked measurements
+    cannot show green overall.'
+  category: quality-check
+  aliases:
+  - unchecked
+  - unchecked grey
+  code_names:
+  - unchecked
+  - r < 0.01
+  related:
+  - measurement-strength
+  - green
+  - amber
+  - red
+  - checked
+  - redundancy
+  shown_on:
+  - leg
+  - closure
+  - adjust
+- id: accept-and-continue
+  term: Accept and continue
+  short: Your choice to go on past an amber result, with a note kept in the report.
+  long: 'During Closure (or on a leg), amber may be accepted with a clear warning; each acceptance is
+    recorded for the closure report. That is the middle Closure outcome: acceptable with Accept and continue
+    noted. Red still always blocks. The live app does not yet expose this as its own step.'
+  category: quality-check
+  aliases:
+  - accept amber
+  - continue on amber
+  code_names: []
+  related:
+  - amber
+  - green
+  - red
+  - closure
+  - leg
+  shown_on:
+  - leg
+  - closure
+- id: uncertainty-ellipse
+  term: Uncertainty ellipse
+  short: The oval that shows how unsure the app is about a point’s position.
+  long: After a solve, each free point has an error ellipse. The headline figure is the 95% semi-major
+    axis (about 2.45 times the 1σ semi-major), shown in millimetres. That number is compared with the
+    tolerance class for the point.
+  category: quality-check
+  aliases:
+  - error ellipse
+  - 95% semi-major
+  - accuracy
+  code_names:
+  - ELLIPSE_95
+  - semiMajorM
+  - semiMajor95Mm
+  - legHeadline
+  - accuracyMm
+  related:
+  - tolerance-class
+  - green
+  - focal-length
+  - adjust
+  units: mm
+  example: C3 shows 95% semi-major 85 mm — inside the 100 mm plantable class.
+  shown_on:
+  - leg
+  - closure
+- id: tolerance-class
+  term: Tolerance class
+  short: How accurate a point must be — e.g. 100 mm ground, 200 mm camera position, tighter by sub-layer.
+  long: 'Tolerance class is the 95% semi-major limit for a point kind or sub-layer. Defaults: ground /
+    plantable about 100 mm; camera position 200 mm and checked. Sub-layers may set caps (railway ~30 mm,
+    flower beds ~100 mm, trees ~150 mm — Paul decides). Meeting precision without being checked is not
+    enough for planting.'
+  category: quality-check
+  aliases:
+  - class limit
+  - plantable class
+  - camera position class
+  - station class
+  code_names:
+  - PLANTABLE_CLASS_M
+  - STATION_CLASS_M
+  - classToleranceMm
+  related:
+  - uncertainty-ellipse
+  - point
+  - camera-position
+  - checked
+  - sub-layer
+  - railway
+  - flower-beds
+  - trees
+  units: mm
+  shown_on:
+  - leg
+- id: redundancy
+  term: Redundancy
+  short: How much spare checking a measurement has; higher is better.
+  long: Redundancy r is a number from 0 to 1 for an observation. Near 0 means the measurement is barely
+    checked; higher means other data would catch a mistake. Quality checks use ray r ≥ 0.13 and cross-tie
+    tape r ≥ 0.34 when those ties are present.
+  category: quality-check
+  aliases:
+  - r
+  - ray r
+  - tape r
+  - spare check
+  code_names:
+  - redundancy
+  - RAY_R_MIN
+  - CROSS_TAPE_R_MIN
+  - tieRayRedundancy
+  - tieTapeRedundancy
+  - UNCHECKED_REDUNDANCY
+  related:
+  - ray
+  - tape-measurement
+  - mdb
+  - amber
+  - green
+  - quality-check
+  units: dimensionless
+  example: Cross-tie C3–H2 with r = 0.41 clears the 0.34 gate.
+  shown_on:
+  - leg
+- id: mdb
+  term: MDB
+  short: The smallest tape mistake the checks would reliably catch, in millimetres.
+  long: MDB (minimal detectable bias) estimates how large an error in a tape would need to be before the
+    statistics flag it. The walk wants tape MDB at most 21.3 mm on the ties for the leg. A null MDB means
+    the tie is too weak to quote a figure.
+  category: quality-check
+  aliases:
+  - minimal detectable bias
+  - tape MDB
+  code_names:
+  - mdb
+  - TAPE_MDB_MAX_MM
+  - MDB_FACTOR
+  - tieMdbMm
+  - TARGET_MM
+  related:
+  - redundancy
+  - tape-measurement
+  - amber
+  - green
+  - quality-check
+  units: mm
+  example: Leg tapes show MDB 18 mm — under the 21.3 mm limit.
+  shown_on:
+  - leg
+- id: chi-squared-test
+  term: Chi-squared test
+  short: The maths test that compares misfit with expected error for Closure or a global adjust.
+  long: 'A χ² test on residuals (or comparing closing gap with closing uncertainty) decides whether the
+    fit is within expected error. For Closure on a measurement-layer outline: gap ≤ 1.96 × uncertainty
+    (1D) or gap inside the 2.45 ellipse (2D), plus any sub-layer cap. Global variance χ² also runs after
+    a baseline or network adjust. Typical rank-6 95% limit ≈ 12.59.'
+  category: quality-check
+  aliases:
+  - χ² test
+  - chi2
+  - chi-squared closure test
+  - position flag
+  - chi-squared-closure
+  code_names:
+  - chi2
+  - chi2Pass
+  - chi2Limit95
+  - chi-squared-closure
+  - closureChi2
+  - CHI2_2_95
+  related:
+  - closure
+  - closing-uncertainty
+  - w-test
+  - checked
+  - green
+  - adjust
+  - closing-gap
+  example: χ² = 4.2 against limit 12.59 → pass (accurate / green).
+  shown_on:
+  - closure
+- id: chi-squared-closure
+  term: Chi-squared closure test
+  short: Legacy id — use Chi-squared test (chi-squared-test).
+  long: This id is kept only so old links resolve. The preferred term is Chi-squared test (id chi-squared-test).
+    Closure still uses that test on measurement-layer outlines.
+  category: quality-check
+  aliases:
+  - chi-squared-test
+  code_names:
+  - chi-squared-test
+  related:
+  - chi-squared-test
+  - closure
+  shown_on: []
+- id: measurement-strength
+  term: Measurement strength
+  short: How well a single tape measurement or photo click is checked by the others, and whether it agrees
+    with them.
+  long: 'Every observation gets two numbers after Adjust: redundancy r (0–1, shown via MDB = the smallest
+    error it could reveal) for how well it is checked, and a w-test (residual ÷ expected size) for how
+    far off it is. Colour is the worse of the two: green means checked and agreeing (|w| ≤ 1.96, r ≥ 0.3);
+    amber means weakly checked (r 0.13–0.3, and for tapes also MDB ≤ 21 mm) or |w| between 1.96 and 3.29;
+    red means |w| > 3.29; weak r < 0.13 shows amber regardless; grey unchecked (r < 0.01) reads “unchecked:
+    add a tape or photo to check this” and is never green. The raw residual (measured minus adjusted,
+    mm or px) is shown for information only and does not set colour, because poorly checked measurements
+    hide errors. If the global variance test fails: banner “whole solve suspect”, remove the worst w (data
+    snooping), then re-colour. Photos use a per-click 2-dof test (amber 5.99, red 13.8); photo colour
+    is the worst click, plus a per-photo variance factor (wrong focal length, phone moved, or wrong photo).
+    Camera position is a solved parameter: show its 95% ellipse versus 200 mm and how many checked clicks
+    fix it. A baseline point fixed only by unchecked measurements cannot be green.'
+  category: quality-check
+  aliases:
+  - observation quality
+  - reliability
+  - named reading
+  - blunder
+  - bad reading
+  - flagged observation
+  - named-reading
+  code_names:
+  - namedReading
+  - readingCandidates
+  - W_CRITICAL
+  - NAME_MARGIN
+  - RHO_SPLIT
+  - NO_SINGLE_READING
+  - named-reading
+  related:
+  - redundancy
+  - mdb
+  - w-test
+  - adjust
+  - photo-click
+  - tape-measurement
+  - camera-position
+  - data-snooping
+  - green
+  - amber
+  - red
+  - grey
+  - checked
+  example: 'Tape C2–C3: r = 0.41, |w| = 0.8 → green measurement strength.'
+  shown_on:
+  - leg
+  - closure
+  - adjust
+- id: net
+  term: Net
+  short: The whole workflow diagram — bins of data and the steps that move them.
+  long: 'The survey workflow is stored as a Petri net in YAML (survey.net.yaml), convertible later to
+    PNML. Circles are places, boxes are steps. Order is not a fixed list: any step whose inputs are ready
+    and whose guard passes may run.'
+  category: workflow-model
+  aliases:
+  - Petri net
+  - workflow net
+  - survey net
+  code_names:
+  - survey.net.yaml
+  - house-traverse-starter
+  related:
+  - place
+  - step
+  - token
+  - guard
+  example: The starter net covers baselines (new / default / choose), Leg while traversing a path, and
+    Closure.
+  shown_on: []
+- id: place
+  term: Place
+  short: A bin that holds zero or more pieces of survey data of one type.
+  long: 'Places are the circles on the diagram. Examples: ready, baselines, baseline_ready, points, traverse_in_progress,
+    observations, legs. A place may have a capacity (often 1) or hold many tokens. Steps take tokens from
+    places and put new tokens into others.'
+  category: workflow-model
+  aliases:
+  - bin
+  - holder
+  code_names:
+  - places
+  - baselines
+  - baseline_ready
+  - points
+  - measured_points
+  - traverse_in_progress
+  - observations
+  - legs
+  related:
+  - token
+  - step
+  - net
+  shown_on: []
+- id: step
+  term: Step
+  short: Something you or the app does that consumes data and produces new data.
+  long: Steps are the boxes on the diagram (Petri transitions). A step lists which places it consumes
+    and produces, which fields it may edit, and a guard that must hold. User steps wait for you; auto
+    steps can fire alone.
+  category: workflow-model
+  aliases:
+  - transition
+  - action
+  code_names:
+  - transitions
+  - measure_new_baseline
+  - use_default_baseline
+  - choose_other_baseline
+  - set_default_baseline
+  - record_leg
+  - check_closure
+  related:
+  - place
+  - guard
+  - user-step
+  - auto-step
+  - token
+  shown_on: []
+- id: token
+  term: Token
+  short: One piece of data sitting in a place, such as a baseline or a leg report.
+  long: Tokens are coloured by object type (Baseline, Point, MeasuredPoint, Path, TraverseRun, and so
+    on). Fields and units are declared in the net’s object_types. Firing a step moves or updates tokens
+    according to the arcs.
+  category: workflow-model
+  aliases:
+  - object
+  - coloured token
+  code_names:
+  - object_types
+  - Baseline
+  - Point
+  - MeasuredPoint
+  - Path
+  - TraverseRun
+  - ObservationBag
+  - LegReport
+  related:
+  - place
+  - step
+  - net
+  shown_on: []
+- id: guard
+  term: Guard
+  short: The rule that must be true before a step is allowed to run.
+  long: 'Guards are predicates on the tokens a step would consume (and on shared constants such as RAY_R_MIN).
+    If the guard fails, the step stays disabled. Example: record_leg requires tone == green and the quality-check
+    limits on redundancy and MDB.'
+  category: workflow-model
+  aliases:
+  - enable condition
+  - gate predicate
+  code_names:
+  - guard
+  - classifyGate
+  - RAY_R_MIN
+  - CROSS_TAPE_R_MIN
+  - TAPE_MDB_MAX_MM
+  related:
+  - step
+  - green
+  - redundancy
+  - mdb
+  - quality-check
+  shown_on: []
+- id: user-step
+  term: User step
+  short: A step that waits for you to type, tape, or photograph before it runs.
+  long: 'In the YAML, user: true marks these. Measuring a new baseline, choosing another baseline, Leg,
+    and Closure are user steps: the engine shows a generic input screen and only fires when you have supplied
+    what the guard needs.'
+  category: workflow-model
+  aliases:
+  - manual step
+  - input step
+  code_names:
+  - user:true
+  related:
+  - step
+  - auto-step
+  shown_on:
+  - measure_new_baseline
+  - choose_other_baseline
+  - set_default_baseline
+  - leg
+  - close
+  - closure
+  - adjust
+- id: auto-step
+  term: Auto step
+  short: A step the app can run by itself when its inputs and guard are ready.
+  long: 'Auto steps have user: false (or omit user). Candidates include stamping focal length on a photo
+    and re-solving after new observations. The runtime needs a rule so continuous solves do not fire in
+    a tight loop.'
+  category: workflow-model
+  aliases:
+  - automatic step
+  - system step
+  code_names:
+  - user:false
+  related:
+  - step
+  - user-step
+  - guard
+  - focal-length
+  shown_on: []
+- id: observation
+  term: Observation
+  short: A soft measured fact with uncertainty — parent of tape readings, rays, and geometric checks.
+  long: Every geometric check and field measurement enters the adjust as a soft observation with a sigma.
+    Tape measurements and rays are observations; so are rectangle, collinear, and similar checks once
+    expanded. Only the frame axes are hard constraints.
+  category: measurement
+  aliases:
+  - obs
+  - soft constraint
+  code_names:
+  - observations
+  - type
+  - sigma_m
+  - sigma_deg
+  related:
+  - tape-measurement
+  - ray
+  - geometric-check
+  - adjust
+  - chi-squared-test
+  - w-test
+- id: geometric-check
+  term: Geometric check
+  short: A soft shape rule (rectangle, collinear, and so on) applied as observations with sigma.
+  long: 'Geometric checks state expected shape: right angle, collinear, parallel, on-circle, rectangle,
+    and similar. Each expands to one or more soft observations with sigma and degrees of freedom. Overlapping
+    expansions are deduped. They never become hard constraints.'
+  category: measurement
+  aliases:
+  - check
+  - shape check
+  code_names:
+  - checks
+  - type
+  related:
+  - observation
+  - rectangle
+  - collinear
+  - right-angle
+  - parallel
+  - perpendicular
+  - on-circle
+  - distance-check
+  - angle-check
+  - triangle-check
+  - adjust
+- id: distance-check
+  term: Distance check
+  short: A soft observation that two points are a stated length apart.
+  long: A distance check is observation type distance(p, q, L) with sigma. It removes one degree of freedom
+    in 2D.
+  category: measurement
+  aliases:
+  - fixed distance
+  code_names:
+  - distance
+  - value_m
+  related:
+  - geometric-check
+  - observation
+  - tape-measurement
+  units: m
+- id: angle-check
+  term: Angle check
+  short: A soft observation that the angle at a vertex equals a stated value.
+  long: An angle check is observation type angle(p, v, q, θ) with sigma in degrees (or radians in the
+    solver). One dof.
+  category: measurement
+  aliases:
+  - fixed angle
+  code_names:
+  - angle
+  - sigma_deg
+  related:
+  - geometric-check
+  - observation
+  - right-angle
+  units: deg
+- id: right-angle
+  term: Right angle
+  short: A soft check that the angle at a vertex is 90°.
+  long: Right-angle(p, v, q) is an angle check fixed at 90°, one dof, with sigma_deg.
+  category: measurement
+  aliases:
+  - square corner
+  - 90 degree
+  code_names:
+  - right-angle
+  related:
+  - angle-check
+  - rectangle
+  - geometric-check
+- id: collinear
+  term: Collinear
+  short: A soft check that three or more points lie on one straight line.
+  long: Collinear(p, q, r, …) costs one dof per extra point beyond two, with sigma as millimetre offset
+    from the line.
+  category: measurement
+  aliases:
+  - straight line check
+  code_names:
+  - collinear
+  - sigma_m
+  related:
+  - geometric-check
+  - observation
+  - railway
+  units: m
+- id: parallel
+  term: Parallel
+  short: A soft check that two segments are parallel.
+  long: 'Parallel(p, q, r, s) is one dof: segment pq parallel to segment rs, with angular or offset sigma.'
+  category: measurement
+  aliases: []
+  code_names:
+  - parallel
+  related:
+  - geometric-check
+  - perpendicular
+  - rectangle
+- id: perpendicular
+  term: Perpendicular
+  short: A soft check that two segments meet at 90°.
+  long: 'Perpendicular(p, q, r, s) is one dof: segment pq perpendicular to segment rs.'
+  category: measurement
+  aliases:
+  - at right angles
+  code_names:
+  - perpendicular
+  related:
+  - geometric-check
+  - right-angle
+  - parallel
+- id: on-circle
+  term: On circle
+  short: A soft check that points lie on a circle of centre and radius.
+  long: On-circle(c, R, p…) is one observation per point, or with four or more points the centre and radius
+    may be unknowns. Sigma is radial.
+  category: measurement
+  aliases:
+  - circle check
+  code_names:
+  - on-circle
+  related:
+  - geometric-check
+  - observation
+  - garden-object
+  units: m
+- id: rectangle
+  term: Rectangle
+  short: 'A composite check: three right angles on four points (optional width and height).'
+  long: Rectangle(a,b,c,d) expands to three right-angle observations (3 dof). Optional width or height
+    adds one dof each. Overlaps with other checks are deduped.
+  category: measurement
+  aliases:
+  - rectangle check
+  code_names:
+  - rectangle
+  related:
+  - geometric-check
+  - right-angle
+  - parallel
+  - garden-object
+  example: 'checks: [{id: R1, type: rectangle, points: [C1,C2,C3,C4], sigma_deg: 0.5}]'
+- id: triangle-check
+  term: Triangle check
+  short: A triangle expressed as three soft tape (distance) observations.
+  long: A triangle check is three tapes between its corners (for example a 3-4-5). Log them as distance/tape
+    observations, not a hard triangle.
+  category: measurement
+  aliases:
+  - triangle
+  code_names:
+  - triangle
+  related:
+  - geometric-check
+  - distance-check
+  - tape-measurement
+- id: tie
+  term: Tie
+  short: An extra tape or ray that checks a point or leg beyond the minimum fix.
+  long: A tie is an observation used as a check — often a tape measurement between baseline points or
+    a ray on a needed span. The app explains the purpose when you take it. Quality checks such as ray
+    r ≥ 0.13 and tape MDB ≤ 21.3 mm apply on the ties that are required.
+  category: measurement
+  aliases:
+  - cross-tie
+  - check tie
+  - check tape
+  code_names:
+  - role:cross
+  - tieRayRedundancy
+  - tieTapeRedundancy
+  related:
+  - tape-measurement
+  - ray
+  - redundancy
+  - mdb
+  - checked
+- id: fix-method
+  term: Fix method
+  short: How a point’s position was determined — tapes, rays, resection, and so on.
+  long: 'Fix method records which observation set placed a point: tape+tape, tape+ray, ray+ray, resection,
+    distances, and similar. Side choice may still be needed when two solutions remain.'
+  category: measurement
+  aliases:
+  - method
+  - placement method
+  code_names:
+  - method
+  - distances
+  - resection
+  - branchChoice
+  related:
+  - fix-option
+  - side-choice
+  - point
+  - measured-point
+  - checked
+- id: fix-option
+  term: Fix option
+  short: One candidate way to place a new point, ranked by feasibility, checks, cost, and ellipse.
+  long: 'From a rough position the app enumerates tape+tape, tape+ray, ray+ray, resection, plus checks
+    touching the point. Each option reports solution count (2 ⇒ side choice), intersection angle (reject
+    under 30°, best 60–120°), 95% ellipse, redundancy, MDB, and field cost. Rank: feasible within baseline
+    class with resolvable ambiguity, then checked, then lowest cost, then smallest ellipse. Show the top
+    three with reasons. Minimum for a trusted structure point: two tapes plus one check or third tape.'
+  category: measurement
+  aliases:
+  - placement option
+  code_names:
+  - fix-option
+  related:
+  - fix-method
+  - side-choice
+  - intersection-angle
+  - checked
+  - point
+- id: intersection-angle
+  term: Intersection angle
+  short: The angle at which two arcs or rays cross when fixing a point; avoid under 30°.
+  long: When two observations intersect, the crossing angle should be at least 30° and ideally 60–120°.
+    Shallow crossings are weak and may be rejected in fix options.
+  category: measurement
+  aliases:
+  - crossing angle
+  - intersection φ
+  code_names:
+  - intersectionAngle
+  - shallow-rays
+  related:
+  - fix-option
+  - danger-circle
+  - ray
+  units: deg
+- id: side-choice
+  term: Side choice
+  short: Picking which of two mirror solutions is the real position of a point or camera.
+  long: Two tapes from a known pair, or similar setups, often leave two candidates mirrored across that
+    pair. A tap on the plan is enough to pick one. It is stored as its own step in the observation log,
+    so you can switch it later; that triggers a re-solve that updates dependants. Until checked, label it unchecked.
+  category: quality-check
+  aliases:
+  - branch choice
+  - mirror choice
+  code_names:
+  - branchChoice
+  - two-candidates
+  - pickByBearings
+  related:
+  - fix-option
+  - fix-method
+  - checked
+  - camera-position
+- id: checked
+  term: Checked
+  short: A point with enough spare observations that a mistake would show — safe to trust for planting.
+  long: Checked means redundancy is real (r > 0 on the determining observations), gates such as ray r
+    ≥ 0.13 and tape MDB ≤ 21 mm hold where required, and the global variance test is not high. r = 0 is
+    fixed but unchecked, not OK. Stations/camera positions meet class only when also checked.
+  category: quality-check
+  aliases:
+  - fixed and checked
+  - trusted
+  code_names:
+  - checked
+  - unchecked
+  - unset
+  - label
+  related:
+  - redundancy
+  - mdb
+  - tolerance-class
+  - w-test
+  - chi-squared-test
+  - point
+- id: danger-circle
+  term: Danger circle
+  short: The locus where a three-point photo fix becomes unstable and must not be trusted.
+  long: For three known points, the camera on (or near) their circumcircle makes resection ill-conditioned.
+    Warn when |ρ − R|/R is small (about < 0.2); for collinear points use distance from the line instead.
+    Accept or reject on the 95% ellipse, not the angle alone.
+  category: quality-check
+  aliases:
+  - danger circle
+  - circumcircle danger
+  code_names:
+  - danger-circle
+  - flat-angle
+  - '|ρ−R|/R'
+  related:
+  - camera-position
+  - intersection-angle
+  - fix-option
+  - uncertainty-ellipse
+- id: w-test
+  term: W-test
+  short: A blunder test on one observation using its standardised residual |w|.
+  long: The w-test uses w_i = v_i / (σ_i √r_i). Critical value 3.29 (α = 0.1%, two-sided). Large |w| can
+    name a reading; if two suspects correlate above 0.9, name both and suggest a separating observation.
+  category: quality-check
+  aliases:
+  - standardised residual test
+  code_names:
+  - w
+  - W_CRITICAL
+  - w-test
+  related:
+  - data-snooping
+  - measurement-strength
+  - mdb
+  - chi-squared-test
+  - redundancy
+- id: data-snooping
+  term: Data snooping
+  short: Finding and naming likely bad observations using w-tests and correlations.
+  long: 'Data snooping runs w-tests across observations and checks, reports plain-words measurement-strength
+    flags (for example “rectangle R1: corner at C3 is 1.4° off square”), and avoids auto-dropping when
+    suspects are inseparable.'
+  category: quality-check
+  aliases:
+  - blunder hunt
+  code_names:
+  - data-snooping
+  - dropBlunders
+  related:
+  - w-test
+  - measurement-strength
+  - chi-squared-test
+  - geometric-check
+# ---- Decisions 15 Oct 2026 (Paul + Geometry & Maths Advisor) ----
+- id: observation-log
+  term: Observation log
+  short: Every tape measurement, photo click and side choice, kept in the order it was collected.
+  long: Nothing is overwritten. The log is the record of the survey; the net says what each entry fixes,
+    not the order of calculation. Any change to the log triggers a re-solve.
+  category: workflow-model
+  aliases:
+  - event log
+  code_names: []
+  related:
+  - re-solve
+  - history-view
+  - tape-measurement
+  - photo-click
+  - side-choice
+- id: re-solve
+  term: Re-solve
+  short: Recalculating the whole survey from the observation log in one batch Adjust, after any change.
+  long: The app reruns one batch least-squares Adjust over all kept observations. It takes milliseconds
+    and the answer does not depend on the order observations were taken. Accepted ambers are re-checked
+    every time.
+  category: workflow-model
+  aliases:
+  - full re-solve
+  code_names: []
+  related:
+  - adjust
+  - observation-log
+  - accepted-amber
+- id: history-view
+  term: History view
+  short: The survey as it stood at an earlier date, solved from the log up to that point.
+  long: The app solves each prefix of the observation log (everything up to time t). That shows whether
+    the survey improved over time and when a problem first appeared in historic data.
+  category: app-screen
+  aliases: []
+  code_names: []
+  related:
+  - observation-log
+  - re-solve
+- id: unavailable-point
+  term: Unavailable point
+  short: A point no longer seen in the latest photos; kept with its old observations, just no new ones.
+  long: An unavailable point is not deleted. Its old tape measurements and photo clicks still tie the
+    survey together. If it belongs to the default baseline, nothing changes.
+  category: survey
+  aliases:
+  - no longer available
+  code_names: []
+  related:
+  - point
+  - deleted-point
+  - default-baseline
+- id: deleted-point
+  term: Deleted point
+  short: A point whose data has been removed from the re-solve, for example because it was bad.
+  long: Deleting removes the point and its observations from the solve. Every other point then gets one
+    of three recalculation states. If a default-baseline point is deleted, the frame is refitted.
+  category: survey
+  aliases: []
+  code_names: []
+  related:
+  - unavailable-point
+  - recalculation-state
+  - frame-refit
+- id: recalculation-state
+  term: Recalculation state
+  short: 'After a deletion each point is: recalculable and checked, recalculable but unchecked, or historically surveyed.'
+  long: 'Recalculable means the re-solve still fixes both coordinates: full rank, a finite covariance, an
+    ellipse within its tolerance class, and no new side-choice ambiguity. Checked also needs r > 0. A point
+    that fails is historically surveyed: old coordinates frozen and labelled, not recalculable.'
+  category: quality-check
+  aliases:
+  - historically surveyed
+  - recalculable
+  code_names: []
+  related:
+  - deleted-point
+  - checked
+  - tolerance-class
+  - uncertainty-ellipse
+  - side-choice
+- id: frame-refit
+  term: Frame refit
+  short: Redefining the frame after a default-baseline point is deleted, so the plan stays in place.
+  long: The app fits a best-fit shift and rotation (no scale) to the old coordinates of the surviving baseline
+    points, then asks you to choose a new default baseline from well-checked survivors. Ellipses may change.
+    Not needed if the point is only unavailable.
+  category: survey
+  aliases: []
+  code_names: []
+  related:
+  - frame
+  - default-baseline
+  - deleted-point
+  - unavailable-point
+- id: accepted-amber
+  term: Accepted amber
+  short: An amber result you chose to keep; recorded, and everything built on it is flagged.
+  long: 'On baseline points amber may be accepted only if |w| is between 1.96 and 3.29, r ≥ 0.13, the ellipse
+    is within the tolerance class, and the point is not one of the two default-baseline points. Red and
+    grey are never accepted. Dependants show "depends on accepted amber"; if a re-solve turns it red, the
+    app blocks.'
+  category: quality-check
+  aliases:
+  - depends on accepted amber
+  code_names: []
+  related:
+  - amber
+  - accept-and-continue
+  - re-solve
+  - w-test
+  - default-baseline
+- id: remove-duplicate-measurement
+  term: Remove duplicate measurement
+  short: Taking a repeated tape measurement or photo click out of the solve; the effect shows in closure.
+  long: Redo always adds a new tape measurement and never replaces the old one. If two now disagree or
+    double up, this action removes one; the change shows in the closing gap and closing uncertainty.
+  category: app-screen
+  aliases: []
+  code_names: []
+  related:
+  - tape-measurement
+  - photo-click
+  - closing-gap
+  - closing-uncertainty
+  - observation-log
+- id: configuration
+  term: Configuration
+  short: Settings such as tolerance limits, editable in the app and stored in a JSON file.
+  long: 'Current tolerance limits: railway 30 mm, flower beds 100 mm, trees 150 mm, baseline 30 mm, camera
+    position 200 mm. They can be changed in the app; the net and checks read them from configuration.'
+  category: app-screen
+  aliases:
+  - settings
+  code_names: []
+  related:
+  - tolerance-class
+  - railway
+  - flower-beds
+  - trees
+  - camera-position

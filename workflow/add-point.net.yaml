@@ -1,0 +1,126 @@
+# add-point.net.yaml — ONE "Add point" activity (replaces "Add a baseline point" in two-steps.net.yaml)
+# Yellow boxes = you; grey boxes = app. Circles = places; dots = tokens.
+# The layer chosen at the start selects the rules. Tolerances come from configuration (JSON, set in the app).
+
+id: review-add-point
+title: Add point (any layer)
+revision: 1
+glossary_note: >
+  Uses point, baseline point, baseline layer, measurement layer (railway, flower bed, tree),
+  fix option, side choice, tape measurement, photo click, adjust, measurement strength
+  (green/amber/red/grey), accepted amber, configuration, re-solve.
+
+configuration:            # defaults; edited in the app, held in JSON
+  tolerance_mm: {baseline: 30, railway: 30, flower_bed: 100, tree: 150, camera_position: 200}
+
+colours:
+  layer: [baseline, railway, flower_bed, tree]
+
+places:
+  - {id: ready, label: Ready to add point, note: "Token: session ready."}
+  - {id: layer_chosen, label: Layer chosen, note: "Token coloured by layer: baseline | railway | flower_bed | tree."}
+  - {id: existing_baseline_points, label: Existing baseline points, note: "Tokens: checked or accepted-amber baseline points."}
+  - {id: fix_options, label: Fix options listed}
+  - {id: chosen_option, label: Fix option chosen}
+  - {id: needs_side_choice, label: Two solutions - pick side}
+  - {id: observations, label: New tape measurements / photo clicks}
+  - {id: strength, label: Measurement strength result, note: "green / amber / red / grey, plus layer."}
+  - {id: baseline_warning, label: Check baseline point warning, note: "Raised when a measurement-layer residual on a baseline point is over 3 sigma."}
+  - {id: point_done, label: Point kept, note: "Token: point kept on its layer (green or accepted amber)."}
+
+transitions:
+  - id: choose_layer
+    title: Choose layer
+    user: true
+    consume: [ready]
+    produce: [layer_chosen]
+    does: "You pick baseline, railway, flower bed or tree. This sets the rules below."
+
+  - id: list_fix_options
+    title: List fix options
+    user: false
+    consume: [layer_chosen]
+    reads: [existing_baseline_points]
+    produce: [fix_options]
+    guard: |
+      layer == baseline: at least 2 existing baseline points (checks are against other baseline points).
+      layer in {railway, flower_bed, tree}: point must be fixed from >= 2 baseline points.
+    does: "App ranks fix options (two tapes + check; tape + ray; two rays)."
+
+  - {id: pick_fix_option, title: Pick a fix option, user: true, consume: [fix_options], produce: [chosen_option]}
+
+  - id: detect_two_solutions
+    title: Detect two solutions
+    user: false
+    consume: [chosen_option]
+    produce: [needs_side_choice]
+    guard: "The chosen fix option has two geometric solutions."
+
+  - id: side_choice
+    title: Side choice (tap)
+    user: true
+    consume: [needs_side_choice]
+    produce: [chosen_option]
+    does: "A tap on the plan picks the side. Stored in the log; can be switched later (re-solve)."
+
+  - id: take_measurements
+    title: Take tape measurements / photo clicks
+    user: true
+    consume: [chosen_option]
+    produce: [observations]
+    guard: "Only one solution remains (side choice done if needed)."
+
+  - id: adjust
+    title: Adjust
+    user: false
+    consume: [observations]
+    reads: [existing_baseline_points]
+    produce: [strength]
+    guard: |
+      layer == baseline: baseline points may move together (baseline-layer adjust).
+      layer in {railway, flower_bed, tree}: one-way coupling - baseline points are held fixed, never moved.
+    does: "App runs Adjust and colours each measurement by measurement strength against the layer tolerance."
+
+  - id: raise_baseline_warning
+    title: Raise 'check baseline point'
+    user: false
+    reads: [strength]
+    produce: [baseline_warning]
+    guard: "layer != baseline AND a residual on a baseline point > 3 sigma."
+    does: "Warns; does not move the baseline point."
+
+  - id: keep_green
+    title: Keep if green
+    user: false
+    consume: [strength]
+    produce: [point_done]
+    produce_if_baseline: [existing_baseline_points]
+    guard: "green AND 95% ellipse within tolerance_mm[layer]."
+    does: "Point kept. If layer == baseline it is added back to existing baseline points."
+
+  - id: accept_amber
+    title: Accept and continue
+    user: true
+    consume: [strength]
+    produce: [point_done]
+    produce_if_baseline: [existing_baseline_points]
+    guard: |
+      layer == baseline: 1.96 <= |w| <= 3.29 AND r >= 0.13 AND ellipse within tolerance_mm.baseline
+                         AND point is not a default-baseline point.
+      layer in {railway, flower_bed, tree}: amber AND ellipse within tolerance_mm[layer].
+    does: "Note recorded; dependants marked 'depends on accepted amber'; re-checked on every re-solve (blocks if it turns red)."
+
+  - id: redo_red
+    title: Redo (adds a measurement)
+    user: true
+    consume: [strength]
+    produce: [chosen_option]
+    guard: "red (or you choose redo on amber)."
+    does: "You take the flagged measurement again; the new one is added, the old one kept."
+
+  - id: add_measurement_grey
+    title: Add measurement (grey)
+    user: true
+    consume: [strength]
+    produce: [chosen_option]
+    guard: "grey (unchecked). Never green while grey."
