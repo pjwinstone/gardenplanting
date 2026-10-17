@@ -1,6 +1,9 @@
 /**
  * IndexedDB queue of original camera files.
  * Records survive reload and tab kill. A killed upload is put back to `queued`.
+ *
+ * WKWebView (Capacitor) often refuses to store Blob/File in IndexedDB — persist
+ * raw bytes plus contentType and rebuild a Blob on read.
  */
 
 import type { AppleMakerNote, SurveyExif } from './photoExif';
@@ -10,6 +13,7 @@ import { migratePreviewPixels, type PreviewPixelMap } from './photoOriginal';
 
 export const PHOTO_DB_NAME = 'garden-survey-photos';
 export const PHOTO_STORE = 'queue';
+export const PHOTO_DB_VERSION = 2;
 
 export interface PhotoQueueRecord {
   id: string;
@@ -52,6 +56,12 @@ export interface PhotoQueueRecord {
   deletedAt?: string;
 }
 
+/** Shape written to IndexedDB (no Blob — WebKit-safe). */
+export type PhotoQueueStoredRow = Omit<PhotoQueueRecord, 'blob'> & {
+  blobBytes: ArrayBuffer;
+  blob?: never;
+};
+
 export interface PhotoQueue {
   put(record: PhotoQueueRecord): Promise<void>;
   get(id: string): Promise<PhotoQueueRecord | undefined>;
@@ -77,6 +87,34 @@ export function normalizeQueueAfterRestart(records: PhotoQueueRecord[]): PhotoQu
       ? { ...next, status: 'queued', lastError: undefined }
       : next;
   });
+}
+
+export async function photoQueueRecordToStoredRow(record: PhotoQueueRecord): Promise<PhotoQueueStoredRow> {
+  const { blob, ...rest } = record;
+  const blobBytes = await blob.arrayBuffer();
+  return { ...rest, blobBytes };
+}
+
+/** Rebuild a queue record from IndexedDB (legacy Blob rows or blobBytes). */
+export function hydratePhotoQueueRow(row: unknown): PhotoQueueRecord {
+  if (!row || typeof row !== 'object') {
+    throw new Error('Photo queue row is not an object.');
+  }
+  const stored = row as Partial<PhotoQueueRecord> & { blobBytes?: ArrayBuffer };
+  if (stored.blob instanceof Blob) {
+    return stored as PhotoQueueRecord;
+  }
+  const bytes = stored.blobBytes;
+  if (!(bytes instanceof ArrayBuffer)) {
+    throw new Error('Photo queue row is missing image bytes.');
+  }
+  const { blobBytes: _drop, blob: _legacy, ...rest } = stored;
+  const contentType =
+    typeof stored.contentType === 'string' && stored.contentType
+      ? stored.contentType
+      : 'application/octet-stream';
+  const blob = new Blob([bytes], { type: contentType });
+  return { ...(rest as Omit<PhotoQueueRecord, 'blob'>), blob };
 }
 
 export function createMemoryPhotoQueue(): PhotoQueue {
@@ -106,7 +144,7 @@ export function createIndexedDbPhotoQueue(factory?: IDBFactory): PhotoQueue {
 
   const open = (): Promise<IDBDatabase> =>
     new Promise((resolve, reject) => {
-      const req = idb.open(PHOTO_DB_NAME, 1);
+      const req = idb.open(PHOTO_DB_NAME, PHOTO_DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(PHOTO_STORE)) {
@@ -127,8 +165,9 @@ export function createIndexedDbPhotoQueue(factory?: IDBFactory): PhotoQueue {
     async put(record) {
       const db = await open();
       try {
+        const stored = await photoQueueRecordToStoredRow(record);
         const tx = db.transaction(PHOTO_STORE, 'readwrite');
-        await txDone(tx.objectStore(PHOTO_STORE).put(record));
+        await txDone(tx.objectStore(PHOTO_STORE).put(stored));
         await transactionComplete(tx);
       } finally {
         db.close();
@@ -139,7 +178,8 @@ export function createIndexedDbPhotoQueue(factory?: IDBFactory): PhotoQueue {
       try {
         const tx = db.transaction(PHOTO_STORE, 'readonly');
         const row = await txDone(tx.objectStore(PHOTO_STORE).get(id));
-        return (row as PhotoQueueRecord | undefined) ?? undefined;
+        if (!row) return undefined;
+        return hydratePhotoQueueRow(row);
       } finally {
         db.close();
       }
@@ -149,7 +189,8 @@ export function createIndexedDbPhotoQueue(factory?: IDBFactory): PhotoQueue {
       try {
         const tx = db.transaction(PHOTO_STORE, 'readonly');
         const rows = await txDone(tx.objectStore(PHOTO_STORE).getAll());
-        return (rows as PhotoQueueRecord[]) ?? [];
+        const list = (rows as unknown[]) ?? [];
+        return list.map((row) => hydratePhotoQueueRow(row));
       } finally {
         db.close();
       }

@@ -18,6 +18,7 @@ import {
   accountKey,
   acquireGraphToken,
   acquireGraphTokenSilent,
+  displayName,
   isSignedIn,
   signIn,
   signOut,
@@ -2134,8 +2135,15 @@ export function applyAuthReady(init: AuthInitResult): void {
 
 async function restoreFromOneDriveAfterSignIn(): Promise<void> {
   if (!isSignedIn()) return;
-  await resumePhotoUploads();
-  await enqueueGardenTask(() => restoreGardenAfterSignIn());
+  try {
+    await resumePhotoUploads();
+    await enqueueGardenTask(() => restoreGardenAfterSignIn());
+  } catch (err) {
+    const reason = shortFailureReason(err);
+    logError(`Sign-in follow-up failed: ${reason}`, { source: 'onedrive' });
+    setCloudMessage(`Sign-in follow-up failed: ${reason}`);
+    setCloudBusy(false);
+  }
 }
 
 async function restoreGardenAfterSignIn(): Promise<void> {
@@ -2155,62 +2163,63 @@ async function restoreGardenAfterSignIn(): Promise<void> {
     );
     return;
   }
-  if (readOwedGardenSave()) {
-    setCloudBusy(true);
-    const localDoc = state.doc;
-    const revision = gardenRevision();
-    const outcome = await applyRedirectOwedSave({
-      account,
-      fileName: preferred,
-      localDoc,
-      revision,
-      token: auth.token,
-      choose: askWhichGardenCopy,
-      downloadLocal: downloadConflictCopy,
-      readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
-      usingLock: withGardenSaveLock,
-    });
-    setCloudBusy(false);
-    void refreshGardenFileList();
-    if (outcome.kind === 'saved') {
-      if (!outcome.superseded) {
-        if (outcome.eTag) rememberDriveETag(account, outcome.fileName, outcome.eTag);
-        setLastSaveIso(outcome.savedAt);
-        setCloudMessage(`Signed in. Saved ${outcome.fileName} to OneDrive.`);
-      }
-      return;
-    }
-    if (outcome.kind === 'kept-remote') {
-      const replaced = adoptRemoteGarden(
-        outcome.doc,
-        outcome.fileName,
-        outcome.eTag,
-        outcome.localOnlyPhotos,
-        outcome.preservedAs,
-        outcome.preservedRevision,
-      );
-      if (!replaced) return;
-      setCloudMessage(outcome.message);
-      return;
-    }
-    if (outcome.kind === 'cancelled') {
-      setCloudMessage(outcome.message);
-      return;
-    }
-    if (outcome.kind === 'failed') {
-      logError(outcome.error, { source: 'onedrive' });
-      setCloudMessage(outcome.error);
-      return;
-    }
-    // Mismatch or an empty owed flag: still compare before adopting OneDrive.
-  }
-  if (!isSignedIn()) return;
   setCloudBusy(true);
-  const decision = await reconcileOpenGarden(preferred, auth.token, account);
-  setCloudBusy(false);
-  if (!isSignedIn()) return;
-  void refreshGardenFileList();
-  applyLoadedGarden(decision, 'sign-in');
+  try {
+    if (readOwedGardenSave()) {
+      const localDoc = state.doc;
+      const revision = gardenRevision();
+      const outcome = await applyRedirectOwedSave({
+        account,
+        fileName: preferred,
+        localDoc,
+        revision,
+        token: auth.token,
+        choose: askWhichGardenCopy,
+        downloadLocal: downloadConflictCopy,
+        readLocal: () => ({ doc: state.doc, dirty: gardenIsDirty(), revision: gardenRevision() }),
+        usingLock: withGardenSaveLock,
+      });
+      void refreshGardenFileList();
+      if (outcome.kind === 'saved') {
+        if (!outcome.superseded) {
+          if (outcome.eTag) rememberDriveETag(account, outcome.fileName, outcome.eTag);
+          setLastSaveIso(outcome.savedAt);
+          setCloudMessage(`Signed in. Saved ${outcome.fileName} to OneDrive.`);
+        }
+        return;
+      }
+      if (outcome.kind === 'kept-remote') {
+        const replaced = adoptRemoteGarden(
+          outcome.doc,
+          outcome.fileName,
+          outcome.eTag,
+          outcome.localOnlyPhotos,
+          outcome.preservedAs,
+          outcome.preservedRevision,
+        );
+        if (!replaced) return;
+        setCloudMessage(outcome.message);
+        return;
+      }
+      if (outcome.kind === 'cancelled') {
+        setCloudMessage(outcome.message);
+        return;
+      }
+      if (outcome.kind === 'failed') {
+        logError(outcome.error, { source: 'onedrive' });
+        setCloudMessage(outcome.error);
+        return;
+      }
+      // Mismatch or an empty owed flag: still compare before adopting OneDrive.
+    }
+    if (!isSignedIn()) return;
+    const decision = await reconcileOpenGarden(preferred, auth.token, account);
+    if (!isSignedIn()) return;
+    void refreshGardenFileList();
+    applyLoadedGarden(decision, 'sign-in');
+  } finally {
+    setCloudBusy(false);
+  }
 }
 
 function reconcileOpenGarden(fileName: string, token: string, account: string): Promise<GardenReconcileResult> {
@@ -2989,14 +2998,25 @@ async function onPhotoSignInToUpload(): Promise<void> {
 
 async function onSignIn(): Promise<void> {
   setCloudBusy(true);
-  setCloudMessage('Opening Microsoft sign-in (redirect)…');
-  const result = await signIn();
-  // loginRedirect navigates away on success; only clear busy on failure.
-  if (!result.ok) {
+  setCloudMessage('Opening Microsoft sign-in…');
+  try {
+    const result = await signIn();
+    if (!result.ok) {
+      const msg = result.error ?? 'Sign-in failed.';
+      logError(msg, { source: 'msal' });
+      setCloudMessage(msg);
+      return;
+    }
+    // Web loginRedirect navigates away; native iOS returns here signed in.
+    if (!isSignedIn()) return;
+    const who = displayName();
+    const last = getGardenCloudFileName();
+    setCloudMessage(
+      who ? `Signed in as ${who}. Loading ${last} from OneDrive…` : `Signed in. Loading ${last} from OneDrive…`,
+    );
+    await restoreFromOneDriveAfterSignIn();
+  } finally {
     setCloudBusy(false);
-    const msg = result.error ?? 'Sign-in failed.';
-    logError(msg, { source: 'msal' });
-    setCloudMessage(msg);
   }
 }
 
@@ -5262,7 +5282,7 @@ function buildCloudPanel(): HTMLElement {
   }
 
   const row = el('div', { className: 'cloud-status__actions' });
-  if (photoUploadNeedsSignIn) {
+  if (photoUploadNeedsSignIn && cloud.signedIn) {
     row.appendChild(
       el('button', {
         className: 'btn btn--suggested',

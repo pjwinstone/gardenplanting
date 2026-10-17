@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { quickXorHash } from '../src/quickXorHash';
 import {
   PHOTO_DB_NAME,
+  PHOTO_DB_VERSION,
   createIndexedDbPhotoQueue,
   createMemoryPhotoQueue,
+  hydratePhotoQueueRow,
   normalizeQueueAfterRestart,
+  photoQueueRecordToStoredRow,
   type PhotoQueueRecord,
 } from '../src/photoQueue';
 
@@ -33,6 +36,45 @@ describe('photo queue', () => {
     expect(restored[0]?.quickXorHash).toBe(hash);
     const bytes = new Uint8Array(await restored[0]!.blob.arrayBuffer());
     expect([...bytes]).toEqual([...jpeg]);
+  });
+
+  it('persists queue bytes as ArrayBuffer, not Blob (WKWebView-safe)', async () => {
+    const queue = createIndexedDbPhotoQueue();
+    await queue.put(record({ status: 'queued', hash: 'h' }));
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = indexedDB.open(PHOTO_DB_NAME, PHOTO_DB_VERSION);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const tx = db.transaction('queue', 'readonly');
+    const raw = await new Promise<unknown>((resolve, reject) => {
+      const req = tx.objectStore('queue').get('ph-a');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+
+    expect(raw).toBeTruthy();
+    expect((raw as { blob?: Blob }).blob).toBeUndefined();
+    expect((raw as { blobBytes?: ArrayBuffer }).blobBytes).toBeInstanceOf(ArrayBuffer);
+
+    const hydrated = hydratePhotoQueueRow(raw);
+    expect(hydrated.blob).toBeInstanceOf(Blob);
+    expect(hydrated.blob.size).toBe(jpeg.byteLength);
+  });
+
+  it('hydrates legacy rows that still store a Blob', async () => {
+    const legacy = { ...record({ status: 'queued', hash: 'h' }) };
+    const hydrated = hydratePhotoQueueRow(legacy);
+    expect(hydrated.blob.size).toBe(jpeg.byteLength);
+  });
+
+  it('serializes records for storage without keeping the Blob reference', async () => {
+    const stored = await photoQueueRecordToStoredRow(record({ status: 'queued', hash: 'h' }));
+    expect(stored.blobBytes).toBeInstanceOf(ArrayBuffer);
+    expect('blob' in stored).toBe(false);
+    expect(stored.contentType).toBe('image/jpeg');
   });
 
   it('leaves a failed item in place until a retry updates it', async () => {
