@@ -75,6 +75,15 @@ export function setCloudBusy(value: boolean): void {
   notify();
 }
 
+/** Drop coach cloud lines and cached listings after sign-out (local auth is already cleared). */
+export function resetCloudSessionUi(): void {
+  message = null;
+  busy = false;
+  gardenFiles = null;
+  listInFlight = false;
+  notify();
+}
+
 export function getCachedGardenFiles(): GardenCloudFile[] | null {
   return gardenFiles;
 }

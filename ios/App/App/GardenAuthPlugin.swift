@@ -118,7 +118,8 @@ public class GardenAuthPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             return
         }
-        enqueueRefresh(stored: stored, clientId: clientId, tenant: tenant, scopes: scopes) { [weak self] outcome in
+        let tokenTenant = stored.tenantId.isEmpty ? tenant : stored.tenantId
+        enqueueRefresh(stored: stored, clientId: clientId, tenant: tokenTenant, scopes: scopes) { [weak self] outcome in
             switch outcome {
             case .token(let token, let session, let expiry):
                 self?.remember(token: token, expiry: expiry, session: session)

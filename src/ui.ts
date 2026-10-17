@@ -28,6 +28,7 @@ import {
   getCloudStatus,
   notifyCloudPrefsChanged,
   refreshGardenFileList,
+  resetCloudSessionUi,
   setCloudBusy,
   setCloudMessage,
   setLastSaveIso,
@@ -2142,6 +2143,7 @@ async function restoreGardenAfterSignIn(): Promise<void> {
   const account = accountKey() ?? '';
   const preferred = getGardenCloudFileName();
   const auth = await silentGraphToken();
+  if (!isSignedIn()) return;
   if (!auth.ok) {
     if (auth.interactionRequired) notePhotoSignIn(true);
     setCloudMessage(
@@ -2202,9 +2204,11 @@ async function restoreGardenAfterSignIn(): Promise<void> {
     }
     // Mismatch or an empty owed flag: still compare before adopting OneDrive.
   }
+  if (!isSignedIn()) return;
   setCloudBusy(true);
   const decision = await reconcileOpenGarden(preferred, auth.token, account);
   setCloudBusy(false);
+  if (!isSignedIn()) return;
   void refreshGardenFileList();
   applyLoadedGarden(decision, 'sign-in');
 }
@@ -2999,13 +3003,9 @@ async function onSignIn(): Promise<void> {
 async function onSignOut(): Promise<void> {
   setCloudBusy(true);
   setCloudMessage('Signing out…');
-  const result = await signOut();
-  setCloudBusy(false);
-  if (!result.ok) {
-    const msg = result.error ?? 'Sign-out failed.';
-    logError(msg, { source: 'msal' });
-    setCloudMessage(msg);
-  }
+  await signOut();
+  resetCloudSessionUi();
+  notePhotoSignIn(false);
 }
 
 async function onDeleteSelectedPhoto(): Promise<void> {
@@ -3111,6 +3111,7 @@ async function runGardenLoad(target: string): Promise<void> {
 }
 
 function applyLoadedGarden(decision: GardenReconcileResult, source: 'sign-in' | 'load'): void {
+  if (!isSignedIn()) return;
   if (decision.kind === 'adopted' || decision.kind === 'kept-remote') {
     const replaced = adoptRemoteGarden(
       decision.doc,

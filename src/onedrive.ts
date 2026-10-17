@@ -8,6 +8,7 @@ import {
   onedrivePathFor,
 } from './cloudConfig';
 import { acquireGraphToken, acquireGraphTokenSilent } from './msalAuth';
+import { formatGraphFailure, readGraphErrorParts } from './graphErrors';
 import { normalizeDocument } from './model';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -80,10 +81,11 @@ async function ensureFolder(
     }),
   });
   if (res.ok || res.status === 409) return { ok: true };
-  const detail = await readGraphError(res);
-  if (res.status === 405 || /nameAlreadyExists/i.test(detail)) return { ok: true };
+  const detail = await readGraphErrorParts(res);
+  const detailText = detail.message || detail.code;
+  if (res.status === 405 || /nameAlreadyExists/i.test(detailText)) return { ok: true };
   if (res.status === 401 || res.status === 403) {
-    return { ok: false, error: plainGraphStatus(res.status, detail, ONEDRIVE_FILE) };
+    return { ok: false, error: formatGraphFailure(res.status, detail, ONEDRIVE_FILE) };
   }
   console.warn('Garden Planting: folder ensure', detail);
   return { ok: true };
@@ -132,8 +134,8 @@ export async function saveGardenToOneDrive(
   }
 
   if (!res.ok) {
-    const detail = await readGraphError(res);
-    return { ok: false, error: plainGraphStatus(res.status, detail, fileName) };
+    const detail = await readGraphErrorParts(res);
+    return { ok: false, error: formatGraphFailure(res.status, detail, fileName) };
   }
 
   return { ok: true, savedAt: new Date().toISOString(), fileName, eTag: await etagFromResponse(res) };
@@ -160,8 +162,8 @@ async function loadNamedFile(
   }
 
   if (!metaRes.ok) {
-    const detail = await readGraphError(metaRes);
-    return { ok: false, error: plainGraphStatus(metaRes.status, detail, fileName) };
+    const detail = await readGraphErrorParts(metaRes);
+    return { ok: false, error: formatGraphFailure(metaRes.status, detail, fileName) };
   }
 
   let eTag: string | undefined;
@@ -196,8 +198,8 @@ async function loadNamedFile(
     };
   }
   if (!bodyRes.ok) {
-    const detail = await readGraphError(bodyRes);
-    return { ok: false, error: plainGraphStatus(bodyRes.status, detail, fileName) };
+    const detail = await readGraphErrorParts(bodyRes);
+    return { ok: false, error: formatGraphFailure(bodyRes.status, detail, fileName) };
   }
 
   const bodyEtag = bodyRes.headers.get('etag') || bodyRes.headers.get('ETag') || undefined;
@@ -290,8 +292,8 @@ async function listGardenFilesWithToken(
     return { ok: true, files: [] };
   }
   if (!res.ok) {
-    const detail = await readGraphError(res);
-    return { ok: false, error: plainGraphStatus(res.status, detail, ONEDRIVE_FILE) };
+    const detail = await readGraphErrorParts(res);
+    return { ok: false, error: formatGraphFailure(res.status, detail, ONEDRIVE_FILE) };
   }
 
   try {
@@ -325,38 +327,6 @@ export async function listGardenFilesOnOneDrive(): Promise<
   return listGardenFilesWithToken(auth.token);
 }
 
-async function readGraphError(res: Response): Promise<string> {
-  try {
-    const j = (await res.json()) as { error?: { message?: string; code?: string } };
-    return j.error?.message || j.error?.code || res.statusText;
-  } catch {
-    return res.statusText || String(res.status);
-  }
-}
-
-function plainGraphStatus(status: number, detail: string, fileName: string): string {
-  if (isSpoLicenseError(detail)) {
-    return (
-      'This Microsoft account’s organisation has no OneDrive/SharePoint licence. ' +
-      'Sign out, then sign in with a personal Microsoft account that has OneDrive ' +
-      '(for example outlook.com / hotmail.com / live.com) — not a work account without M365.'
-    );
-  }
-  if (status === 401) {
-    return 'Microsoft says the session expired. Sign in again.';
-  }
-  if (status === 403) {
-    return 'OneDrive access was denied. Check Files.ReadWrite permission on the Entra app registration.';
-  }
-  if (status === 404) {
-    return `Could not find /${onedrivePathFor(fileName)} on OneDrive.`;
-  }
-  if (status >= 500) {
-    return `OneDrive is temporarily unavailable (${status}). Try again in a moment.`;
-  }
-  return detail || `OneDrive request failed (${status}).`;
-}
-
 async function etagFromResponse(res: Response): Promise<string | undefined> {
   const header = res.headers.get('etag') || res.headers.get('ETag') || '';
   if (header) return header;
@@ -368,8 +338,3 @@ async function etagFromResponse(res: Response): Promise<string | undefined> {
   }
 }
 
-function isSpoLicenseError(detail: string): boolean {
-  return /SPO\s*license|SharePointOnline|does not have a SPO|no SPO license|SPOLicense/i.test(
-    detail,
-  );
-}

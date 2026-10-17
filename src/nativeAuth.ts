@@ -133,15 +133,15 @@ export async function nativeSignIn(): Promise<{ ok: boolean; error?: string; lab
 }
 
 export async function nativeSignOut(): Promise<void> {
-  const env = clientConfig();
   clearNativeAccount();
+  const env = clientConfig();
   try {
     await GardenAuth.signOut({
       tenantId: env?.tenantId || 'common',
       redirectUri: IOS_ENTRA_REDIRECT_URI,
     });
-  } catch {
-    /* Local tokens are already cleared. */
+  } catch (error) {
+    console.warn('Garden Planting: native signOut plugin call failed', error);
   }
 }
 
