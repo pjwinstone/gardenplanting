@@ -46,6 +46,7 @@
  * - reflected counts garden-sign fallback points, including a tape chain
  *   that inherited that flag. A garden on -Y is not a false mirror.
  *   jointCofactor returns the a-priori joint covariance.
+ *   residualCorrelation is the a-priori residual correlation of two observations.
  * - House Q_m holds the first azimuth and puts angle noise on the other n−1
  *   turnings. All n interior angles also face |Σα−(n−2)π| ≤ 1.96 σ √n.
  * - v1 offsetMm is not applied. A constant frame offset is used only when the

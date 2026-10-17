@@ -275,9 +275,71 @@ Note: Sleeve R mm and height m.
 
 ## Walk round the house
 
-Coming soon.
+Ready. 5 steps.
 
-A traverse around the house. Coming soon.
+Tape one house edge, then walk the corners back to the start.
+
+### 1. Datum
+
+Tape this house edge. Two readings.
+
+- Offsets are OK. C1 and C2 stay until the loop is closed.
+
+Completes when: baseline.saved tape.
+
+Opens: Mode BASELINE.
+
+### 2. Leg
+
+Tape the next corner. Photograph it in the app at 1×.
+
+- On iOS use the in-app camera. Move on when the status is green.
+
+Completes when: traverse.phase leg.
+
+Opens: Mode ADD_POINT.
+
+Survey maths:
+
+- Check again stays on this leg until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and tape MDB is at most 21.3 mm.
+- A short tie asks for a named cross-tie. A mark seen from one setup has to be photographed from here.
+
+### 3. Close
+
+Tape back to the start, then stand there again.
+
+- On iOS, photograph at 1× with the in-app camera.
+
+Completes when: traverse.phase close.
+
+Opens: Mode ADD_POINT.
+
+### 4. Closure review
+
+Read the loop before you adjust.
+
+- The raw gap is not a test for a bad reading.
+
+Completes when: traverse.phase closure-review.
+
+Opens: —.
+
+Survey maths:
+
+- Along, across, and azimuth sit against their 1σ.
+- The position flag is a 2-D χ² test. The azimuth flag is a z-test.
+- χ² is compared with the rank of the duplicate misclosure.
+- The raw misclosure is not a blunder test.
+
+### 5. Adjust
+
+Run Adjust.
+
+- One bad reading is named.
+
+Completes when: traverse.phase adjust.
+
+Opens: Mode ADJUST.
 
 ## iOS setup
 

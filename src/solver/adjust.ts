@@ -533,10 +533,8 @@ function solveOnce(input: SolveInput): SolveResult {
       const other = candidates.length === 1 ? best : best === 0 ? 1 : 0;
       const sep = Math.hypot(candidates[best].x - candidates[other].x, candidates[best].y - candidates[other].y);
       // Bearings side a both-tapes station without a user branch flag. A ray
-      // does the same when the hit sits with one tape intersection. A hit
-      // near the bisector does not choose, and the pair stays unresolved.
-      // Half the separation is that margin: the mirror is several times
-      // farther, the way SIDE_MATCH_RAD rejects the other station side.
+      // does the same when the hit is at least half the separation closer to
+      // one candidate than the other. Otherwise the pair stays unresolved.
       const clear = candidates.length === 1 || secondD - bestD >= 0.5 * sep;
       if (!clear) {
         s.x = undefined;
@@ -746,6 +744,7 @@ function solveOnce(input: SolveInput): SolveResult {
         .map((s) => ({ x: s.x as number, y: s.y as number, fromGardenSign: s.sidedByGardenSign === true })),
     }),
     jointCofactor: (pointIds: string[]) => jointCofactorOf(pointIds, built, adjusted, state, held, originId, axisId),
+    residualCorrelation: (idA: string, idB: string) => residualCorrelationOf(idA, idB, built, adjusted),
     datum: { originId, axisPointId: axisId, gardenSign },
   };
 }
@@ -780,6 +779,35 @@ function jointCofactorOf(
     }
   }
   return c;
+}
+
+/** A-priori residual correlation. qvv_ij = δ_ij σ² − j_iᵀ Q j_j. */
+function residualCorrelationOf(idA: string, idB: string, built: Built, adjusted: LmResult): number | null {
+  const q = adjusted.q;
+  if (!q) return null;
+  const a = built.obs.find((item) => item.id === idA);
+  const b = built.obs.find((item) => item.id === idB);
+  if (!a || !b) return null;
+  if (a.live && !a.live()) return null;
+  if (b.live && !b.live()) return null;
+  const ja = a.jacobian(adjusted.x);
+  const jb = b.jacobian(adjusted.x);
+  const quad = (left: number[], right: number[]) => {
+    let sum = 0;
+    for (let i = 0; i < left.length; i++) {
+      let qj = 0;
+      for (let k = 0; k < right.length; k++) qj += (q[i]?.[k] ?? 0) * right[k];
+      sum += left[i] * qj;
+    }
+    return sum;
+  };
+  const vii = a.sigma * a.sigma - quad(ja, ja);
+  const vjj = b.sigma * b.sigma - quad(jb, jb);
+  if (!(vii > 1e-18) || !(vjj > 1e-18)) return null;
+  if (idA === idB) return 1;
+  const rho = -quad(ja, jb) / Math.sqrt(vii * vjj);
+  if (!Number.isFinite(rho)) return null;
+  return Math.max(-1, Math.min(1, rho));
 }
 
 interface SidePick {

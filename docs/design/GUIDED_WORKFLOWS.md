@@ -44,7 +44,7 @@ Four rows, each at least 84px:
 |---|---|
 | Circle field test | Full step list below. The picture shows it paused at 8/12, next step STN01. |
 | Print & fit markers | Full step list below. |
-| Walk round the house | Named only. A traverse, sourced later from [stage-2-field-checklist.md](../stage-2-field-checklist.md). |
+| Walk round the house | Datum, leg, close, closure review, then adjust. Next leg needs ray r ≥ 0.13, cross-tie tape r ≥ 0.34, and tape MDB ≤ 21.3 mm. |
 | iOS setup | Named only. Camera.app settings from the circle sheet, plus the Capacitor shell when it exists. |
 
 **Later** is a moss outline pill in 16px type, full contrast. The row is not greyed out. It does not start.

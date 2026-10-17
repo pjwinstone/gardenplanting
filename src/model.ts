@@ -96,6 +96,14 @@ export interface Line {
   lengthM?: number;
   sigmaM?: number;
   kind: LineKind;
+  /** Traverse step. Absent on older tapes. */
+  step?: number;
+  /** Leg, cross-tie, station tape, or a repeated closing tape. */
+  role?: 'leg' | 'cross' | 'station' | 'repeat';
+  /** Walk run this tape belongs to. Absent on older tapes. */
+  runId?: string;
+  /** When this tape was saved. Earlier than the run start, it does not count. */
+  recordedAt?: string;
 }
 
 /** Known-length control between two marks. Default field use: one house edge. */
@@ -275,6 +283,21 @@ export interface Photo {
   /** Estimated camera pose after adjust (metres, radians). */
   pose?: { x: number; y: number; yawRad: number };
   /**
+   * Camera station for a traverse photo. Absent: the add-point id is the station.
+   */
+  stationId?: string;
+  /** Traverse step. `solveTraverseStep` keeps photos at or before this index. */
+  step?: number;
+  /** Occupy, leg-station, or the closing re-occupation. */
+  role?: 'occupy' | 'leg' | 'close';
+  /** Closing re-occupation. A `-close-` id is not enough. */
+  closing?: boolean;
+  /** Walk run this photo belongs to. Absent on older photos. */
+  runId?: string;
+  sigmaPx?: number;
+  sigmaCentringM?: number;
+  gravity?: { x: number; y: number; z: number };
+  /**
    * Per-photo contribution to the add-point station (metres).
    * Combined point (x,y) is the average of these estimates when present.
    */
@@ -289,6 +312,74 @@ export interface Setup {
   closed?: boolean;
   /** True once A and B have been photographed together in this setup leapfrog. */
   abPhotographedTogether?: boolean;
+}
+
+/**
+ * One walk round the house. Optional, so an older garden still loads.
+ * The rod `Setup` above is a different record.
+ */
+export interface Traverse {
+  id: string;
+  /** Workflow run this walk belongs to. A new run does not reuse an older walk. */
+  runId?: string;
+  /** When that run started. Tapes and photos from before this do not count. */
+  startedAt?: string;
+  phoneId?: string;
+  lens?: string;
+  /** Datum ends first, then each new mark. */
+  markOrder: string[];
+  status: 'open' | 'closed';
+  closedAt?: string;
+  /** Latest observed leg. */
+  observedStep?: number;
+  newestId?: string;
+  /** The surveyor asked to close, or the newest mark is near the start. */
+  closeRequested?: boolean;
+}
+
+/** One taped leg of the walk. */
+export interface TraverseLeg {
+  id: string;
+  /** Walk run this leg belongs to. */
+  runId?: string;
+  startedAt?: string;
+  from: string;
+  to: string;
+  step: number;
+  tapeIds: string[];
+  tieKind: 'photos' | 'crossTies' | 'both';
+  setupIds: string[];
+  stationIds: string[];
+}
+
+/** Camera occupation on a leg. Not the rod `Setup`. */
+export interface TraverseSetup {
+  id: string;
+  /** Walk run this occupation belongs to. */
+  runId?: string;
+  startedAt?: string;
+  stationId: string;
+  step: number;
+  poleHeightM?: number;
+  leanBoundDeg?: number;
+  lensOnAxis?: boolean;
+}
+
+/** Duplicate-point closure. Raw millimetres are not a blunder test. */
+export interface TraverseMisclosure {
+  w: { x: number; y: number };
+  qW: number[][];
+  alongM: number;
+  acrossM: number;
+  azimuthRad: number;
+  chi2: number;
+  rank: number;
+  pass: boolean;
+  positionPass: boolean;
+  azimuthPass: boolean;
+  rawMisclosureM: number;
+  rawMisclosureIsBlunderTest: false;
+  computedAt: string;
 }
 
 export interface SessionState {
@@ -346,6 +437,13 @@ export interface GardenDocument {
    * Rides the same OneDrive save as the rest of the document.
    */
   workflowProgress?: import('./workflows/guided/types').WorkflowProgress;
+  /** Walk round the house. Optional. Older readers ignore it. */
+  houseTraverse?: Traverse;
+  /** Walks replaced by Start over. The live walk is `houseTraverse`. */
+  pastTraverses?: Traverse[];
+  traverseLegs?: TraverseLeg[];
+  traverseSetups?: TraverseSetup[];
+  traverseMisclosure?: TraverseMisclosure;
 }
 
 export const SIGMA = {
