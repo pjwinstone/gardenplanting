@@ -65,12 +65,12 @@ function isTie(d: SolverDistanceInput): boolean {
   return d.role === 'leg' || d.role === 'cross';
 }
 
-/** Observations up to and including `step`. Distances and photos with no step stay. */
+/** Observations up to and including `step`. Untagged distances and photos stay out. */
 export function sliceTraverseStep(input: SolveInput, step: number): SolveInput {
   return {
     ...input,
-    distances: (input.distances ?? []).filter((d) => d.step == null || d.step <= step),
-    photos: (input.photos ?? []).filter((p) => p.step == null || p.step <= step),
+    distances: (input.distances ?? []).filter((d) => d.step != null && d.step <= step),
+    photos: (input.photos ?? []).filter((p) => p.step != null && p.step <= step),
   };
 }
 

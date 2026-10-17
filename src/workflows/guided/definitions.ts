@@ -295,10 +295,61 @@ export const printFitMarkers: WorkflowDefinition = {
 export const houseTraverse: WorkflowDefinition = {
   id: 'house-traverse',
   revision: 1,
-  status: 'later',
+  status: 'ready',
   title: 'Walk round the house',
-  summary: 'A traverse around the house. Coming soon.',
-  steps: [],
+  summary: 'Tape one house edge, then walk the corners back to the start.',
+  steps: [
+    {
+      id: 'datum',
+      title: 'Datum',
+      instruction: 'Tape this house edge. Two readings.',
+      detail: ['Offsets are OK. C1 and C2 stay until the loop is closed.'],
+      complete: { on: 'baseline.saved', kind: 'tape' },
+      link: { to: 'mode', mode: 'BASELINE' },
+    },
+    {
+      id: 'leg',
+      title: 'Leg',
+      instruction: 'Tape the next corner. Photograph it in the app at 1×.',
+      detail: ['On iOS use the in-app camera. Move on when the status is green.'],
+      help: [
+        'Check again stays on this leg until ray r is at least 0.13, each cross-tie tape r is at least 0.34, and tape MDB is at most 21.3 mm.',
+        'A short tie asks for a named cross-tie. A mark seen from one setup has to be photographed from here.',
+      ],
+      complete: { on: 'traverse.phase', phase: 'leg' },
+      link: { to: 'mode', mode: 'ADD_POINT' },
+    },
+    {
+      id: 'close',
+      title: 'Close',
+      instruction: 'Tape back to the start, then stand there again.',
+      detail: ['On iOS, photograph at 1× with the in-app camera.'],
+      complete: { on: 'traverse.phase', phase: 'close' },
+      link: { to: 'mode', mode: 'ADD_POINT' },
+    },
+    {
+      id: 'closure-review',
+      title: 'Closure review',
+      instruction: 'Read the loop before you adjust.',
+      detail: ['The raw gap is not a test for a bad reading.'],
+      help: [
+        'Along, across, and azimuth sit against their 1σ.',
+        'The position flag is a 2-D χ² test. The azimuth flag is a z-test.',
+        'χ² is compared with the rank of the duplicate misclosure.',
+        'The raw misclosure is not a blunder test.',
+      ],
+      complete: { on: 'traverse.phase', phase: 'closure-review' },
+      link: { to: 'none' },
+    },
+    {
+      id: 'adjust',
+      title: 'Adjust',
+      instruction: 'Run Adjust.',
+      detail: ['One bad reading is named.'],
+      complete: { on: 'traverse.phase', phase: 'adjust' },
+      link: { to: 'mode', mode: 'ADJUST' },
+    },
+  ],
 };
 
 export const iosSetup: WorkflowDefinition = {

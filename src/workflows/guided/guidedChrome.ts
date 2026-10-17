@@ -23,7 +23,10 @@ import {
   type WorkflowMove,
 } from './engine';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
-import type { WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
+import type { FieldStatus, WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
+import { gardenRevision } from '../../gardenCloudSave';
+import { isNativeApp } from '../../nativePlatform';
+import { closeWalk, nextTraverse, restartHouseWalk, walkView, type WalkView } from './traverseWalk';
 
 const SUN_KEY = 'garden-survey:workflow-sunlight';
 
@@ -119,18 +122,39 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-resume') move = resumeWorkflow(progress, workflowId);
   else if (cmd === 'workflow-review') move = reviewWorkflow(progress, workflowId);
   else if (cmd === 'workflow-start-over') {
-    const agreed = window.confirm('Start over? Notes from this run, such as sleeve R, heights, and CHK-BASE, stay under Past runs.');
-    if (!agreed) return {};
+    if (typeof window !== 'undefined' && !window.confirm('Start over? Notes from this run, such as sleeve R, heights, and CHK-BASE, stay under Past runs.')) return {};
+    if ((workflowId || progress.activeId) === 'house-traverse') {
+      notice = null;
+      pickerOpen = false;
+      sheetOpen = false;
+      return { doc: restartHouseWalk(doc) };
+    }
     move = restartWorkflow(progress, workflowId || progress.activeId || '');
   }
-  else if (cmd === 'workflow-next') move = advanceWorkflow(progress);
+  else if (cmd === 'workflow-close-loop' && progress.activeId === 'house-traverse') {
+    notice = null;
+    return { doc: closeWalk(doc) };
+  }
+  else if (cmd === 'workflow-next' && progress.activeId === 'house-traverse') {
+    const walked = nextTraverse(doc);
+    notice = walked.notice ?? null;
+    if (walked.link && walked.link.to !== 'none') {
+      sheetOpen = false;
+      pickerOpen = false;
+    }
+    if (!walked.changed) return {};
+    return { doc: walked.doc, link: walked.link };
+  }
+  else if (cmd === 'workflow-next') move = advanceWorkflow(progress, new Date().toISOString(), doc);
   else if (cmd === 'workflow-back') move = backWorkflow(progress);
   else if (cmd === 'workflow-done') move = doneWorkflow(progress);
   else if (cmd === 'workflow-tick') {
     const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
     const id = stepId || active?.currentStepId || '';
-    const live = document.querySelector<HTMLTextAreaElement>(`textarea[data-step="${CSS.escape(id)}"]`)?.value;
-    move = tickWorkflow(progress, id, live ?? active?.steps[id]?.note);
+    const live = typeof document === 'undefined'
+      ? undefined
+      : document.querySelector<HTMLTextAreaElement>(`textarea[data-step="${CSS.escape(id)}"]`)?.value;
+    move = tickWorkflow(progress, id, live ?? active?.steps[id]?.note, new Date().toISOString(), doc);
   }
   if (!move) return {};
   notice = move.notice ?? null;
@@ -146,13 +170,34 @@ export function handleWorkflowCommand(
   return { doc: commitWorkflow(doc, move.progress), link: move.link };
 }
 
+let walkCache: { key: string; view: WalkView } | undefined;
+
+function chromeWalkView(doc: GardenDocument): WalkView {
+  const traverse = doc.houseTraverse;
+  const key = [
+    String(gardenRevision()),
+    doc.updatedAt ?? '',
+    traverse?.runId ?? '',
+    String(traverse?.observedStep ?? ''),
+    traverse?.newestId ?? '',
+    traverse?.closeRequested ? '1' : '0',
+    String(doc.lines.length),
+    String(doc.photos.length),
+  ].join('|');
+  if (walkCache?.key === key) return walkCache.view;
+  const view = walkView(doc);
+  walkCache = { key, view };
+  return view;
+}
+
 export function renderGuidedChrome(doc: GardenDocument): HTMLElement {
   const root = document.createElement('div');
   root.className = 'workflow-root' + (sunlightActive() ? ' workflow-sun' : '');
   root.dataset.testid = 'workflow-root';
   const progress = readProgress(doc);
+  const view = chromeWalkView(doc);
   if (pickerOpen) root.append(renderPicker(progress));
-  else appendActive(root, progress);
+  else appendActive(root, progress, view);
   placedRoot = root;
   requestAnimationFrame(() => {
     if (root.isConnected) placeWorkflowChrome(root);
@@ -184,14 +229,14 @@ export function placeWorkflowChrome(root: HTMLElement): void {
   root.ownerDocument.documentElement.style.setProperty('--workflow-chrome-offset', `${Math.max(0, offset)}px`);
 }
 
-function appendActive(root: HTMLElement, progress: WorkflowProgress): void {
+function appendActive(root: HTMLElement, progress: WorkflowProgress, view: WalkView): void {
   const id = progress.activeId;
   const def = id ? workflowById(id) : undefined;
   const run = id ? progress.runs[id] : undefined;
   if (!def || !run || def.status !== 'ready' || def.steps.length === 0) return;
-  if (sheetOpen && !run.finishedAt) root.append(renderSheet(def, run));
-  else root.append(renderBar(def, run, progress));
-  if (!sheetOpen) root.append(renderThumb(def, run, progress));
+  if (sheetOpen && !run.finishedAt) root.append(renderSheet(def, run, view));
+  else root.append(renderBar(def, run, progress, view));
+  if (!sheetOpen) root.append(renderThumb(def, run, progress, view));
 }
 
 function stepIndex(def: WorkflowDefinition, run: WorkflowRun): number {
@@ -227,7 +272,8 @@ function autoSentence(step: WorkflowStep): string {
   return 'Ticked from the app. You did not tap it.';
 }
 
-function nextLabel(step: WorkflowStep, last: boolean): string {
+function nextLabel(step: WorkflowStep, last: boolean, held = false): string {
+  if (held) return 'Check again';
   if (stepIsManualOnly(step) || last) return 'Done';
   return 'Next';
 }
@@ -238,7 +284,7 @@ function sunButton(): HTMLButtonElement {
   return button(label, 'workflow-sun', { className: 'workflow-btn', testid: 'workflow-sun' });
 }
 
-function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: WorkflowProgress): HTMLElement {
+function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: WorkflowProgress, view: WalkView): HTMLElement {
   if (run.finishedAt) return renderFinished(def, progress);
   const step = currentStep(def, run);
   const state = run.steps[step.id];
@@ -251,21 +297,29 @@ function renderBar(def: WorkflowDefinition, run: WorkflowRun, progress: Workflow
   kicker.append(sunButton());
   bar.append(kicker);
   bar.append(el('h2', 'workflow-title', done && step.doneTitle ? step.doneTitle : step.title));
-  bar.append(el('p', 'workflow-instruction', done && step.doneInstruction ? step.doneInstruction : step.instruction));
+  bar.append(el('p', 'workflow-instruction', done && step.doneInstruction ? step.doneInstruction : shownInstruction(def, step)));
+  const statusBlock = el('div', 'workflow-status-block');
+  appendStatus(statusBlock, view);
+  bar.append(statusBlock);
+  const body = el('div', 'workflow-bar-body');
   if (done && state?.completedBy === 'auto') {
     const line = el('div', 'workflow-tick-line');
     line.innerHTML = tickSvg();
     line.append(document.createTextNode(autoSentence(step)));
-    bar.append(line);
+    body.append(line);
   } else if (done) {
-    bar.append(el('p', 'workflow-auto', 'Ticked by you.'));
+    body.append(el('p', 'workflow-auto', 'Ticked by you.'));
   }
-  if (notice) bar.append(el('p', 'workflow-notice', notice));
+  if (notice && notice !== view.status?.line) body.append(el('p', 'workflow-notice', notice));
+  if (body.childElementCount) bar.append(body);
   const actions = el('div', 'workflow-actions');
   const back = button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 });
   const details = button('Details', 'workflow-expand');
   const last = stepIndex(def, run) === def.steps.length - 1;
-  actions.append(back, details, button(nextLabel(step, last), 'workflow-next', { primary: true }));
+  if (def.id === 'house-traverse' && step.id === 'leg') {
+    actions.append(button('Close the loop', 'workflow-close-loop'));
+  }
+  actions.append(back, details, nextButton(step, last, view));
   bar.append(actions);
   return bar;
 }
@@ -295,7 +349,7 @@ function renderFinished(def: WorkflowDefinition, progress: WorkflowProgress): HT
   return bar;
 }
 
-function renderThumb(def: WorkflowDefinition, run: WorkflowRun, progress: WorkflowProgress): HTMLButtonElement {
+function renderThumb(def: WorkflowDefinition, run: WorkflowRun, progress: WorkflowProgress, view: WalkView): HTMLButtonElement {
   const paused = run.finishedAt ? pausedRun(progress) : undefined;
   if (paused) {
     return button('Resume', 'workflow-resume', {
@@ -312,13 +366,15 @@ function renderThumb(def: WorkflowDefinition, run: WorkflowRun, progress: Workfl
   }
   const step = currentStep(def, run);
   const last = stepIndex(def, run) === def.steps.length - 1;
-  return button(nextLabel(step, last), 'workflow-next', {
+  const held = view.status?.blocked === true;
+  return button(nextLabel(step, last, held), 'workflow-next', {
     className: 'workflow-thumb',
     testid: 'workflow-thumb',
+    title: held ? view.status?.line : undefined,
   });
 }
 
-function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
+function renderSheet(def: WorkflowDefinition, run: WorkflowRun, view: WalkView): HTMLElement {
   const step = currentStep(def, run);
   const state = run.steps[step.id];
   const sheet = el('section', 'workflow-sheet');
@@ -329,47 +385,125 @@ function renderSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
   kicker.append(sunButton());
   sheet.append(kicker);
   sheet.append(el('h2', 'workflow-title', step.title));
-  sheet.append(el('p', 'workflow-instruction', step.instruction));
+  sheet.append(el('p', 'workflow-instruction', shownInstruction(def, step)));
+  const statusBlock = el('div', 'workflow-status-block');
+  appendStatus(statusBlock, view);
+  sheet.append(statusBlock);
+  const body = el('div', 'workflow-sheet-body');
   if (step.diagram) {
     const host = el('div', 'workflow-diagram-host');
     host.innerHTML = diagramSvg(step.diagram);
-    sheet.append(host);
+    body.append(host);
   }
-  for (const line of step.detail) sheet.append(el('p', 'workflow-detail', line));
+  for (const line of step.detail) {
+    if (line === view.status?.note) continue;
+    body.append(el('p', 'workflow-detail', line));
+  }
+  appendMaths(body, step, view);
   if (step.noteLabel) {
-    sheet.append(el('label', 'workflow-note-label', step.noteLabel));
+    body.append(el('label', 'workflow-note-label', step.noteLabel));
     const note = document.createElement('textarea');
     note.className = 'workflow-note';
     note.dataset.cmd = 'workflow-note';
     note.dataset.step = step.id;
     note.value = state?.note ?? '';
     note.rows = 2;
-    sheet.append(note);
+    body.append(note);
   }
   const manual = stepIsManualOnly(step);
-  if (!manual) {
+  const held = view.status?.blocked === true;
+  if (!manual && !held) {
     const photo = uploadedStep(step);
     const hint = photo
       ? `Ticks when ${photo.minPhotos} ${photo.minPhotos === 1 ? 'photo is' : 'photos are'} saved at ${photo.stationId}.`
       : 'Ticks itself when the app sees this step. You can still tick it by hand.';
-    sheet.append(el('p', 'workflow-auto', state?.status === 'complete'
+    body.append(el('p', 'workflow-auto', state?.status === 'complete'
       ? (state.completedBy === 'auto' ? autoSentence(step) : 'Ticked by you.')
       : hint));
   }
   if (run.parkedStepIds?.length) {
-    sheet.append(el('p', 'workflow-notice', `Older steps kept aside: ${run.parkedStepIds.join(', ')}.`));
+    body.append(el('p', 'workflow-notice', `Older steps kept aside: ${run.parkedStepIds.join(', ')}.`));
   }
-  if (notice) sheet.append(el('p', 'workflow-notice', notice));
+  if (notice && notice !== view.status?.line) body.append(el('p', 'workflow-notice', notice));
   const actions = el('div', 'workflow-sheet-actions');
   actions.append(button('Back', 'workflow-back', { disabled: stepIndex(def, run) === 0 }));
   actions.append(button('Close', 'workflow-collapse'));
-  if (!manual && state?.status !== 'complete') {
+  if (!manual && !held && state?.status !== 'complete') {
     actions.append(button('Tick anyway', 'workflow-tick', { step: step.id }));
   }
+  if (def.id === 'house-traverse' && step.id === 'leg') {
+    actions.append(button('Close the loop', 'workflow-close-loop'));
+  }
+  if (def.id === 'house-traverse' && !run.finishedAt) {
+    actions.append(button('Start over', 'workflow-start-over', { workflow: def.id }));
+  }
   const last = stepIndex(def, run) === def.steps.length - 1;
-  actions.append(button(nextLabel(step, last), 'workflow-next', { primary: true }));
-  sheet.append(actions);
+  actions.append(nextButton(step, last, view));
+  sheet.append(body, actions);
   return sheet;
+}
+
+function nextButton(step: WorkflowStep, last: boolean, view: WalkView): HTMLButtonElement {
+  const held = view.status?.blocked === true;
+  return button(nextLabel(step, last, held), 'workflow-next', {
+    primary: true,
+    title: held ? view.status?.line : undefined,
+    testid: 'workflow-next',
+  });
+}
+
+function appendStatus(parent: HTMLElement, view: WalkView): void {
+  const status = view.status;
+  if (!status) return;
+  const line = el('p', `workflow-status workflow-status--${status.tone}`, status.line);
+  line.dataset.testid = 'workflow-status';
+  parent.append(line);
+  if (status.headline) {
+    parent.append(el('p', 'workflow-headline', status.headline));
+    parent.append(accuracyMeter(status));
+  }
+  if (status.note) parent.append(el('p', 'workflow-status-note', status.note));
+}
+
+function accuracyMeter(status: FieldStatus): HTMLElement {
+  const row = el('div', 'workflow-meter-row');
+  const target = status.targetMm ?? 21;
+  const scale = target * 2.5;
+  const mm = status.accuracyMm ?? 0;
+  const fill = Math.max(8, Math.min(100, (mm / scale) * 100));
+  const mark = Math.max(0, Math.min(100, (target / scale) * 100));
+  const track = el('div', 'workflow-meter');
+  track.dataset.testid = 'workflow-meter';
+  track.setAttribute('role', 'img');
+  track.setAttribute('aria-label', status.headline ?? 'Accuracy');
+  const bar = el('span', `workflow-meter-fill workflow-meter-fill--${status.tone}`);
+  bar.style.width = `${fill}%`;
+  const tick = el('span', 'workflow-meter-target');
+  tick.style.left = `${mark}%`;
+  track.append(bar, tick);
+  const ellipse = el('div', 'workflow-ellipse');
+  const rx = Math.max(6, Math.min(18, 4 + (fill / 100) * 14));
+  ellipse.innerHTML = `<svg viewBox="0 0 48 28" aria-hidden="true"><ellipse cx="24" cy="14" rx="${rx.toFixed(1)}" ry="${(rx * 0.55).toFixed(1)}" class="workflow-ellipse-shape workflow-ellipse-shape--${status.tone}"/></svg>`;
+  row.append(track, ellipse);
+  return row;
+}
+
+function appendMaths(parent: HTMLElement, step: WorkflowStep, view: WalkView): void {
+  const lines = view.lines ?? [];
+  const help = step.help ?? [];
+  if (!lines.length && !help.length) return;
+  const details = document.createElement('details');
+  details.className = 'workflow-maths';
+  details.dataset.testid = 'workflow-maths';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Survey maths';
+  details.append(summary);
+  for (const line of help) details.append(el('p', 'workflow-maths-line', line));
+  const block = el('div', 'workflow-live');
+  block.dataset.testid = 'workflow-live';
+  for (const line of lines) block.append(el('p', 'workflow-live-line', line));
+  if (lines.length) details.append(block);
+  parent.append(details);
 }
 
 function renderPicker(progress: WorkflowProgress): HTMLElement {
@@ -438,6 +572,12 @@ function pickerAction(def: WorkflowDefinition, run: WorkflowRun | undefined): HT
     return button('Later', 'workflow-start', { workflow: def.id, disabled: true });
   }
   if (!run) return button('Start', 'workflow-start', { workflow: def.id, primary: true });
+  if (!run.finishedAt && def.id === 'house-traverse') {
+    const actions = el('div', 'workflow-row-actions');
+    actions.append(button('Resume', 'workflow-resume', { workflow: def.id, primary: true }));
+    actions.append(button('Start over', 'workflow-start-over', { workflow: def.id }));
+    return actions;
+  }
   if (run.finishedAt) {
     const actions = el('div', 'workflow-row-actions');
     actions.append(button('Review', 'workflow-review', { workflow: def.id, primary: true }));
@@ -445,6 +585,14 @@ function pickerAction(def: WorkflowDefinition, run: WorkflowRun | undefined): HT
     return actions;
   }
   return button('Resume', 'workflow-resume', { workflow: def.id, primary: true });
+}
+
+function shownInstruction(def: WorkflowDefinition, step: WorkflowStep): string {
+  if (def.id === 'house-traverse' && !isNativeApp()) {
+    if (step.id === 'leg') return 'Tape the next corner. Shoot at 1× in Camera.app, then pick Library.';
+    if (step.id === 'close') return 'Tape back to the start. Shoot at 1× in Camera.app, then pick Library.';
+  }
+  return step.instruction;
 }
 
 function tickSvg(): string {
@@ -461,13 +609,14 @@ function el(tag: string, className: string, text?: string): HTMLElement {
 function button(
   text: string,
   cmd: string,
-  opts: { primary?: boolean; disabled?: boolean; className?: string; testid?: string; workflow?: string; step?: string } = {},
+  opts: { primary?: boolean; disabled?: boolean; className?: string; testid?: string; workflow?: string; step?: string; title?: string } = {},
 ): HTMLButtonElement {
   const node = document.createElement('button');
   node.type = 'button';
   node.className = opts.className ?? ('workflow-btn' + (opts.primary ? ' workflow-primary' : ''));
   node.dataset.cmd = cmd;
   node.textContent = text;
+  if (opts.title) node.title = opts.title;
   if (opts.disabled) node.disabled = true;
   if (opts.testid) node.dataset.testid = opts.testid;
   if (opts.workflow) node.dataset.workflow = opts.workflow;

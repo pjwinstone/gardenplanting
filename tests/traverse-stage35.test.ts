@@ -429,9 +429,9 @@ test('open-chain C3 is checked when rays choose between tape candidates', () => 
     else assert.equal(trial.varianceTest, 'high', `draw ${i} C3 ${mark?.status}`);
     checked += trial.points.filter((p) => p.status === 'checked').length;
   }
-  // fbf5b7e counted 1,135 checked marks. The branch flag had dropped that to 960.
+  // 1,530 is every checked point across the 200 draws. The 1,135 and 960
+  // figures counted only the C and H marks.
   assert.equal(c3Checked, 190);
-  assert.ok(checked >= 1135, `checked ${checked}`);
   assert.equal(checked, 1530);
 });
 

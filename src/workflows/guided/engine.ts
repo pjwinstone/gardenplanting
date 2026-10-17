@@ -77,7 +77,7 @@ function eventMatches(trigger: Exclude<WorkflowTrigger, { all: WorkflowTrigger[]
   if (trigger.on !== event.type) return false;
   if (trigger.on === 'baseline.saved' && event.type === 'baseline.saved') {
     if (event.kind !== trigger.kind) return false;
-    if (!endsMatch(event, trigger.endA, trigger.endB)) return false;
+    if (trigger.endA && trigger.endB && !endsMatch(event, trigger.endA, trigger.endB)) return false;
     if (trigger.offsetAMm !== undefined && event.offsetAMm !== trigger.offsetAMm) return false;
     if (trigger.offsetBMm !== undefined && event.offsetBMm !== trigger.offsetBMm) return false;
     return true;
@@ -109,6 +109,7 @@ function eventMatches(trigger: Exclude<WorkflowTrigger, { all: WorkflowTrigger[]
     return true;
   }
   if (trigger.on === 'cloud.saved' && event.type === 'cloud.saved') return true;
+  if (trigger.on === 'traverse.phase' && event.type === 'traverse.phase') return event.phase === trigger.phase;
   return false;
 }
 
@@ -355,11 +356,20 @@ export function commitWorkflow(doc: GardenDocument, progress: WorkflowProgress):
   return { ...doc, workflowProgress: progress };
 }
 
+/** A workflow module can fold document entities after the tick. Set once, from that module. */
+let workflowEventHook: ((doc: GardenDocument, event: WorkflowEvent, now: string) => GardenDocument) | null = null;
+
+export function setWorkflowEventHook(
+  hook: (doc: GardenDocument, event: WorkflowEvent, now: string) => GardenDocument,
+): void {
+  workflowEventHook = hook;
+}
+
 export function withWorkflowEvent(doc: GardenDocument, event: WorkflowEvent, now = new Date().toISOString()): GardenDocument {
   const progress = readProgress(doc);
   const next = applyWorkflowEvent(progress, event, now);
-  if (progressJson(progress) === progressJson(next)) return doc;
-  return commitWorkflow(doc, next);
+  const committed = progressJson(progress) === progressJson(next) ? doc : commitWorkflow(doc, next);
+  return workflowEventHook ? workflowEventHook(committed, event, now) : committed;
 }
 
 export function applyWorkflowEvent(progress: WorkflowProgress, event: WorkflowEvent, now = new Date().toISOString()): WorkflowProgress {
@@ -529,21 +539,29 @@ export function stepIsManualOnly(step: WorkflowStep): boolean {
   return 'on' in step.complete && step.complete.on === 'manual';
 }
 
-function tickManualCurrent(progress: WorkflowProgress, now: string): WorkflowProgress {
+function tickManualCurrent(progress: WorkflowProgress, now: string, doc?: GardenDocument): WorkflowProgress {
   const pair = activePair(progress);
   if (!pair || pair.run.finishedAt) return progress;
   const step = pair.def.steps.find((item) => item.id === pair.run.currentStepId);
   if (!step || !stepIsManualOnly(step)) return progress;
   if (pair.run.steps[step.id]?.status === 'complete') return progress;
-  return tickWorkflow(progress, step.id, pair.run.steps[step.id]?.note, now).progress;
+  return tickWorkflow(progress, step.id, pair.run.steps[step.id]?.note, now, doc).progress;
 }
 
-export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toISOString()): WorkflowMove {
+export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toISOString(), doc?: GardenDocument): WorkflowMove {
   const initial = activePair(progress);
   if (!initial) return { progress, notice: 'Start a workflow first.', changed: false };
   if (initial.run.finishedAt) return { progress, notice: `${initial.def.title} is already finished.`, changed: false };
-  const ticked = tickManualCurrent(progress, now);
+  const ticked = tickManualCurrent(progress, now, doc);
   const pair = activePair(ticked) ?? initial;
+  const held = workflowStepGate?.(ticked, pair.run.currentStepId, doc) ?? null;
+  if (held) {
+    return {
+      progress: ticked,
+      notice: held,
+      changed: progressJson(progress) !== progressJson(ticked),
+    };
+  }
   const index = pair.def.steps.findIndex((step) => step.id === pair.run.currentStepId);
   const at = index < 0 ? 0 : index;
   if (at >= pair.def.steps.length - 1) return doneWorkflow(ticked, now);
@@ -562,7 +580,13 @@ export function backWorkflow(progress: WorkflowProgress, now = new Date().toISOS
   const index = pair.def.steps.findIndex((step) => step.id === pair.run.currentStepId);
   if (index <= 0) return { progress, changed: false };
   const prev = pair.def.steps[index - 1];
-  const run: WorkflowRun = { ...pair.run, currentStepId: prev.id, updatedAt: now };
+  const run: WorkflowRun = {
+    ...pair.run,
+    currentStepId: prev.id,
+    updatedAt: now,
+    fieldStatus: undefined,
+    liveLines: undefined,
+  };
   return {
     progress: { ...progress, runs: { ...progress.runs, [pair.def.id]: run } },
     changed: true,
@@ -599,7 +623,15 @@ export function doneWorkflow(progress: WorkflowProgress, now = new Date().toISOS
   };
 }
 
-export function tickWorkflow(progress: WorkflowProgress, stepId: string, note?: string, now = new Date().toISOString()): WorkflowMove {
+export function tickWorkflow(
+  progress: WorkflowProgress,
+  stepId: string,
+  note?: string,
+  now = new Date().toISOString(),
+  doc?: GardenDocument,
+): WorkflowMove {
+  const held = workflowStepGate?.(progress, stepId, doc) ?? null;
+  if (held) return { progress, notice: held, changed: false };
   const next = applyWorkflowEvent(progress, { type: 'manual.tick', stepId, note }, now);
   const changed = progressJson(progress) !== progressJson(next);
   return { progress: next, changed };
@@ -662,6 +694,31 @@ function photoTimeMs(value: string | undefined): number | undefined {
 }
 
 /**
+ * A photo counts for this run only after the OneDrive upload checked out,
+ * with both capture and receive times at or after the run start, and only
+ * if no step has already consumed it. A missing time does not count.
+ */
+export function photoIsUploadFresh(photo: Photo, startedAt: string, taken: ReadonlySet<string>): boolean {
+  const start = photoTimeMs(startedAt);
+  if (start === undefined || taken.has(photo.id)) return false;
+  if (photo.originalFile?.uploadStatus !== 'verified') return false;
+  if ((photo.originalFile.usabilityNote ?? '').includes('Not usable')) return false;
+  const captured = photoTimeMs(photo.originalFile?.capturedAt) ?? photoTimeMs(photo.exifDateTimeOriginal);
+  const received = photoTimeMs(photo.originalFile?.receivedAt);
+  if (captured === undefined || received === undefined) return false;
+  return captured >= start && received >= start;
+}
+
+/** A workflow can refuse Tick and Next for a step that has not passed. The document is the garden being ticked. */
+let workflowStepGate: ((progress: WorkflowProgress, stepId: string, doc: GardenDocument | undefined) => string | null) | null = null;
+
+export function setWorkflowStepGate(
+  gate: ((progress: WorkflowProgress, stepId: string, doc: GardenDocument | undefined) => string | null) | null,
+): void {
+  workflowStepGate = gate;
+}
+
+/**
  * Photos that can tick a station step in this run.
  * Verified means the OneDrive upload checked out. There is no marker detector.
  * A photo counts only when it was captured and received at or after the run
@@ -682,14 +739,8 @@ export function countUploadedPhotosForStep(
     for (const photoId of state.consumedPhotoIds ?? []) taken.add(photoId);
   }
   const photoIds = doc.photos.filter((photo) => {
-    if (taken.has(photo.id)) return false;
     if (!photoOnStation(doc, photo, stationId)) return false;
-    if (photo.originalFile?.uploadStatus !== 'verified') return false;
-    if ((photo.originalFile.usabilityNote ?? '').includes('Not usable')) return false;
-    const captured = photoTimeMs(photo.originalFile?.capturedAt) ?? photoTimeMs(photo.exifDateTimeOriginal);
-    const received = photoTimeMs(photo.originalFile?.receivedAt);
-    if (captured === undefined || received === undefined) return false;
-    return captured >= start && received >= start;
+    return photoIsUploadFresh(photo, run.startedAt, taken);
   }).map((photo) => photo.id);
   return { count: photoIds.length, photoIds };
 }
