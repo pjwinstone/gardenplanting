@@ -124,23 +124,21 @@ jobs:
           """
           )
           PY
-          # Cloud signing. Apple holds the distribution key. This is not fastlane match.
-          # https://developer.apple.com/videos/play/wwdc2021/10204/
+          # Archive unsigned; export re-signs with cloud-managed App Store distribution
+          # (automatic + API key). Avoids creating Apple Development certs/profiles on
+          # ephemeral runners. https://developer.apple.com/videos/play/wwdc2021/10204/
           xcodebuild \
             -project ios/App/App.xcodeproj \
             -scheme App \
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/App.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/AuthKey.p8" \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Apple Development" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             archive
           xcodebuild \
             -exportArchive \
