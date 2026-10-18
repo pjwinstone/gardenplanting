@@ -10,18 +10,43 @@ import {
   advanceWorkflow,
   backWorkflow,
   commitWorkflow,
+  confirmSetupWorkflow,
+  counts,
   doneWorkflow,
+  jumpWorkflowCount,
   noteWorkflow,
+  pauseWorkflow,
   pausedRun,
   readProgress,
   restartWorkflow,
   resumeWorkflow,
+  retakeEvidenceWorkflow,
+  scrollWorkflowToStep,
+  skipWithNoteWorkflow,
   reviewWorkflow,
   startWorkflow,
   stepIsManualOnly,
+  tickAgainWorkflow,
+  tickWithReasonWorkflow,
   tickWorkflow,
+  untickWorkflow,
   type WorkflowMove,
 } from './engine';
+import {
+  attachRollerWheel,
+  formatCountsLine,
+  primaryActionLabel,
+  reasonLine,
+  rollerPositionLabel,
+  rollerRowIds,
+  rowNumber,
+  rowTitle,
+  stateIconChar,
+  stateIconClass,
+  wheelHeightPx,
+} from './guidedRoller';
+import { SETUP_STEP_ID } from './fieldTestMeta';
+import { isSettled, normalizeStatus } from './guards';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
 import type { WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
 
@@ -31,6 +56,8 @@ let pickerOpen = false;
 let sheetOpen = false;
 let notice: string | null = null;
 let placedRoot: HTMLElement | null = null;
+let chromeRerender: (() => void) | null = null;
+let chromeDoc: GardenDocument | null = null;
 
 export interface WorkflowCommandResult {
   doc?: GardenDocument;
@@ -67,6 +94,7 @@ function cycleSun(): void {
 }
 
 export function installWorkflowChrome(rerender: () => void): void {
+  chromeRerender = rerender;
   const media = window.matchMedia?.('(prefers-contrast: more)');
   media?.addEventListener?.('change', () => {
     if (sunlightMode() === 'system') rerender();
@@ -124,8 +152,32 @@ export function handleWorkflowCommand(
     move = restartWorkflow(progress, workflowId || progress.activeId || '');
   }
   else if (cmd === 'workflow-next') move = advanceWorkflow(progress);
+  else if (cmd === 'workflow-later') move = advanceWorkflow(progress);
   else if (cmd === 'workflow-back') move = backWorkflow(progress);
   else if (cmd === 'workflow-done') move = doneWorkflow(progress);
+  else if (cmd === 'workflow-scroll') move = scrollWorkflowToStep(progress, stepId || '');
+  else if (cmd === 'workflow-jump') {
+    const kind = source.getAttribute('data-kind') as 'error' | 'warning' | 'open' | 'recheck' | null;
+    if (kind) move = jumpWorkflowCount(progress, kind);
+  }
+  else if (cmd === 'workflow-setup') move = scrollWorkflowToStep(progress, SETUP_STEP_ID);
+  else if (cmd === 'workflow-confirm-setup') move = confirmSetupWorkflow(progress);
+  else if (cmd === 'workflow-skip') {
+    const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
+    const id = stepId || active?.currentStepId || '';
+    const live = document.querySelector<HTMLTextAreaElement>(`textarea[data-step="${CSS.escape(id)}"]`)?.value;
+    move = skipWithNoteWorkflow(progress, id, live ?? '');
+  }
+  else if (cmd === 'workflow-tick-reason') {
+    const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
+    const id = stepId || active?.currentStepId || '';
+    const live = document.querySelector<HTMLTextAreaElement>(`textarea[data-step="${CSS.escape(id)}"]`)?.value ?? '';
+    move = tickWithReasonWorkflow(progress, id, live);
+  }
+  else if (cmd === 'workflow-retake') move = retakeEvidenceWorkflow(progress, stepId);
+  else if (cmd === 'workflow-untick') move = untickWorkflow(progress, stepId);
+  else if (cmd === 'workflow-pause') move = pauseWorkflow(progress);
+  else if (cmd === 'workflow-tick-again') move = tickAgainWorkflow(progress);
   else if (cmd === 'workflow-tick') {
     const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
     const id = stepId || active?.currentStepId || '';
@@ -147,6 +199,7 @@ export function handleWorkflowCommand(
 }
 
 export function renderGuidedChrome(doc: GardenDocument): HTMLElement {
+  chromeDoc = doc;
   const root = document.createElement('div');
   root.className = 'workflow-root' + (sunlightActive() ? ' workflow-sun' : '');
   root.dataset.testid = 'workflow-root';
@@ -189,9 +242,188 @@ function appendActive(root: HTMLElement, progress: WorkflowProgress): void {
   const def = id ? workflowById(id) : undefined;
   const run = id ? progress.runs[id] : undefined;
   if (!def || !run || def.status !== 'ready' || def.steps.length === 0) return;
+  const roller = def.id === 'circle-field-test' && def.revision >= 3;
+  if (roller && !run.finishedAt) {
+    if (sheetOpen) root.append(renderDetailsSheet(def, run));
+    else root.append(renderRollerPanel(def, run, progress));
+    return;
+  }
   if (sheetOpen && !run.finishedAt) root.append(renderSheet(def, run));
   else root.append(renderBar(def, run, progress));
   if (!sheetOpen) root.append(renderThumb(def, run, progress));
+}
+
+function renderRollerPanel(
+  def: WorkflowDefinition,
+  run: WorkflowRun,
+  _progress: WorkflowProgress,
+): HTMLElement {
+  const panel = el('section', 'workflow-roller-sheet');
+  panel.dataset.testid = 'workflow-bar';
+  const top = el('div', 'roller-top');
+  const hdr = el('div', 'roller-hdr');
+  hdr.append(el('b', '', def.title));
+  const right = el('span', 'roller-hdr-right');
+  right.append(el('span', '', rollerPositionLabel(def, run)));
+  const cog = button('', 'workflow-setup', { className: 'roller-cog', testid: 'workflow-setup-cog' });
+  cog.setAttribute('aria-label', 'Set-up');
+  cog.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+  right.append(cog);
+  hdr.append(right);
+  top.append(hdr);
+  const countsLine = el('div', 'roller-counts');
+  countsLine.setAttribute('aria-live', 'polite');
+  countsLine.textContent = formatCountsLine(def, run);
+  top.append(countsLine);
+  panel.append(top);
+
+  const wheel = el('div', 'roller-wheel');
+  wheel.style.height = `${wheelHeightPx(run)}px`;
+  const cap = el('div', 'roller-cap');
+  wheel.append(cap);
+  const list = el('div', 'roller-list');
+  list.dataset.rollerList = '1';
+  list.setAttribute('role', 'listbox');
+  const pad = (wheelHeightPx(run) - ROW_PX) / 2;
+  list.style.paddingTop = `${pad}px`;
+  list.style.paddingBottom = `${pad}px`;
+  const rowIds = rollerRowIds(def);
+  const currentId = run.currentStepId;
+  for (const stepId of rowIds) {
+    const row = el('div', 'roller-row');
+    row.dataset.stepId = stepId;
+    row.setAttribute('role', 'option');
+    const state = stepId === SETUP_STEP_ID
+      ? { status: run.setup?.status === 'unconfirmed' ? 'open' : 'ticked_by_you' }
+      : run.steps[stepId];
+    row.append(el('span', 'roller-n', rowNumber(def, stepId)));
+    const ic = el('span', `roller-ic ${stateIconClass(state?.status ?? 'open')}`, stateIconChar(state?.status ?? 'open', stepId));
+    row.append(ic);
+    const title = el('span', 'roller-t' + (stepId === currentId ? ' roller-t-cur' : ''), rowTitle(def, stepId));
+    row.append(title);
+    if (stepId === currentId) {
+      const step = def.steps.find((item) => item.id === stepId);
+      const pill = step ? primaryActionLabel(step, run) : undefined;
+      if (pill) row.append(button(pill, pill === 'Retake' ? 'workflow-retake' : 'workflow-expand', { className: 'roller-pill', step: stepId }));
+      row.append(button('?', 'workflow-expand', { className: 'roller-q', step: stepId }));
+    }
+    list.append(row);
+  }
+  wheel.append(list);
+  panel.append(wheel);
+
+  const currentStep = def.steps.find((item) => item.id === currentId);
+  if (currentId === SETUP_STEP_ID) {
+    panel.append(renderSetupForm(def, run));
+  } else if (currentStep) {
+    panel.append(renderButtonRow(def, run, currentStep));
+  }
+  if (notice) panel.append(el('p', 'workflow-notice', notice));
+
+  requestAnimationFrame(() => {
+    const currentRow = list.querySelector<HTMLElement>(`[data-step-id="${CSS.escape(currentId)}"]`);
+    if (currentRow) currentRow.scrollIntoView({ block: 'center' });
+    attachRollerWheel(wheel, rowIds, currentId, (stepId) => {
+      if (!chromeDoc || stepId === currentId) return;
+      const move = scrollWorkflowToStep(readProgress(chromeDoc), stepId);
+      if (!move.changed) return;
+      chromeDoc = commitWorkflow(chromeDoc, move.progress);
+      chromeRerender?.();
+    });
+  });
+  return panel;
+}
+
+const ROW_PX = 44;
+
+function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
+  const form = el('div', 'roller-setup-form');
+  const values = run.setup?.values;
+  if (!values) return form;
+  const grid = el('div', 'roller-form-grid');
+  grid.append(formTile('Baseline BAS01–BAS02', `${values.baseline_length_m.toFixed(3)} m`));
+  grid.append(formTile('Circle diameter', `${values.circle_diameter_m.toFixed(3)} m`));
+  grid.append(formTile('BAS02 from peg', `${values.bas02_from_peg_m.toFixed(2)} m`));
+  grid.append(formTile('Calibration distance', `${values.calibration_distance_m.toFixed(1)} m`));
+  form.append(grid);
+  const act = el('div', 'roller-form-act');
+  act.append(el('div', 'roller-hint', run.setup?.status === 'changed_mid_run' ? 'Set-up changed. Confirm when ready.' : ''));
+  act.append(button('Confirm', 'workflow-confirm-setup', { primary: true }));
+  form.append(act);
+  return form;
+}
+
+function formTile(label: string, value: string): HTMLElement {
+  const tile = el('div', 'roller-form-tile');
+  tile.append(el('small', '', label));
+  tile.append(el('b', '', value));
+  return tile;
+}
+
+function renderButtonRow(def: WorkflowDefinition, run: WorkflowRun, step: WorkflowStep): HTMLElement {
+  const row = el('div', 'roller-act');
+  const hint = el('div', 'roller-hint', reasonLine(def, run, step));
+  row.append(hint);
+  const state = run.steps[step.id];
+  const status = normalizeStatus(state?.status ?? 'open');
+  const last = def.steps[def.steps.length - 1]?.id === step.id;
+  const settled = isSettled(state);
+  if (status === 'needs_recheck' && step.kind === 'user') {
+    row.append(button('Tick again', 'workflow-tick-again'));
+    row.append(button('Next', 'workflow-next'));
+    return row;
+  }
+  if (!settled && (status === 'waiting_for_app' || status === 'evidence_failed' || status === 'open')) {
+    if (step.kind === 'user' || step.kind === 'user+app') row.append(button('Tick', 'workflow-tick', { step: step.id }));
+    row.append(button('Later', 'workflow-later'));
+    return row;
+  }
+  if (step.kind === 'user' && !settled) {
+    row.append(button('Tick', 'workflow-tick', { step: step.id }));
+    row.append(button(last ? 'Done' : 'Next', last ? 'workflow-done' : 'workflow-next'));
+    return row;
+  }
+  const open = counts(def, run).open + counts(def, run).errors;
+  if (last && open > 0) {
+    row.append(button(`Done · ${open} open`, 'workflow-done'));
+    return row;
+  }
+  row.append(button(last ? 'Done' : 'Next', last ? 'workflow-done' : 'workflow-next', { primary: true }));
+  return row;
+}
+
+function renderDetailsSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
+  const stepId = run.currentStepId;
+  const step = stepId === SETUP_STEP_ID
+    ? { id: SETUP_STEP_ID, title: 'Set-up', instruction: 'Check lengths and tolerances for this run.', detail: [] as string[] }
+    : def.steps.find((item) => item.id === stepId);
+  if (!step) return el('section', 'workflow-sheet');
+  const sheet = el('section', 'workflow-sheet workflow-details-sheet');
+  sheet.dataset.testid = 'workflow-sheet';
+  sheet.append(el('h2', 'workflow-title', step.title));
+  if ('instruction' in step) sheet.append(el('p', 'workflow-instruction', step.instruction));
+  if ('detail' in step && step.detail) for (const line of step.detail) sheet.append(el('p', 'workflow-detail', line));
+  if ('diagram' in step && step.diagram) {
+    const host = el('div', 'workflow-diagram-host');
+    host.innerHTML = diagramSvg(step.diagram);
+    sheet.append(host);
+  }
+  const note = document.createElement('textarea');
+  note.className = 'workflow-note';
+  note.dataset.step = step.id;
+  note.value = run.steps[step.id]?.note ?? run.steps[step.id]?.reason ?? '';
+  note.rows = 3;
+  sheet.append(note);
+  const actions = el('div', 'workflow-sheet-actions');
+  if (stepId !== SETUP_STEP_ID) {
+    actions.append(button('Tick by hand', 'workflow-tick-reason', { step: stepId }));
+    actions.append(button('Skip with a note', 'workflow-skip', { step: stepId }));
+    actions.append(button('Untick', 'workflow-untick', { step: stepId }));
+  }
+  actions.append(button('Pause', 'workflow-pause'));
+  actions.append(button('Close', 'workflow-collapse'));
+  sheet.append(actions);
+  return sheet;
 }
 
 function stepIndex(def: WorkflowDefinition, run: WorkflowRun): number {

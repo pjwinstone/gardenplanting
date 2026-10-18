@@ -1,0 +1,361 @@
+# field-test.net.yaml — the guided "Circle field test" checklist as a Petri net
+# Yellow boxes = you (user steps); grey boxes = app (auto steps). Circles = places; dots = tokens.
+# One token per checklist step, coloured by step id. A separate "cursor" token marks the current step.
+# Guards are named TypeScript predicates (src/workflows/guided/guards.ts, proposed).
+# Replaces the implicit logic in src/workflows/guided/engine.ts (advanceWorkflow / doneWorkflow)
+# and the step list in definitions.ts (circleFieldTest).
+
+id: review-field-test
+title: Circle field test (guided checklist)
+revision: 3   # rev 3: Step 0 Set-up (run config) + header cog; config changes mark dependants 'needs re-check'.
+# rev 2: rev 2: Back = roller scroll; Retake and Details (?) are row actions; ONE button row (Tick + Next/Later/Done);
+               # Pause, Skip with a note, Tick by hand and Untick live in the Details sheet
+glossary_note: >
+  Uses step, user step, auto step, token, guard, place, camera position (not "station"),
+  tape measurement, baseline, baseline point, focal length, observation log, configuration.
+  Old names STN01/STN02/STN03, CAL and "station" are legacy; the app still accepts them as aliases
+  when photos are matched to a camera position.
+
+# ---------------------------------------------------------------------------
+# Step states (explicit — stored per step in the run, never inferred from the cursor)
+# ---------------------------------------------------------------------------
+step_states:
+  open:            "Not done yet. Shown as an empty circle."
+  waiting_for_app: "Open, and the step needs app evidence (baseline saved, photos at a camera position, file saved). Shown as an hourglass."
+  ticked_by_you:   "You tapped Tick. Green tick with a hand."
+  ticked_by_app:   "The app saw the evidence. Green tick with the app badge."
+  ticked_with_reason: "You ticked an evidence step by hand and typed why. Counts as ticked; shown with an amber warning dot."
+  skipped_with_note:  "You chose Skip and typed a note. Not ticked; counts as settled; amber warning."
+  evidence_failed:    "The app saw evidence but it failed a check (e.g. photo not usable for focal length, wrong tape length). Red error. Still open."
+  needs_recheck:      "Was settled, but a Set-up value it depends on changed. Amber ring with a circular arrow. Not settled until re-checked."
+
+settled: [ticked_by_you, ticked_by_app, ticked_with_reason, skipped_with_note]   # only these let the run finish
+counts_as_warning: [ticked_with_reason, skipped_with_note]
+counts_as_error: [evidence_failed]
+counts_as_open_extra: [needs_recheck]   # shown in the header as 'n to re-check'
+
+# ---------------------------------------------------------------------------
+# Steps (renamed in plain words). evidence = what the app listens for.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Step 0 — Set-up: the run's assumptions. Top row of the roller; the header cog scrolls to it.
+# No separate settings screen. Values are copied into the run and every change is a 'config.changed'
+# entry in the run log (old value, new value, time).
+# ---------------------------------------------------------------------------
+setup:
+  id: setup
+  n: 0
+  title: Set-up
+  counted: false          # not part of 'n of 12 ticked'; must be confirmed before Done
+  states: [unconfirmed, confirmed, changed_mid_run]
+  values:                 # defaults for the Circle field test; units in the label
+    baseline_length_m: 8.000            # BAS01–BAS02
+    bas02_from_peg_m: 4.30
+    circle_diameter_m: 8.000            # radius 4.000 from the peg
+    calibration_distance_m: 4.0
+    camera_positions:                   # distances to BAS01 / BAS02, m
+      left:       {to_bas01: 8.00,  to_bas02: 8.00}
+      right_near: {to_bas01: 6.50,  to_bas02: 9.00}
+      right_far:  {to_bas01: 10.50, to_bas02: 10.50}
+    tolerances_mm:                      # from workflow/tolerances.json (shared app configuration)
+      baseline: 30
+      railway: 30
+      flower_bed: 100
+      tree: 150
+      camera_position: 200
+  depends_on:             # config key -> steps that must be re-checked when it changes
+    baseline_length_m:     [place-baseline-points, tape-baseline, laser-check-baseline, camera-left, camera-right-near, camera-right-far]
+    bas02_from_peg_m:      [place-baseline-points]
+    circle_diameter_m:     [set-out-circle, tape-diameters]
+    calibration_distance_m: [camera-calibration]
+    camera_positions.left:       [camera-left]
+    camera_positions.right_near: [camera-right-near]
+    camera_positions.right_far:  [camera-right-far]
+    tolerances_mm.baseline:        [tape-baseline, laser-check-baseline]
+    tolerances_mm.camera_position: [camera-left, camera-right-near, camera-right-far]
+    # railway / flower_bed / tree tolerances: no step in this workflow depends on them
+
+steps:
+  - {n: 1,  id: gather-kit,            title: Gather the kit,                         kind: user, evidence: none}
+  - {n: 2,  id: set-out-circle,        title: Set out the circle,                     kind: user, evidence: none}
+  - {n: 3,  id: tape-diameters,        title: Tape the two diameters,                 kind: user, evidence: none,
+     note: "Tape measurements CRC01–CRC04 and CRC02–CRC05, both 8.000 m."}
+  - {n: 4,  id: place-baseline-points, title: Place the baseline points,              kind: user, evidence: none,
+     note: "Baseline points BAS02 (4.30 m from the peg) and BAS01 (8.000 m from BAS02)."}
+  - {n: 5,  id: tape-baseline,         title: Tape the baseline both ways,            kind: user+app,
+     evidence: "baseline.saved BAS01–BAS02, tape measurement, offsets 0", note: "You tick when taped; the app ticks when the baseline is saved. Both needed."}
+  - {n: 6,  id: laser-check-baseline,  title: Laser check of the baseline,            kind: user, evidence: none,
+     note: "Was 'Laser CHK-BASE'. Write the laser reading in the note; do not enter it as a tape measurement."}
+  - {n: 7,  id: plumb-canes,           title: Plumb the canes and note heights,       kind: user, evidence: none}
+  - {n: 8,  id: camera-calibration,    title: Calibration photo (focal length),       kind: app,
+     evidence: "1 photo at camera position 'Calibration' (legacy CAL)"}
+  - {n: 9,  id: camera-left,           title: Camera position Left (8.00 / 8.00),     kind: app,
+     evidence: "2 photos at camera position 'Left' (legacy STN01)"}
+  - {n: 10, id: camera-right-near,     title: Camera position Right near (6.50 / 9.00), kind: app,
+     evidence: "2 photos at camera position 'Right near' (legacy STN02)"}
+  - {n: 11, id: camera-right-far,      title: Camera position Right far (10.50 / 10.50), kind: app,
+     evidence: "2 photos at camera position 'Right far' (legacy STN03)"}
+  - {n: 12, id: save-to-onedrive,      title: Save to OneDrive,                       kind: app,
+     evidence: "cloud.saved while this step is current"}
+
+rename_map:   # old id -> new id (old ids kept as aliases in reconcileRun so saved runs migrate)
+  kit: gather-kit
+  set-out: set-out-circle
+  diameters: tape-diameters
+  place-baseline: place-baseline-points
+  tape-baseline: tape-baseline
+  laser-check: laser-check-baseline
+  plumb: plumb-canes
+  cal: camera-calibration
+  stn01: camera-left
+  stn02: camera-right-near
+  stn03: camera-right-far
+  save-send: save-to-onedrive
+
+# ---------------------------------------------------------------------------
+# Places
+# ---------------------------------------------------------------------------
+colours:
+  step: [gather-kit, set-out-circle, tape-diameters, place-baseline-points, tape-baseline,
+         laser-check-baseline, plumb-canes, camera-calibration, camera-left, camera-right-near,
+         camera-right-far, save-to-onedrive]
+
+places:
+  - {id: setup_config,  label: Set-up values (step 0), note: "Token: the current config version. Read by every check guard."}
+  - {id: run_log,       label: Run log, note: "config.changed entries (old -> new), ticks, skips, reasons. Append-only."}
+  - {id: needs_recheck, label: Needs a re-check, note: "Amber. Steps whose Set-up inputs changed after they were settled."}
+  - {id: not_started,   label: Not started, note: "Token: the run (one)."}
+  - {id: run_active,    label: Run active (checklist shown), note: "Token: the run."}
+  - {id: run_paused,    label: Run paused (checklist hidden), note: "Token: the run. Nothing is lost; a Resume button stays in the menu."}
+  - {id: run_finished,  label: Run finished}
+  - {id: cursor,        label: Current step, note: "Token coloured by step id. Exactly one while the run is active."}
+  - {id: open,          label: Open steps, note: "Tokens: user steps not yet ticked. Initial marking: all user steps."}
+  - {id: waiting_for_app, label: Waiting for app evidence, note: "Tokens: steps whose evidence has not arrived. Initial marking: all app / user+app steps."}
+  - {id: evidence_failed, label: Evidence failed (error), note: "Red. Still open."}
+  - {id: ticked_by_you, label: Ticked by you}
+  - {id: ticked_by_app, label: Ticked by the app}
+  - {id: ticked_with_reason, label: Ticked by hand with a reason (warning)}
+  - {id: skipped_with_note,  label: Skipped with a note (warning)}
+  - {id: app_events,    label: App events, note: "baseline.saved, photo.uploaded (camera position, photo ids), cloud.saved. From the observation log."}
+
+# ---------------------------------------------------------------------------
+# Transitions
+# ---------------------------------------------------------------------------
+transitions:
+  - id: start_run
+    title: Start the field test
+    user: true
+    consume: [not_started]
+    produce: [run_active, cursor]
+    does: "Cursor on step 1. Every step token starts in open or waiting_for_app."
+
+  - id: confirm_setup
+    title: Confirm Set-up (step 0)
+    user: true
+    consume: [setup_config]
+    produce: [setup_config, run_log]
+    guard: "isCurrentStep(setup, run) && setupValid(values)"
+    does: "Run starts on step 0. You check the values in the compact form and tap Confirm. Logged as config.confirmed."
+
+  - id: edit_setup
+    title: Edit Set-up (cog or scroll to step 0)
+    user: true
+    consume: [setup_config]
+    produce: [setup_config, run_log]
+    guard: "isCurrentStep(setup, run) && setupValid(newValues) && changedKeys(old, new).length > 0"
+    does: "Any time, also mid-run. Logged as config.changed with old and new values. Fires mark_recheck."
+
+  - id: mark_recheck
+    title: Mark dependants for re-check
+    user: false
+    consume: [ticked_by_you, ticked_by_app, ticked_with_reason]   # each matching token
+    reads: [setup_config, run_log]
+    produce: [needs_recheck]
+    guard: "dependsOnChanged(step, changedKeys) && isSettled(step)"
+    does: "Every settled step that depends on a changed key becomes 'needs re-check'. Skipped steps stay skipped (the note is kept)."
+
+  - id: app_recheck
+    title: Re-check stored evidence
+    user: false
+    consume: [needs_recheck]
+    reads: [setup_config, app_events]
+    produce: [ticked_by_app]          # or evidence_failed if !evidencePassesChecks with the new values
+    guard: "needsAppEvidence(step) && hasStoredEvidence(step)"
+    does: "The app re-runs the checks on the photos / baseline already in the observation log. No retake unless it now fails."
+
+  - id: tick_again
+    title: Tick again (button row)
+    user: true
+    consume: [needs_recheck]
+    reads: [cursor]
+    produce: [ticked_by_you]
+    guard: "isCurrentStep(step, run) && isUserStep(step) && !needsAppEvidence(step)"
+    does: "User steps (e.g. set out the circle) need you to look again and tick. The reason line says which value changed."
+
+  - id: tick_user_step
+    title: Tick (button row, left)
+    user: true
+    consume: [open]
+    reads: [cursor]
+    produce: [ticked_by_you]
+    guard: "isCurrentStep(step, run) && isUserStep(step)"
+    does: "You tap Tick on the current step. For tape-baseline this is half; it stays waiting_for_app until the baseline is saved."
+
+  - id: app_sees_evidence
+    title: App sees evidence
+    user: false
+    consume: [waiting_for_app, app_events]
+    produce: [ticked_by_app]
+    guard: |
+      evidenceMatches(step, event)   // camera position name matches (aliases allowed), photo count >= minPhotos,
+                                      // baseline BAS01–BAS02 tape with offsets 0
+      && evidencePassesChecks(step, event)
+      && (event.type !== 'cloud.saved' || isCurrentStep(step, run))
+    does: "Ticks the step whether or not it is current (except Save, which must be current). Shown as 'Ticked by the app'."
+
+  - id: app_rejects_evidence
+    title: App rejects evidence
+    user: false
+    consume: [waiting_for_app, app_events]
+    produce: [evidence_failed]
+    guard: "evidenceMatches(step, event) && !evidencePassesChecks(step, event)"
+    does: "Red error, with the reason (e.g. 'Not usable for focal length — retake at 1×')."
+
+  - id: retry_evidence
+    title: Retake (row action)
+    user: true
+    consume: [evidence_failed]
+    produce: [waiting_for_app]
+    does: "Inline 'Retake' pill on the current roller row. You retake the photos or re-save the baseline. Old observations are kept in the observation log."
+
+  - id: tick_with_reason
+    title: Tick by hand (in Details, with reason)
+    user: true
+    consume: [waiting_for_app]
+    reads: [cursor]
+    produce: [ticked_with_reason]
+    guard: "isCurrentStep(step, run) && needsAppEvidence(step) && hasReason(note)"
+    does: "Replaces 'Tick anyway'. A reason is required. Counts as ticked, flagged amber."
+
+  - id: skip_with_note
+    title: Skip with a note (in Details)
+    user: true
+    consume: [open]          # also enabled from waiting_for_app and evidence_failed
+    reads: [cursor]
+    produce: [skipped_with_note]
+    guard: "isCurrentStep(step, run) && hasNote(note) && isSkippable(step)"
+    does: "Settled but not ticked; amber warning. Save to OneDrive is not skippable."
+
+  - id: untick
+    title: Untick (in Details)
+    user: true
+    consume: [ticked_by_you]   # also ticked_with_reason, skipped_with_note
+    produce: [open]            # or waiting_for_app if needsAppEvidence(step)
+    guard: "isCurrentStep(step, run)"
+    does: "Puts the step back. Ticked by the app cannot be unticked by hand (redo the evidence instead)."
+
+  - id: next
+    title: Next
+    user: true
+    consume: [cursor]
+    produce: [cursor]
+    guard: "isSettled(currentStep(run)) && !isLastStep(run)"
+    does: |
+      Button row, right. Moves to the next step. NEVER silently skips: while the current step is not settled
+      this button reads 'Later' (go_on_waiting) and the step stays open, visible on the roller and counted in the header.
+
+  - id: go_on_waiting
+    title: Later (button row)
+    user: true
+    consume: [cursor]
+    produce: [cursor]
+    guard: "!isSettled(currentStep(run)) && !isLastStep(run)"
+    does: "Shown in place of Next while the step is unsettled. Explicit, visible deferral: the step stays open/waiting and can still be ticked by the app later."
+
+  - id: scroll_roller
+    title: Scroll the roller (or tap a row / a count)
+    user: true
+    consume: [cursor]
+    produce: [cursor]
+    does: |
+      The only way to move back, and a free way to move anywhere. Settling the wheel on a row makes it current.
+      Tapping '1 error' / '2 warnings' / 'n open' in the header scrolls to the next step of that kind.
+      There is no Back button.
+
+  - id: done_go_to_first_open
+    title: Done → first open step
+    user: false
+    consume: [cursor]
+    produce: [cursor]
+    guard: "hasUnsettledSteps(run)"
+    does: "Done (button row, last step) shows 'Done · N open' when anything is open. Tapping it moves the cursor to the first open (or failed) step and names it."
+
+  - id: finish_run
+    title: Done
+    user: true
+    consume: [run_active, cursor]
+    reads: [setup_config]
+    produce: [run_finished]
+    guard: "setupConfirmed(run) && noUnsettledSteps(run)"
+    does: "Only enabled when every step is settled. Summary lists warnings (ticked by hand, skipped) for the record."
+
+  - id: pause_run
+    title: Pause (in Details)
+    user: true
+    consume: [run_active]
+    produce: [run_paused]
+    does: "Hides the checklist. Cursor and step states are kept. App evidence still ticks steps while paused."
+
+  - id: resume_run
+    title: Resume
+    user: true
+    consume: [run_paused]
+    produce: [run_active]
+
+  - id: start_over
+    title: Start over
+    user: true
+    consume: [run_finished]   # also run_active / run_paused, after a confirmation
+    produce: [not_started]
+    does: "Old run archived under Past runs, notes kept."
+
+ui_only:   # no token moves; listed so every control has a home
+  cog_to_setup: "Small cog in the header. Scrolls the roller to step 0 (Set-up). Same as scrolling there by hand. There is no settings screen."
+  setup_form:   "When step 0 is current, the compact form replaces the button row (rows of 44 pt fields, Confirm on the right). Long lists (tolerances) open in Details."
+  open_details: "Small '?' on the current roller row opens Details: instructions, diagram, note / reason, and the less common actions Tick by hand, Skip with a note, Untick, Pause. Current row only."
+
+guards:   # proposed src/workflows/guided/guards.ts
+  isUserStep:          "(step) => step.kind === 'user' || step.kind === 'user+app'"
+  needsAppEvidence:    "(step) => step.kind === 'app' || step.kind === 'user+app'"
+  isCurrentStep:       "(step, run) => run.currentStepId === step.id"
+  isLastStep:          "(run) => stepIndex(run) === def.steps.length - 1"
+  isSettled:           "(state) => SETTLED.includes(state.status)"
+  isWaiting:           "(state) => state.status === 'waiting_for_app' || state.status === 'evidence_failed'"
+  hasReason:           "(note) => note.trim().length >= 3"
+  hasNote:             "(note) => note.trim().length >= 3"
+  isSkippable:         "(step) => step.id !== 'save-to-onedrive'"
+  evidenceMatches:     "(step, event) => matches type + camera position (aliases) + photo count / baseline ends"
+  evidencePassesChecks: "(step, event) => photos verified (focal length usable) / tape kind + offsets 0"
+  setupValid:          "(v) => v.baseline_length_m > 0 && v.circle_diameter_m > 0 && all camera distances > 0 && tolerances > 0"
+  setupConfirmed:      "(run) => run.setup.status !== 'unconfirmed'"
+  changedKeys:         "(old, next) => keys whose value differs (deep, dotted paths)"
+  dependsOnChanged:    "(step, keys) => keys.some(k => setup.depends_on[k]?.includes(step.id))"
+  hasStoredEvidence:   "(step) => the observation log holds matching photos / baseline for this step"
+  hasUnsettledSteps:   "(run) => steps.some(s => !isSettled(run.steps[s.id]))"
+  noUnsettledSteps:    "(run) => !hasUnsettledSteps(run)"
+
+counts:   # header text, all from step states (never from the cursor position)
+  ticked:   "ticked_by_you + ticked_by_app + ticked_with_reason"
+  warnings: "ticked_with_reason + skipped_with_note"
+  errors:   "evidence_failed"
+  open:     "open + waiting_for_app   (errors are counted separately, never twice)"
+  recheck:  "needs_recheck — shown as 'n to re-check' (amber), tappable like the other counts"
+  header:   "'{ticked} of {total} ticked · {warnings} warnings · {errors} error · {open} open' — zero terms left out; each count is tappable and scrolls the roller to the next step of that kind"
+  position: "Shown separately as 'Step {n} of {total}', never next to the word 'ticked'."
+
+setup_in_counts: "Step 0 is not counted in 'of 12'. If unconfirmed, the header shows 'Set-up not confirmed' (tappable)."
+
+bug_this_fixes: >
+  Build 0.7.25: Next silently passed the five evidence steps (tape-baseline, cal, stn01-03), the bar showed
+  '12/12 · ticked' (position + current step only), and Done only printed '5 steps are still open' and stayed put,
+  with no way to hide the bar. See engine.ts:542 advanceWorkflow, engine.ts:588 doneWorkflow, guidedChrome.ts:250.

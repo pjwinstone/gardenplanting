@@ -7,7 +7,14 @@ import { gardenSaveIsOwed } from '../src/cloudSignIn';
 import { setGraphTokenClientForTests } from '../src/msalAuth';
 import { emptyDocument, type GardenDocument, type Photo } from '../src/model';
 import { gardenCloudUiForTests, getState, photosOnPoint } from '../src/ui';
-import { advanceWorkflow, emptyProgress, startWorkflow } from '../src/workflows/guided/engine';
+import { circleFieldTest } from '../src/workflows/guided/definitions';
+import {
+  advanceWorkflow,
+  confirmSetupWorkflow,
+  emptyProgress,
+  startWorkflow,
+  tickWorkflow,
+} from '../src/workflows/guided/engine';
 
 const authFlag = vi.hoisted(() => ({ signedIn: false }));
 
@@ -618,6 +625,8 @@ describe('adopt remote garden', () => {
 
   it('keeps a cloud.saved tick on reload instead of adopting the pre-tick OneDrive file', async () => {
     const pending = saveSendProgress();
+    expect(pending.activeId).toBe('circle-field-test');
+    expect(pending.runs['circle-field-test']?.currentStepId).toBe('save-to-onedrive');
     const local = namedGarden('On save step');
     local.workflowProgress = pending;
     local.updatedAt = '2026-06-01T12:00:00.000Z';
@@ -627,6 +636,8 @@ describe('adopt remote garden', () => {
     remote.workflowProgress = pending;
     const puts = mockGardenDrive(remote, '"v1"');
     gardenCloudUiForTests.adopt(local, 'garden-v1.json', '"v1"');
+    expect(getState().doc.workflowProgress?.activeId).toBe('circle-field-test');
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.currentStepId).toBe('save-to-onedrive');
     const revision = gardenRevision();
     let asked = false;
     vi.stubGlobal('window', {
@@ -653,7 +664,7 @@ describe('adopt remote garden', () => {
     expect(gardenRevision()).toBe(revision + 1);
     expect(gardenIsDirty()).toBe(true);
     expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
-    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('complete');
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('ticked_by_app');
 
     await gardenCloudUiForTests.afterSignIn();
 
@@ -682,8 +693,8 @@ describe('adopt remote garden', () => {
     await vi.advanceTimersByTimeAsync(2500);
     expect(puts).toHaveLength(1);
     expect(puts[0]?.ifMatch).toBe('"v1"');
-    expect(puts[0]?.saveSend).not.toBe('complete');
-    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('complete');
+    expect(puts[0]?.saveSend).not.toBe('ticked_by_app');
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.steps['save-send']?.status).toBe('ticked_by_app');
     expect(gardenIsDirty()).toBe(true);
     expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
     expect(gardenCloudUiForTests.signInStatus()).toMatchObject({ inline: 'Saving…', text: 'Saving…' });
@@ -692,7 +703,7 @@ describe('adopt remote garden', () => {
     await vi.advanceTimersByTimeAsync(2500);
     expect(puts).toHaveLength(2);
     expect(puts[1]?.ifMatch).toBe('"v2"');
-    expect(puts[1]?.saveSend).toBe('complete');
+    expect(puts[1]?.saveSend).toBe('ticked_by_app');
     expect(gardenIsDirty()).toBe(false);
     expect(gardenCloudUiForTests.saveScheduled()).toBe(false);
     expect(gardenCloudUiForTests.signInStatus().text).not.toBe('Saving…');
@@ -723,7 +734,13 @@ describe('adopt remote garden', () => {
 
 function saveSendProgress() {
   let progress = startWorkflow(emptyProgress(), 'circle-field-test', '2026-06-01T12:00:00.000Z').progress;
-  for (let i = 0; i < 11; i += 1) {
+  progress = confirmSetupWorkflow(progress, undefined, '2026-06-01T12:00:00.000Z').progress;
+  for (const step of circleFieldTest.steps) {
+    if (step.id === 'save-to-onedrive') {
+      progress = advanceWorkflow(progress, '2026-06-01T12:00:00.000Z').progress;
+      break;
+    }
+    progress = tickWorkflow(progress, step.id, undefined, '2026-06-01T12:00:00.000Z').progress;
     progress = advanceWorkflow(progress, '2026-06-01T12:00:00.000Z').progress;
   }
   return progress;

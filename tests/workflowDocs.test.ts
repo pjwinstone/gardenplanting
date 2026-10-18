@@ -23,9 +23,9 @@ describe('workflow markdown', () => {
     expect(generated).toContain('A shot from earlier does not count');
     expect(generated).not.toContain('Camera.app');
     expect(generated).not.toContain('exactly on the dashed line');
-    expect(generated).toContain('photo.uploaded STN01');
+    expect(generated).toContain('photo.uploaded Left');
     expect(generated).toContain('STN01');
-    expect(generated).toContain('STN03');
+    expect(generated).toContain('Right far');
     expect(generated).toContain('Coming soon');
   });
 });
