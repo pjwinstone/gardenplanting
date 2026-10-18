@@ -50,6 +50,7 @@ import {
   isErrorLogEntrySeen,
   toggleErrorLogEntrySeen,
   subscribeErrorLog,
+  clearErrorLog,
   unseenErrorCount,
 } from './errorLog';
 import {
@@ -2082,7 +2083,13 @@ export function mount(root: HTMLElement): void {
   subscribeAuth(render);
   subscribeCloud(render);
   subscribeErrorLog(render);
-  installWorkflowChrome(() => setState({}), (doc) => setState({ doc }));
+  installWorkflowChrome(
+    () => setState({}),
+    (update) => {
+      const next = update(state.doc);
+      if (next !== state.doc) setState({ doc: next });
+    },
+  );
   render();
   startPhotoUploadLoop({
     getToken: async () => {
@@ -2381,6 +2388,10 @@ async function onShellClick(e: Event): Promise<void> {
   }
   if (cmd === 'open-error-log') {
     openMenuSection('error-log');
+    return;
+  }
+  if (cmd === 'clear-error-log') {
+    clearErrorLog();
     return;
   }
   if (cmd === 'toggle-error-log-entry') {
@@ -5029,47 +5040,50 @@ function buildMenuDrawer(
       el('p', { className: 'menu-drawer__empty', text: 'No errors captured this session.' }),
     );
   } else {
-    const list = el('ul', { className: 'error-log__list' });
+    const head = el('div', { className: 'log-roller__head' });
+    const errors = entries.filter((e) => (e.severity ?? 'error') === 'error' && !isErrorLogEntrySeen(e.id)).length;
+    head.appendChild(
+      el('span', {
+        className: 'log-roller__counts',
+        text: `${entries.length} line${entries.length === 1 ? '' : 's'}${errors ? ` · ${errors} unseen error${errors === 1 ? '' : 's'}` : ''}`,
+      }),
+    );
+    head.appendChild(
+      el('button', {
+        className: 'log-roller__clear',
+        text: 'Clear all',
+        attrs: { type: 'button', 'data-cmd': 'clear-error-log', 'data-testid': 'error-log-clear' },
+      }),
+    );
+    errBody.appendChild(head);
+    const list = el('ul', { className: 'log-roller', attrs: { role: 'list' } });
     for (const entry of entries) {
       const isError = (entry.severity ?? 'error') === 'error';
       const seen = isErrorLogEntrySeen(entry.id);
       const item = el('li', {
         className:
-          'error-log__item error-log__item--tap' +
-          (isError
-            ? seen
-              ? ' error-log__item--error-seen'
-              : ' error-log__item--error'
-            : seen
-              ? ' error-log__item--info-seen'
-              : ' error-log__item--info'),
+          'log-roller__row' +
+          (isError ? ' log-roller__row--error' : ' log-roller__row--warn') +
+          (seen ? ' log-roller__row--seen' : ''),
         attrs: {
           'data-cmd': 'toggle-error-log-entry',
           'data-entry-id': entry.id,
           'data-testid': isError ? 'error-log-entry' : 'error-log-entry-info',
           role: 'button',
           tabindex: '0',
-          title: seen ? 'Tap to mark unseen' : 'Tap to acknowledge',
           'aria-pressed': seen ? 'true' : 'false',
-          'aria-label': isError
-            ? seen
-              ? 'Acknowledged error — tap to mark unseen'
-              : 'Unacknowledged error — tap to acknowledge'
-            : seen
-              ? 'Acknowledged message — tap to mark unseen'
-              : 'Message — tap to acknowledge',
+          'aria-label': `${isError ? 'Error' : 'Warning'}${seen ? ', seen' : ''}: ${entry.message}${(entry.count ?? 1) > 1 ? `, ${entry.count} times` : ''}. Tap to mark ${seen ? 'unseen' : 'seen'}.`,
+          title: entry.stack ? `${entry.message}\n${entry.stack}` : entry.message,
         },
       });
-      const when = new Date(entry.at).toLocaleString();
-      item.appendChild(
-        el('div', {
-          className: 'error-log__meta',
-          text: `${when}${entry.source ? ` · ${entry.source}` : ''}`,
-        }),
-      );
-      item.appendChild(el('div', { className: 'error-log__msg', text: entry.message }));
-      if (entry.stack) {
-        item.appendChild(el('pre', { className: 'error-log__stack', text: entry.stack }));
+      item.appendChild(el('span', { className: 'log-roller__dot', attrs: { 'aria-hidden': 'true' } }));
+      const body = el('span', { className: 'log-roller__body' });
+      const when = new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      body.appendChild(el('span', { className: 'log-roller__meta', text: `${when}${entry.source ? ` · ${entry.source}` : ''}` }));
+      body.appendChild(el('span', { className: 'log-roller__msg', text: entry.message }));
+      item.appendChild(body);
+      if ((entry.count ?? 1) > 1) {
+        item.appendChild(el('span', { className: 'log-roller__count', text: `×${entry.count}` }));
       }
       list.appendChild(item);
     }

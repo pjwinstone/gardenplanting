@@ -57,7 +57,12 @@ let sheetOpen = false;
 let notice: string | null = null;
 let placedRoot: HTMLElement | null = null;
 let chromeRerender: (() => void) | null = null;
-let chromeCommit: ((doc: GardenDocument) => void) | null = null;
+/** Apply a workflow change to the app's *current* document (never a stale copy). */
+let chromeCommit: ((update: (doc: GardenDocument) => GardenDocument) => void) | null = null;
+/** Last roller panel and the state it was drawn from. Reused while nothing changed, so a
+ * re-render from elsewhere (photo loop, cloud status, error log) does not rebuild the wheel
+ * under the user's finger or swallow a tap on a row pill. */
+let rollerCache: { key: string; panel: HTMLElement; touching: () => boolean; recentre: () => void } | null = null;
 /** Set-up form edits not yet confirmed (dotted key -> typed text). Survives re-renders. */
 let setupDraft: Record<string, string> = {};
 let chromeDoc: GardenDocument | null = null;
@@ -96,7 +101,10 @@ function cycleSun(): void {
   }
 }
 
-export function installWorkflowChrome(rerender: () => void, commit?: (doc: GardenDocument) => void): void {
+export function installWorkflowChrome(
+  rerender: () => void,
+  commit?: (update: (doc: GardenDocument) => GardenDocument) => void,
+): void {
   chromeRerender = rerender;
   chromeCommit = commit ?? null;
   const media = window.matchMedia?.('(prefers-contrast: more)');
@@ -140,6 +148,17 @@ export function handleWorkflowCommand(
   if (cmd === 'workflow-expand') {
     sheetOpen = true;
     return {};
+  }
+  if (cmd === 'workflow-go') {
+    // Row pill (Take photos / Save baseline / Save): open the place in the app that makes the evidence.
+    const def = progress.activeId ? workflowById(progress.activeId) : undefined;
+    const step = def?.steps.find((item) => item.id === stepId);
+    if (!step?.link || step.link.to === 'none') {
+      sheetOpen = true;
+      return {};
+    }
+    sheetOpen = false;
+    return { link: step.link };
   }
   if (cmd === 'workflow-collapse') {
     sheetOpen = false;
@@ -197,7 +216,12 @@ export function handleWorkflowCommand(
     const live = document.querySelector<HTMLTextAreaElement>(`textarea[data-step="${CSS.escape(id)}"]`)?.value ?? '';
     move = tickWithReasonWorkflow(progress, id, live);
   }
-  else if (cmd === 'workflow-retake') move = retakeEvidenceWorkflow(progress, stepId);
+  else if (cmd === 'workflow-retake') {
+    move = retakeEvidenceWorkflow(progress, stepId);
+    const def = progress.activeId ? workflowById(progress.activeId) : undefined;
+    const link = def?.steps.find((item) => item.id === stepId)?.link;
+    if (move.changed && link && !move.link) move = { ...move, link };
+  }
   else if (cmd === 'workflow-untick') move = untickWorkflow(progress, stepId);
   else if (cmd === 'workflow-pause') move = pauseWorkflow(progress);
   else if (cmd === 'workflow-tick-again') move = tickAgainWorkflow(progress);
@@ -279,8 +303,16 @@ function appendActive(root: HTMLElement, progress: WorkflowProgress): void {
 function renderRollerPanel(
   def: WorkflowDefinition,
   run: WorkflowRun,
-  _progress: WorkflowProgress,
+  progress: WorkflowProgress,
 ): HTMLElement {
+  const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive() });
+  if (rollerCache && rollerCache.key === key) {
+    const cached = rollerCache;
+    requestAnimationFrame(() => {
+      if (cached.panel.isConnected && !cached.touching()) cached.recentre();
+    });
+    return cached.panel;
+  }
   const panel = el('section', 'workflow-roller-sheet');
   panel.dataset.testid = 'workflow-bar';
   const top = el('div', 'roller-top');
@@ -329,7 +361,7 @@ function renderRollerPanel(
     if (stepId === currentId) {
       const step = def.steps.find((item) => item.id === stepId);
       const pill = step ? primaryActionLabel(step, run) : undefined;
-      if (pill) row.append(button(pill, pill === 'Retake' ? 'workflow-retake' : 'workflow-expand', { className: 'roller-pill', step: stepId }));
+      if (pill) row.append(button(pill, pill === 'Retake' ? 'workflow-retake' : 'workflow-go', { className: 'roller-pill', step: stepId, testid: 'roller-pill' }));
       row.append(button('?', 'workflow-expand', { className: 'roller-q', step: stepId }));
     }
     list.append(row);
@@ -345,17 +377,26 @@ function renderRollerPanel(
   }
   if (notice) panel.append(el('p', 'workflow-notice', notice));
 
-  requestAnimationFrame(() => {
+  const recentre = () => {
     const currentRow = list.querySelector<HTMLElement>(`[data-step-id="${CSS.escape(currentId)}"]`);
-    if (currentRow) list.scrollTop = currentRow.offsetTop - pad;
-    attachRollerWheel(wheel, rowIds, currentId, (stepId) => {
-      if (!chromeDoc || stepId === currentId) return;
-      const move = scrollWorkflowToStep(readProgress(chromeDoc), stepId);
-      if (!move.changed) return;
-      chromeDoc = commitWorkflow(chromeDoc, move.progress);
+    if (currentRow && list.clientHeight > 0) list.scrollTop = currentRow.offsetTop - pad;
+  };
+  let handle: { touching: () => boolean } = { touching: () => false };
+  rollerCache = { key, panel, touching: () => handle.touching(), recentre };
+  requestAnimationFrame(() => {
+    recentre();
+    handle = attachRollerWheel(wheel, rowIds, currentId, (stepId) => {
+      if (stepId === currentId) return;
+      const update = (doc: GardenDocument): GardenDocument => {
+        const move = scrollWorkflowToStep(readProgress(doc), stepId);
+        return move.changed ? commitWorkflow(doc, move.progress) : doc;
+      };
       // Must reach the app's state.doc; a bare rerender redraws from the old doc and snaps back.
-      if (chromeCommit) chromeCommit(chromeDoc);
-      else chromeRerender?.();
+      if (chromeCommit) chromeCommit(update);
+      else if (chromeDoc) {
+        chromeDoc = update(chromeDoc);
+        chromeRerender?.();
+      }
     });
   });
   return panel;

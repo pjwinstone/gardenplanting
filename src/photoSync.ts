@@ -18,6 +18,7 @@ import {
 } from './photoQueue';
 import type { GraphRequest, PhotoProvenance } from './photosManifest';
 import { publishPhotoManifest, retireDrivePhoto, uploadAndVerifyOriginal } from './photoUpload';
+import { callableFetch } from './boundFetch';
 
 /**
  * Pause automatic retries after this many counted failures.
@@ -32,6 +33,12 @@ const BACKOFF_MAX_MS = 60_000;
 export function photoUploadBackoffMs(attempts: number): number {
   const n = Math.max(1, attempts);
   return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** (n - 1));
+}
+
+/** When a failed attempt may run again: the exponential backoff, or Retry-After if longer. */
+export function failureRetryNotBefore(attempts: number, retryAfterMs: number | undefined, now = Date.now()): string {
+  const wait = Math.max(photoUploadBackoffMs(attempts), retryAfterMs ?? 0);
+  return new Date(now + wait).toISOString();
 }
 
 /** Wait at least the exponential backoff, and at least until Retry-After. */
@@ -409,7 +416,7 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
   }
   if (!tokenResult.token) return 0;
 
-  const client: GraphRequest = { fetch: deps.fetchImpl ?? fetch, token: tokenResult.token };
+  const client: GraphRequest = { fetch: callableFetch(deps.fetchImpl), token: tokenResult.token };
   let failed = 0;
   const records = await deps.queue.list();
   for (const record of records) {
@@ -459,10 +466,11 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
         failed += 1;
         const attempts = record.attempts + 1;
         const permanent = Boolean(outcome.permanent);
-        const retryNotBefore =
-          outcome.retryAfterMs != null
-            ? new Date(Date.now() + outcome.retryAfterMs).toISOString()
-            : undefined;
+        // Hold every failure for its backoff, not only 429/503, so a persistent fault
+        // (e.g. a bad URL) cannot loop and flood the error log on every kick.
+        const retryNotBefore = permanent
+          ? undefined
+          : failureRetryNotBefore(attempts, outcome.retryAfterMs, nowMs(deps));
         const failedRec: PhotoQueueRecord = {
           ...(outcome.record ?? uploading),
           status: 'failed',
@@ -497,6 +505,7 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
         status: 'failed',
         attempts,
         permanent: false,
+        retryNotBefore: failureRetryNotBefore(attempts, undefined, nowMs(deps)),
         lastError: message,
         updatedAt: deps.now?.() ?? new Date().toISOString(),
       };

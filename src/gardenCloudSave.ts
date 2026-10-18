@@ -32,6 +32,7 @@ import {
   type CloudLoadResult,
   type CloudSaveResult,
 } from './onedrive';
+import { callableFetch } from './boundFetch';
 
 const ETAG_KEY = 'garden-survey:drive-etags';
 const PROMPTED_KEY = 'garden-survey:conflict-prompted';
@@ -684,7 +685,7 @@ async function settleRemoteChoice(
     photosOnlyInLocal(beforeCopy.doc, again.doc).length === 0
       ? { photoIds: [] as string[], fileNames: [] as string[] }
       : await loadDeletedPhotoKeys({
-          client: { fetch: opts.fetchImpl ?? fetch, token: opts.token },
+          client: { fetch: callableFetch(opts.fetchImpl), token: opts.token },
           manifestPath: photosManifestPath(),
           deletedFolderPath: deletedPhotosFolderPath(),
         });

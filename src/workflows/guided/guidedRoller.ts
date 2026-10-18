@@ -105,18 +105,33 @@ export function wheelHeightPx(run: WorkflowRun): number {
   return run.currentStepId === SETUP_STEP_ID ? ROW_PX * 2 : ROW_PX * WHEEL_ROWS;
 }
 
+export interface RollerWheelHandle {
+  /** True while a finger (or mouse) is on the wheel. A re-render must not move it then. */
+  touching(): boolean;
+}
+
+/**
+ * Wire the wheel. Settle only commits a step after a real user gesture, and never from a
+ * list that has left the document: a re-render mid-scroll used to fire the old list's
+ * 120 ms timer on a detached node, where every row measures 0, so it picked row 0 (Set-up).
+ */
 export function attachRollerWheel(
   wheel: HTMLElement,
   rowIds: string[],
   currentId: string,
   onSettle: (stepId: string) => void,
-): void {
+): RollerWheelHandle {
   const list = wheel.querySelector<HTMLElement>('[data-roller-list]');
-  if (!list) return;
+  let touching = false;
+  const handle: RollerWheelHandle = { touching: () => touching };
+  if (!list) return handle;
   const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   let raf = 0;
+  let userMoved = false;
+  let settleTimer: number | undefined;
   const update = () => {
     raf = 0;
+    if (!list.isConnected) return;
     const center = list.clientHeight / 2;
     const rows = [...list.querySelectorAll<HTMLElement>('.roller-row')];
     rows.forEach((row) => {
@@ -129,31 +144,57 @@ export function attachRollerWheel(
       row.style.opacity = `${opacity}`;
     });
   };
-  const onScroll = () => {
-    if (!raf) raf = window.requestAnimationFrame(update);
-  };
-  list.addEventListener('scroll', onScroll, { passive: true });
-  let settleTimer: number | undefined;
   const settle = () => {
-    const center = list.scrollTop + list.clientHeight / 2;
-    let best = rowIds[0]!;
-    let bestDist = Infinity;
-    for (const row of list.querySelectorAll<HTMLElement>('.roller-row')) {
-      const id = row.dataset.stepId ?? '';
-      const mid = row.offsetTop + row.offsetHeight / 2;
-      const dist = Math.abs(mid - center);
-      if (dist < bestDist) {
-        bestDist = dist;
-        best = id;
-      }
-    }
-    if (best !== currentId) onSettle(best);
+    window.clearTimeout(settleTimer);
+    settleTimer = undefined;
+    if (!list.isConnected || list.clientHeight === 0) return;
+    if (!userMoved || touching) return;
+    const best = rollerRowAtCenter(list, rowIds);
+    userMoved = false;
+    if (best && best !== currentId) onSettle(best);
     update();
   };
-  list.addEventListener('scrollend', settle);
-  list.addEventListener('scroll', () => {
+  const start = () => {
+    touching = true;
+    userMoved = true;
+  };
+  const end = () => {
+    touching = false;
     window.clearTimeout(settleTimer);
     settleTimer = window.setTimeout(settle, 120);
-  });
+  };
+  list.addEventListener('touchstart', start, { passive: true });
+  list.addEventListener('touchend', end, { passive: true });
+  list.addEventListener('touchcancel', end, { passive: true });
+  list.addEventListener('pointerdown', start, { passive: true });
+  list.addEventListener('pointerup', end, { passive: true });
+  list.addEventListener('wheel', () => { userMoved = true; }, { passive: true });
+  list.addEventListener('scroll', () => {
+    if (!raf) raf = window.requestAnimationFrame(update);
+    if (!userMoved || touching) return;
+    window.clearTimeout(settleTimer);
+    settleTimer = window.setTimeout(settle, 120);
+  }, { passive: true });
+  list.addEventListener('scrollend', settle);
   update();
+  return handle;
+}
+
+/** The row whose centre is nearest the list centre, or undefined when the list is not laid out. */
+export function rollerRowAtCenter(list: HTMLElement, rowIds: string[]): string | undefined {
+  if (list.clientHeight === 0) return undefined;
+  const center = list.scrollTop + list.clientHeight / 2;
+  let best: string | undefined;
+  let bestDist = Infinity;
+  for (const row of list.querySelectorAll<HTMLElement>('.roller-row')) {
+    const id = row.dataset.stepId ?? '';
+    if (!rowIds.includes(id)) continue;
+    const mid = row.offsetTop + row.offsetHeight / 2;
+    const dist = Math.abs(mid - center);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = id;
+    }
+  }
+  return best;
 }
