@@ -46,9 +46,9 @@ import {
   wheelHeightPx,
 } from './guidedRoller';
 import { SETUP_STEP_ID } from './fieldTestMeta';
-import { isSettled, normalizeStatus } from './guards';
+import { firstUnsettledStepId, isSettled, normalizeStatus } from './guards';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
-import type { WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
+import type { FieldTestSetupValues, WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
 
 const SUN_KEY = 'garden-survey:workflow-sunlight';
 
@@ -57,6 +57,9 @@ let sheetOpen = false;
 let notice: string | null = null;
 let placedRoot: HTMLElement | null = null;
 let chromeRerender: (() => void) | null = null;
+let chromeCommit: ((doc: GardenDocument) => void) | null = null;
+/** Set-up form edits not yet confirmed (dotted key -> typed text). Survives re-renders. */
+let setupDraft: Record<string, string> = {};
 let chromeDoc: GardenDocument | null = null;
 
 export interface WorkflowCommandResult {
@@ -93,8 +96,9 @@ function cycleSun(): void {
   }
 }
 
-export function installWorkflowChrome(rerender: () => void): void {
+export function installWorkflowChrome(rerender: () => void, commit?: (doc: GardenDocument) => void): void {
   chromeRerender = rerender;
+  chromeCommit = commit ?? null;
   const media = window.matchMedia?.('(prefers-contrast: more)');
   media?.addEventListener?.('change', () => {
     if (sunlightMode() === 'system') rerender();
@@ -161,7 +165,26 @@ export function handleWorkflowCommand(
     if (kind) move = jumpWorkflowCount(progress, kind);
   }
   else if (cmd === 'workflow-setup') move = scrollWorkflowToStep(progress, SETUP_STEP_ID);
-  else if (cmd === 'workflow-confirm-setup') move = confirmSetupWorkflow(progress);
+  else if (cmd === 'workflow-confirm-setup') {
+    const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
+    const base = active?.setup?.values;
+    const values = base ? setupValuesWithDraft(base) : undefined;
+    if (values === null) {
+      notice = 'Set-up values must be numbers above 0.';
+      return {};
+    }
+    move = confirmSetupWorkflow(progress, values);
+    if (move.changed) {
+      setupDraft = {};
+      const pair = move.progress.activeId ? move.progress.runs[move.progress.activeId] : undefined;
+      const def = move.progress.activeId ? workflowById(move.progress.activeId) : undefined;
+      if (pair && def && pair.currentStepId === SETUP_STEP_ID) {
+        const target = firstUnsettledStepId(def, pair);
+        const next = target && target !== SETUP_STEP_ID ? target : def.steps[0]?.id;
+        if (next) move = { ...scrollWorkflowToStep(move.progress, next), notice: move.notice, changed: true };
+      }
+    }
+  }
   else if (cmd === 'workflow-skip') {
     const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
     const id = stepId || active?.currentStepId || '';
@@ -281,6 +304,8 @@ function renderRollerPanel(
   wheel.style.height = `${wheelHeightPx(run)}px`;
   const cap = el('div', 'roller-cap');
   wheel.append(cap);
+  const capTop = (wheelHeightPx(run) - ROW_PX) / 2;
+  cap.style.top = `${capTop}px`;
   const list = el('div', 'roller-list');
   list.dataset.rollerList = '1';
   list.setAttribute('role', 'listbox');
@@ -322,13 +347,15 @@ function renderRollerPanel(
 
   requestAnimationFrame(() => {
     const currentRow = list.querySelector<HTMLElement>(`[data-step-id="${CSS.escape(currentId)}"]`);
-    if (currentRow) currentRow.scrollIntoView({ block: 'center' });
+    if (currentRow) list.scrollTop = currentRow.offsetTop - pad;
     attachRollerWheel(wheel, rowIds, currentId, (stepId) => {
       if (!chromeDoc || stepId === currentId) return;
       const move = scrollWorkflowToStep(readProgress(chromeDoc), stepId);
       if (!move.changed) return;
       chromeDoc = commitWorkflow(chromeDoc, move.progress);
-      chromeRerender?.();
+      // Must reach the app's state.doc; a bare rerender redraws from the old doc and snaps back.
+      if (chromeCommit) chromeCommit(chromeDoc);
+      else chromeRerender?.();
     });
   });
   return panel;
@@ -341,22 +368,58 @@ function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElemen
   const values = run.setup?.values;
   if (!values) return form;
   const grid = el('div', 'roller-form-grid');
-  grid.append(formTile('Baseline BAS01–BAS02', `${values.baseline_length_m.toFixed(3)} m`));
-  grid.append(formTile('Circle diameter', `${values.circle_diameter_m.toFixed(3)} m`));
-  grid.append(formTile('BAS02 from peg', `${values.bas02_from_peg_m.toFixed(2)} m`));
-  grid.append(formTile('Calibration distance', `${values.calibration_distance_m.toFixed(1)} m`));
+  grid.append(formTile('Baseline BAS01–BAS02 (m)', 'baseline_length_m', values.baseline_length_m.toFixed(3)));
+  grid.append(formTile('Circle diameter (m)', 'circle_diameter_m', values.circle_diameter_m.toFixed(3)));
+  grid.append(formTile('BAS02 from peg (m)', 'bas02_from_peg_m', values.bas02_from_peg_m.toFixed(2)));
+  grid.append(formTile('Calibration distance (m)', 'calibration_distance_m', values.calibration_distance_m.toFixed(1)));
+  grid.append(formTile('Tolerance baseline (mm)', 'tolerances_mm.baseline', String(values.tolerances_mm.baseline)));
+  grid.append(formTile('Tolerance camera position (mm)', 'tolerances_mm.camera_position', String(values.tolerances_mm.camera_position)));
   form.append(grid);
   const act = el('div', 'roller-form-act');
-  act.append(el('div', 'roller-hint', run.setup?.status === 'changed_mid_run' ? 'Set-up changed. Confirm when ready.' : ''));
-  act.append(button('Confirm', 'workflow-confirm-setup', { primary: true }));
+  const dirty = Object.keys(setupDraft).length > 0;
+  act.append(el('div', 'roller-hint', dirty || run.setup?.status === 'changed_mid_run' ? 'Set-up changed. Confirm when ready.' : ''));
+  act.append(button('Confirm', 'workflow-confirm-setup', { primary: true, testid: 'workflow-confirm-setup' }));
   form.append(act);
   return form;
 }
 
-function formTile(label: string, value: string): HTMLElement {
-  const tile = el('div', 'roller-form-tile');
+function readDotted(values: FieldTestSetupValues, key: string): unknown {
+  return key.split('.').reduce<unknown>((obj, part) => (obj as Record<string, unknown> | undefined)?.[part], values);
+}
+
+/** Apply the typed draft to a copy of the values. null when a typed value is not a number above 0. */
+export function setupValuesWithDraft(values: FieldTestSetupValues, draft: Record<string, string> = setupDraft): FieldTestSetupValues | null {
+  const next = JSON.parse(JSON.stringify(values)) as FieldTestSetupValues;
+  for (const [key, text] of Object.entries(draft)) {
+    const num = Number(text.replace(',', '.').trim());
+    if (!Number.isFinite(num) || num <= 0) return null;
+    if (typeof readDotted(next, key) !== 'number') continue;
+    const parts = key.split('.');
+    const last = parts.pop()!;
+    const holder = parts.reduce<Record<string, unknown>>((obj, part) => obj[part] as Record<string, unknown>, next as unknown as Record<string, unknown>);
+    holder[last] = num;
+  }
+  return next;
+}
+
+function formTile(label: string, key: string, value: string): HTMLElement {
+  const tile = el('label', 'roller-form-tile');
   tile.append(el('small', '', label));
-  tile.append(el('b', '', value));
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.className = 'roller-form-input';
+  input.dataset.setupKey = key;
+  input.dataset.testid = `setup-${key}`;
+  input.value = setupDraft[key] ?? value;
+  if (setupDraft[key] !== undefined) tile.classList.add('roller-form-tile--changed');
+  input.addEventListener('input', () => {
+    if (input.value === value) delete setupDraft[key];
+    else setupDraft[key] = input.value;
+    tile.classList.toggle('roller-form-tile--changed', setupDraft[key] !== undefined);
+  });
+  tile.append(input);
   return tile;
 }
 

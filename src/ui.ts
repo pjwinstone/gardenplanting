@@ -2082,7 +2082,7 @@ export function mount(root: HTMLElement): void {
   subscribeAuth(render);
   subscribeCloud(render);
   subscribeErrorLog(render);
-  installWorkflowChrome(() => setState({}));
+  installWorkflowChrome(() => setState({}), (doc) => setState({ doc }));
   render();
   startPhotoUploadLoop({
     getToken: async () => {
