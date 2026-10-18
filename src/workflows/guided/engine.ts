@@ -6,7 +6,33 @@
 import { getGardenCloudFileName, onedrivePathFor } from '../../cloudConfig';
 import type { GardenDocument, Photo } from '../../model';
 import { workflowById } from './definitions';
+import {
+  CAMERA_POSITION_LEGACY,
+  canonicalStepId,
+  defaultFieldTestSetup,
+  FIELD_TEST_STEP_ALIASES,
+  SETUP_STEP_ID,
+} from './fieldTestMeta';
+import {
+  dependsOnChanged,
+  ensureRunSetup,
+  firstUnsettledStepId,
+  hasNote,
+  hasReason,
+  isCurrentStep,
+  isSettled,
+  isSkippable,
+  isUserStep,
+  needsAppEvidence,
+  nextIndexForCount,
+  normalizeStatus,
+  setupConfirmed,
+  setupValid,
+  changedKeys,
+  SETTLED,
+} from './guards';
 import type {
+  FieldTestSetupValues,
   StepState,
   WorkflowDefinition,
   WorkflowEvent,
@@ -18,6 +44,8 @@ import type {
   WorkflowStep,
   WorkflowTrigger,
 } from './types';
+
+export { counts, nextIndexForCount } from './guards';
 
 export const WORKFLOW_MIRROR_KEY = 'garden-survey:workflow-progress';
 
@@ -36,8 +64,47 @@ export function isWorkflowId(id: string | undefined): id is WorkflowId {
   return !!id && WORKFLOW_IDS.has(id as WorkflowId);
 }
 
+function isFieldTestRoller(def: WorkflowDefinition): boolean {
+  return def.id === 'circle-field-test' && def.revision >= 3;
+}
+
+function initialStepState(step: WorkflowStep | undefined): StepState {
+  if (!step) return { status: 'open', completedBy: null };
+  if (needsAppEvidence(step)) return { status: 'waiting_for_app', completedBy: null };
+  return { status: 'open', completedBy: null };
+}
+
+function mirrorLegacy(state: StepState): StepState {
+  const status = normalizeStatus(state.status);
+  let completedBy = state.completedBy ?? null;
+  if (status === 'ticked_by_you' || status === 'ticked_with_reason') completedBy = 'manual';
+  else if (status === 'ticked_by_app') completedBy = 'auto';
+  else if (SETTLED.includes(status)) completedBy = state.completedBy ?? null;
+  else completedBy = null;
+  return { ...state, status, completedBy };
+}
+
+function normalizeLegacyState(state: StepState, step?: WorkflowStep): StepState {
+  if (state.status === 'pending') {
+    return mirrorLegacy(initialStepState(step));
+  }
+  if (state.status === 'complete') {
+    if (state.completedBy === 'auto') return mirrorLegacy({ ...state, status: 'ticked_by_app' });
+    return mirrorLegacy({ ...state, status: 'ticked_by_you' });
+  }
+  return mirrorLegacy(state);
+}
+
+function syncStepAliases(steps: Record<string, StepState>): Record<string, StepState> {
+  const next = { ...steps };
+  for (const [alias, canonical] of Object.entries(FIELD_TEST_STEP_ALIASES)) {
+    if (next[canonical]) next[alias] = next[canonical];
+  }
+  return next;
+}
+
 function pending(): StepState {
-  return { status: 'pending', completedBy: null };
+  return { status: 'open', completedBy: null };
 }
 
 export function nameMatchesStation(value: string, stationId: string): boolean {
@@ -46,6 +113,11 @@ export function nameMatchesStation(value: string, stationId: string): boolean {
   if (!v || !id) return false;
   if (v === id) return true;
   if (v.startsWith(`${id} `) || v.startsWith(`${id}-`)) return true;
+  for (const aliases of Object.values(CAMERA_POSITION_LEGACY)) {
+    const group = aliases.map((alias) => alias.trim().toUpperCase());
+    if (!group.includes(id)) continue;
+    if (group.some((alias) => v === alias || v.startsWith(`${alias} `) || v.startsWith(`${alias}-`))) return true;
+  }
   return false;
 }
 
@@ -163,39 +235,63 @@ function sameSeen(a: string[] | undefined, b: Set<string>): boolean {
 }
 
 function reduceStep(step: WorkflowStep, state: StepState, event: WorkflowEvent | null, now: string): StepState {
-  if (event?.type === 'manual.tick' && event.stepId === step.id && state.status !== 'complete') {
-    return {
-      status: 'complete',
+  const status = normalizeStatus(state.status);
+  if (event?.type === 'manual.tick' && canonicalStepId(event.stepId) === step.id && !isSettled(state)) {
+    const check = collect(step.complete, event, new Set(state.seen ?? []), state.note, step.id, false);
+    if (step.kind === 'app') {
+      return mirrorLegacy({
+        ...state,
+        status: 'ticked_by_you',
+        completedBy: 'manual',
+        completedAt: now,
+        note: event.note ?? state.note,
+      });
+    }
+    const next: StepState = {
+      ...state,
+      status: step.kind === 'user+app' && !check.done ? 'ticked_by_you' : 'ticked_by_you',
       completedBy: 'manual',
       completedAt: now,
       note: event.note ?? state.note,
-      seen: state.seen,
+      seen: check.done ? seenList(check.seen) : state.seen,
     };
+    if (step.kind === 'user+app' && check.done) {
+      return mirrorLegacy({
+        ...next,
+        status: 'ticked_by_app',
+        completedBy: 'auto',
+        seen: seenList(check.seen),
+      });
+    }
+    return mirrorLegacy(next);
   }
   const note = state.note;
   const check = collect(step.complete, event, new Set(state.seen ?? []), note, step.id, false);
-  if (state.status === 'complete' && state.completedBy === 'auto') return state;
-  if (state.status === 'complete' && state.completedBy === 'manual') {
-    const manualOnly = 'on' in step.complete && step.complete.on === 'manual';
-    if (!check.done || manualOnly) return state;
-    return {
+  if (status === 'ticked_by_app') return state;
+  if (status === 'ticked_by_you' && step.kind === 'user+app') {
+    if (!check.done) return mirrorLegacy({ ...state, seen: seenList(check.seen) });
+    return mirrorLegacy({
       ...state,
+      status: 'ticked_by_app',
       completedBy: 'auto',
       completedAt: now,
       seen: seenList(check.seen),
-    };
+    });
   }
+  if (status === 'ticked_by_you' && step.kind === 'user') return state;
   if (check.done) {
-    return {
-      status: 'complete',
+    return mirrorLegacy({
+      ...state,
+      status: 'ticked_by_app',
       completedBy: 'auto',
       completedAt: now,
       note,
       seen: seenList(check.seen),
-    };
+    });
   }
   if (sameSeen(state.seen, check.seen)) return state;
-  return { ...state, seen: seenList(check.seen) };
+  const waiting = needsAppEvidence(step) ? 'waiting_for_app' : 'open';
+  return mirrorLegacy({ ...state, status: waiting, seen: seenList(check.seen) });
 }
 
 export function reconcileRun(def: WorkflowDefinition, run: WorkflowRun): WorkflowRun {
@@ -203,36 +299,57 @@ export function reconcileRun(def: WorkflowDefinition, run: WorkflowRun): Workflo
   const steps: Record<string, StepState> = {};
   const parked = new Set(run.parkedStepIds ?? []);
   for (const id of Object.keys(run.steps)) {
-    if (known.has(id)) steps[id] = run.steps[id];
-    else parked.add(id);
+    const canonical = canonicalStepId(id);
+    const stepDef = def.steps.find((step) => step.id === canonical);
+    if (known.has(canonical)) {
+      const merged = steps[canonical] ?? normalizeLegacyState(run.steps[id], stepDef);
+      steps[canonical] = merged;
+    } else if (!FIELD_TEST_STEP_ALIASES[id]) parked.add(id);
   }
   for (const step of def.steps) {
-    if (!steps[step.id]) steps[step.id] = pending();
+    if (!steps[step.id]) steps[step.id] = initialStepState(step);
+    else steps[step.id] = normalizeLegacyState(steps[step.id], step);
   }
-  const currentOk = def.steps.some((step) => step.id === run.currentStepId);
+  const synced = syncStepAliases(steps);
+  const currentCanonical = canonicalStepId(run.currentStepId);
+  const currentOk = currentCanonical === SETUP_STEP_ID || def.steps.some((step) => step.id === currentCanonical);
   const parkedStepIds = [...parked];
+  const roller = isFieldTestRoller(def);
+  const setup = roller
+    ? ensureRunSetup({ ...run, setup: run.setup ?? { status: 'unconfirmed', values: defaultFieldTestSetup() } })
+    : run.setup;
   return {
     ...run,
     workflowId: def.id,
     revision: def.revision,
     startedAt: run.startedAt || run.updatedAt,
-    currentStepId: currentOk ? run.currentStepId : (def.steps[0]?.id ?? run.currentStepId),
-    steps,
+    currentStepId: currentOk
+      ? (currentCanonical === SETUP_STEP_ID ? SETUP_STEP_ID : currentCanonical)
+      : (roller ? SETUP_STEP_ID : (def.steps[0]?.id ?? run.currentStepId)),
+    steps: synced,
+    setup,
+    runLog: run.runLog ?? [],
     parkedStepIds: parkedStepIds.length ? parkedStepIds : undefined,
   };
 }
 
 function freshRun(def: WorkflowDefinition, now: string): WorkflowRun {
   const steps: Record<string, StepState> = {};
-  for (const step of def.steps) steps[step.id] = pending();
-  return {
+  for (const step of def.steps) steps[step.id] = initialStepState(step);
+  const roller = isFieldTestRoller(def);
+  const run: WorkflowRun = {
     workflowId: def.id,
     revision: def.revision,
-    currentStepId: def.steps[0].id,
+    currentStepId: roller ? SETUP_STEP_ID : def.steps[0].id,
     startedAt: now,
     updatedAt: now,
-    steps,
+    steps: syncStepAliases(steps),
+    runLog: [],
   };
+  if (roller) {
+    run.setup = { status: 'unconfirmed', values: defaultFieldTestSetup() };
+  }
+  return run;
 }
 
 export function readProgress(doc: { workflowProgress?: WorkflowProgress } | undefined): WorkflowProgress {
@@ -419,7 +536,7 @@ export function reduceRun(def: WorkflowDefinition, run: WorkflowRun, event: Work
     }
   }
   if (!changed) return run;
-  return { ...run, steps, updatedAt: now };
+  return { ...run, steps: syncStepAliases(steps), updatedAt: now };
 }
 
 function readyDef(id: string): { def: WorkflowDefinition } | { error: string } {
@@ -460,15 +577,15 @@ export function resumeWorkflow(progress: WorkflowProgress, id: string, now = new
   const next: WorkflowProgress = {
     ...progress,
     activeId: ready.def.id,
-    runs: { ...progress.runs, [ready.def.id]: changed ? { ...run, updatedAt: now } : run },
+    runs: { ...progress.runs, [ready.def.id]: changed ? { ...run, paused: false, updatedAt: now } : { ...run, paused: false } },
   };
   return { progress: next, changed };
 }
 
-function archivedRun(run: WorkflowRun, now: string): WorkflowPastRun {
-  const notes = Object.entries(run.steps).flatMap(([stepId, state]) => {
-    const note = state.note?.trim();
-    return note ? [{ stepId, note }] : [];
+function archivedRun(def: WorkflowDefinition, run: WorkflowRun, now: string): WorkflowPastRun {
+  const notes = def.steps.flatMap((step) => {
+    const note = run.steps[step.id]?.note?.trim();
+    return note ? [{ stepId: step.id, note }] : [];
   });
   return {
     workflowId: run.workflowId,
@@ -489,7 +606,7 @@ export function restartWorkflow(progress: WorkflowProgress, id: string, now = ne
     version: 1,
     activeId: ready.def.id,
     runs: { ...progress.runs, [ready.def.id]: run },
-    pastRuns: capPastRuns([...(progress.pastRuns ?? []), archivedRun(existing, now)]),
+    pastRuns: capPastRuns([...(progress.pastRuns ?? []), archivedRun(ready.def, existing, now)]),
   };
   return { progress: next, link: ready.def.steps[0]?.link, changed: true };
 }
@@ -516,7 +633,7 @@ function activePair(progress: WorkflowProgress): { def: WorkflowDefinition; run:
 }
 
 function openSteps(def: WorkflowDefinition, run: WorkflowRun): WorkflowStep[] {
-  return def.steps.filter((step) => run.steps[step.id]?.status !== 'complete');
+  return def.steps.filter((step) => !isSettled(run.steps[step.id]));
 }
 
 export function openStepNotice(def: WorkflowDefinition, run: WorkflowRun): string {
@@ -526,6 +643,7 @@ export function openStepNotice(def: WorkflowDefinition, run: WorkflowRun): strin
 }
 
 export function stepIsManualOnly(step: WorkflowStep): boolean {
+  if (step.kind) return step.kind === 'user';
   return 'on' in step.complete && step.complete.on === 'manual';
 }
 
@@ -534,7 +652,7 @@ function tickManualCurrent(progress: WorkflowProgress, now: string): WorkflowPro
   if (!pair || pair.run.finishedAt) return progress;
   const step = pair.def.steps.find((item) => item.id === pair.run.currentStepId);
   if (!step || !stepIsManualOnly(step)) return progress;
-  if (pair.run.steps[step.id]?.status === 'complete') return progress;
+  if (isSettled(pair.run.steps[step.id])) return progress;
   return tickWorkflow(progress, step.id, pair.run.steps[step.id]?.note, now).progress;
 }
 
@@ -542,9 +660,20 @@ export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toI
   const initial = activePair(progress);
   if (!initial) return { progress, notice: 'Start a workflow first.', changed: false };
   if (initial.run.finishedAt) return { progress, notice: `${initial.def.title} is already finished.`, changed: false };
-  const ticked = tickManualCurrent(progress, now);
+  const roller = isFieldTestRoller(initial.def);
+  const ticked = roller ? progress : tickManualCurrent(progress, now);
   const pair = activePair(ticked) ?? initial;
-  const index = pair.def.steps.findIndex((step) => step.id === pair.run.currentStepId);
+  const currentId = canonicalStepId(pair.run.currentStepId);
+  if (currentId === SETUP_STEP_ID) {
+    const nextStep = pair.def.steps[0];
+    const run: WorkflowRun = { ...pair.run, currentStepId: nextStep.id, updatedAt: now };
+    return {
+      progress: { ...ticked, runs: { ...ticked.runs, [pair.def.id]: run } },
+      link: nextStep.link,
+      changed: true,
+    };
+  }
+  const index = pair.def.steps.findIndex((step) => step.id === currentId);
   const at = index < 0 ? 0 : index;
   if (at >= pair.def.steps.length - 1) return doneWorkflow(ticked, now);
   const nextStep = pair.def.steps[at + 1];
@@ -576,16 +705,46 @@ export function doneWorkflow(progress: WorkflowProgress, now = new Date().toISOS
     if (!progress.activeId) return { progress, changed: false };
     return { progress: { ...progress, activeId: undefined }, changed: true };
   }
-  const index = pair.def.steps.findIndex((step) => step.id === pair.run.currentStepId);
-  const step = pair.def.steps[index < 0 ? 0 : index];
-  const open = openSteps(pair.def, pair.run);
+  const roller = isFieldTestRoller(pair.def);
+  const index = pair.def.steps.findIndex((step) => step.id === canonicalStepId(pair.run.currentStepId));
+  const step = pair.def.steps[index < 0 ? pair.def.steps.length - 1 : index];
   const last = index >= pair.def.steps.length - 1;
-  const onlyThis = !!step && open.length === 1 && open[0].id === step.id;
-  const ticked = step && stepIsManualOnly(step) && (last || onlyThis)
+  const onlyThis = !!step && openSteps(pair.def, pair.run).length === 1 && openSteps(pair.def, pair.run)[0]?.id === step.id;
+  const ticked = !roller && step && stepIsManualOnly(step) && (last || onlyThis)
     ? tickManualCurrent(progress, now)
     : progress;
   const nextPair = activePair(ticked) ?? pair;
-  if (openSteps(nextPair.def, nextPair.run).length > 0) {
+  const open = openSteps(nextPair.def, nextPair.run);
+  const currentId = canonicalStepId(nextPair.run.currentStepId);
+  const stepIndexOnRun = nextPair.def.steps.findIndex((step) => step.id === currentId);
+  const onLast = currentId !== SETUP_STEP_ID && stepIndexOnRun >= nextPair.def.steps.length - 1;
+  if (open.length > 0 && !onLast) {
+    return {
+      progress: ticked,
+      notice: openStepNotice(nextPair.def, nextPair.run),
+      changed: progressJson(progress) !== progressJson(ticked),
+    };
+  }
+  if (roller && !setupConfirmed(nextPair.run) && onLast) {
+    const run: WorkflowRun = { ...nextPair.run, currentStepId: SETUP_STEP_ID, updatedAt: now };
+    return {
+      progress: { ...ticked, runs: { ...ticked.runs, [nextPair.def.id]: run } },
+      notice: 'Set-up not confirmed.',
+      changed: true,
+    };
+  }
+  const unsettled = firstUnsettledStepId(nextPair.def, nextPair.run);
+  if (roller && unsettled && onLast) {
+    const jump = nextPair.def.steps.find((item) => item.id === unsettled);
+    const title = unsettled === SETUP_STEP_ID ? 'Set-up' : (jump?.title ?? unsettled);
+    const run: WorkflowRun = { ...nextPair.run, currentStepId: unsettled, updatedAt: now };
+    return {
+      progress: { ...ticked, runs: { ...ticked.runs, [nextPair.def.id]: run } },
+      notice: `${title} is still open.`,
+      changed: true,
+    };
+  }
+  if (open.length > 0) {
     return {
       progress: ticked,
       notice: openStepNotice(nextPair.def, nextPair.run),
@@ -600,7 +759,7 @@ export function doneWorkflow(progress: WorkflowProgress, now = new Date().toISOS
 }
 
 export function tickWorkflow(progress: WorkflowProgress, stepId: string, note?: string, now = new Date().toISOString()): WorkflowMove {
-  const next = applyWorkflowEvent(progress, { type: 'manual.tick', stepId, note }, now);
+  const next = applyWorkflowEvent(progress, { type: 'manual.tick', stepId: canonicalStepId(stepId), note }, now);
   const changed = progressJson(progress) !== progressJson(next);
   return { progress: next, changed };
 }
@@ -608,15 +767,16 @@ export function tickWorkflow(progress: WorkflowProgress, stepId: string, note?: 
 export function noteWorkflow(progress: WorkflowProgress, stepId: string, note: string, now = new Date().toISOString()): WorkflowMove {
   const pair = activePair(progress);
   if (!pair) return { progress, changed: false };
-  const step = pair.def.steps.find((item) => item.id === stepId);
-  const state = pair.run.steps[stepId];
+  const sid = canonicalStepId(stepId);
+  const step = pair.def.steps.find((item) => item.id === sid);
+  const state = pair.run.steps[sid];
   if (!step || !state) return { progress, changed: false };
   const withNote: StepState = { ...state, note };
-  const steps = { ...pair.run.steps, [stepId]: withNote };
+  const steps = { ...pair.run.steps, [sid]: withNote };
   let run: WorkflowRun = { ...pair.run, steps };
   const reduced = reduceStep(step, withNote, null, now);
   if (reduced !== withNote) {
-    run = { ...run, steps: { ...steps, [stepId]: reduced }, updatedAt: now };
+    run = { ...run, steps: syncStepAliases({ ...steps, [sid]: reduced }), updatedAt: now };
   } else if (note !== state.note) {
     run = { ...run, updatedAt: now };
   } else {
@@ -633,7 +793,7 @@ export function pausedRun(progress: WorkflowProgress): { id: WorkflowId; run: Wo
     if (!def) continue;
     const run = progress.runs[def.id];
     if (!run || run.finishedAt || progress.activeId === def.id) continue;
-    return { id: def.id, run, def };
+    if (run.paused) return { id: def.id, run, def };
   }
   for (const [id, run] of Object.entries(progress.runs)) {
     if (!isWorkflowId(id) || !run || run.finishedAt || id === progress.activeId) continue;
@@ -677,8 +837,9 @@ export function countUploadedPhotosForStep(
   const start = photoTimeMs(run.startedAt);
   if (start === undefined) return { count: 0, photoIds: [] };
   const taken = new Set<string>();
+  const canonicalStep = canonicalStepId(stepId);
   for (const [id, state] of Object.entries(run.steps)) {
-    if (id === stepId) continue;
+    if (canonicalStepId(id) === canonicalStep) continue;
     for (const photoId of state.consumedPhotoIds ?? []) taken.add(photoId);
   }
   const photoIds = doc.photos.filter((photo) => {
@@ -744,4 +905,258 @@ export function workflowAfterUploadedPhoto(doc: GardenDocument, photoId: string,
     }, now);
   }
   return next;
+}
+
+function patchRun(progress: WorkflowProgress, id: WorkflowId, run: WorkflowRun): WorkflowProgress {
+  return { ...progress, runs: { ...progress.runs, [id]: { ...run, steps: syncStepAliases(run.steps) } } };
+}
+
+export function scrollWorkflowToStep(
+  progress: WorkflowProgress,
+  stepId: string,
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair || pair.run.finishedAt) return { progress, changed: false };
+  const target = canonicalStepId(stepId);
+  const ok = target === SETUP_STEP_ID || pair.def.steps.some((step) => step.id === target);
+  if (!ok) return { progress, changed: false };
+  const run: WorkflowRun = { ...pair.run, currentStepId: target, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+export function jumpWorkflowCount(
+  progress: WorkflowProgress,
+  kind: 'error' | 'warning' | 'open' | 'recheck',
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const nextId = nextIndexForCount(pair.def, pair.run, kind, pair.run.currentStepId);
+  if (!nextId) return { progress, changed: false };
+  return scrollWorkflowToStep(progress, nextId, now);
+}
+
+function markDependantsForRecheck(
+  def: WorkflowDefinition,
+  run: WorkflowRun,
+  keys: string[],
+  now: string,
+): WorkflowRun {
+  const steps = { ...run.steps };
+  for (const step of def.steps) {
+    if (!dependsOnChanged(step.id, keys)) continue;
+    const state = steps[step.id];
+    if (!state || !isSettled(state)) continue;
+    steps[step.id] = mirrorLegacy({ ...state, status: 'needs_recheck' });
+  }
+  return { ...run, steps, updatedAt: now };
+}
+
+function dotValue(values: FieldTestSetupValues, path: string): unknown {
+  return path.split('.').reduce<unknown>((cur, part) => {
+    if (cur && typeof cur === 'object') return (cur as Record<string, unknown>)[part];
+    return undefined;
+  }, values);
+}
+
+export function confirmSetupWorkflow(
+  progress: WorkflowProgress,
+  values?: FieldTestSetupValues,
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair || !isFieldTestRoller(pair.def)) return { progress, changed: false };
+  const prev = ensureRunSetup(pair.run);
+  const nextValues = values ?? prev.values;
+  if (!setupValid(nextValues)) return { progress, notice: 'Set-up values are not valid.', changed: false };
+  const keys = changedKeys(prev.values, nextValues);
+  const log = [...(pair.run.runLog ?? [])];
+  if (keys.length > 0) {
+    log.push({
+      at: now,
+      type: 'config.changed',
+      changes: keys.map((key) => ({ key, from: dotValue(prev.values, key), to: dotValue(nextValues, key) })),
+    });
+  } else if (prev.status === 'unconfirmed') {
+    log.push({ at: now, type: 'config.confirmed' });
+  }
+  let run: WorkflowRun = {
+    ...pair.run,
+    setup: {
+      status: keys.length > 0 ? 'changed_mid_run' : 'confirmed',
+      values: nextValues,
+      confirmedAt: now,
+    },
+    runLog: log,
+    updatedAt: now,
+  };
+  if (keys.length > 0) run = markDependantsForRecheck(pair.def, run, keys, now);
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+export function skipWithNoteWorkflow(
+  progress: WorkflowProgress,
+  stepId: string,
+  note: string,
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const id = canonicalStepId(stepId);
+  const step = pair.def.steps.find((item) => item.id === id);
+  if (!step || !isSkippable(step) || !isCurrentStep(id, pair.run) || !hasNote(note)) {
+    return { progress, notice: 'Add a short note to skip this step.', changed: false };
+  }
+  const steps = {
+    ...pair.run.steps,
+    [id]: mirrorLegacy({
+      ...(pair.run.steps[id] ?? initialStepState(step)),
+      status: 'skipped_with_note',
+      note,
+      completedAt: now,
+    }),
+  };
+  const run: WorkflowRun = { ...pair.run, steps, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+export function tickWithReasonWorkflow(
+  progress: WorkflowProgress,
+  stepId: string,
+  reason: string,
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const id = canonicalStepId(stepId);
+  const step = pair.def.steps.find((item) => item.id === id);
+  if (!step || !needsAppEvidence(step) || !isCurrentStep(id, pair.run) || !hasReason(reason)) {
+    return { progress, notice: 'Type why you are ticking this step by hand.', changed: false };
+  }
+  const steps = {
+    ...pair.run.steps,
+    [id]: mirrorLegacy({
+      ...(pair.run.steps[id] ?? initialStepState(step)),
+      status: 'ticked_with_reason',
+      reason,
+      note: reason,
+      completedBy: 'manual',
+      completedAt: now,
+    }),
+  };
+  const run: WorkflowRun = { ...pair.run, steps, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+export function retakeEvidenceWorkflow(
+  progress: WorkflowProgress,
+  stepId: string,
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const id = canonicalStepId(stepId);
+  const step = pair.def.steps.find((item) => item.id === id);
+  const state = pair.run.steps[id];
+  if (!step || !state || normalizeStatus(state.status) !== 'evidence_failed') return { progress, changed: false };
+  const steps = {
+    ...pair.run.steps,
+    [id]: mirrorLegacy({
+      ...state,
+      status: 'waiting_for_app',
+      reason: undefined,
+      completedBy: null,
+    }),
+  };
+  const run: WorkflowRun = { ...pair.run, steps, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+export function rejectEvidenceWorkflow(
+  progress: WorkflowProgress,
+  stepId: string,
+  reason: string,
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const id = canonicalStepId(stepId);
+  const step = pair.def.steps.find((item) => item.id === id);
+  if (!step) return { progress, changed: false };
+  const steps = {
+    ...pair.run.steps,
+    [id]: mirrorLegacy({
+      ...(pair.run.steps[id] ?? initialStepState(step)),
+      status: 'evidence_failed',
+      reason,
+      completedBy: null,
+    }),
+  };
+  const run: WorkflowRun = { ...pair.run, steps, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+export function untickWorkflow(
+  progress: WorkflowProgress,
+  stepId: string,
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const id = canonicalStepId(stepId);
+  const step = pair.def.steps.find((item) => item.id === id);
+  const state = pair.run.steps[id];
+  if (!step || !state || !isCurrentStep(id, pair.run)) return { progress, changed: false };
+  const status = normalizeStatus(state.status);
+  if (status === 'ticked_by_app') return { progress, notice: 'App-ticked steps cannot be unticked by hand.', changed: false };
+  if (!['ticked_by_you', 'ticked_with_reason', 'skipped_with_note'].includes(status)) {
+    return { progress, changed: false };
+  }
+  const steps = {
+    ...pair.run.steps,
+    [id]: mirrorLegacy({
+      ...state,
+      status: needsAppEvidence(step) ? 'waiting_for_app' : 'open',
+      completedBy: null,
+      completedAt: undefined,
+      reason: undefined,
+    }),
+  };
+  const run: WorkflowRun = { ...pair.run, steps, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+export function pauseWorkflow(progress: WorkflowProgress, now = new Date().toISOString()): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair || pair.run.finishedAt) return { progress, changed: false };
+  const run: WorkflowRun = { ...pair.run, paused: true, updatedAt: now };
+  return {
+    progress: { ...progress, activeId: undefined, runs: { ...progress.runs, [pair.def.id]: run } },
+    changed: true,
+  };
+}
+
+export function resumePausedWorkflow(progress: WorkflowProgress, id: string, now = new Date().toISOString()): WorkflowMove {
+  const ready = readyDef(id);
+  if ('error' in ready) return { progress, notice: ready.error, changed: false };
+  const existing = progress.runs[ready.def.id];
+  if (!existing || existing.finishedAt) return { progress, notice: `${ready.def.title} has nothing to resume.`, changed: false };
+  const run: WorkflowRun = { ...reconcileRun(ready.def, existing), paused: false, updatedAt: now };
+  return {
+    progress: { ...progress, activeId: ready.def.id, runs: { ...progress.runs, [ready.def.id]: run } },
+    changed: true,
+  };
+}
+
+export function tickAgainWorkflow(progress: WorkflowProgress, now = new Date().toISOString()): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const id = canonicalStepId(pair.run.currentStepId);
+  const step = pair.def.steps.find((item) => item.id === id);
+  const state = pair.run.steps[id];
+  if (!step || !state || normalizeStatus(state.status) !== 'needs_recheck' || !isUserStep(step)) {
+    return { progress, changed: false };
+  }
+  return tickWorkflow(progress, id, state.note, now);
 }

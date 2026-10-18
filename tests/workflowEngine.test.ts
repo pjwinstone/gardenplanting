@@ -5,6 +5,7 @@ import {
   advanceWorkflow,
   applyWorkflowEvent,
   backWorkflow,
+  confirmSetupWorkflow,
   countUploadedPhotosForStep,
   doneWorkflow,
   emptyProgress,
@@ -28,7 +29,11 @@ const NOW = '2026-06-01T12:00:00.000Z';
 const LATER = '2026-06-01T12:05:00.000Z';
 
 function started(id: 'circle-field-test' | 'print-fit-markers' = 'circle-field-test') {
-  return startWorkflow(emptyProgress(), id, NOW).progress;
+  let progress = startWorkflow(emptyProgress(), id, NOW).progress;
+  if (id === 'circle-field-test') {
+    progress = confirmSetupWorkflow(progress, undefined, NOW).progress;
+  }
+  return progress;
 }
 
 function photo(
@@ -94,7 +99,7 @@ describe('guided workflow engine', () => {
     const progress = started();
     const ticked = tickWorkflow(progress, 'stn01', undefined, NOW);
     const step = ticked.progress.runs['circle-field-test']?.steps.stn01;
-    expect(step).toMatchObject({ status: 'complete', completedBy: 'manual' });
+    expect(step).toMatchObject({ status: 'ticked_by_you', completedBy: 'manual' });
     const again = applyWorkflowEvent(ticked.progress, {
       type: 'photo.uploaded',
       stationId: 'STN01',
@@ -116,7 +121,7 @@ describe('guided workflow engine', () => {
     const run = doc.workflowProgress?.runs['circle-field-test'];
     expect(run && countUploadedPhotosForStep(doc, 'STN01', run, 'stn01').count).toBe(1);
     doc = workflowAfterUploadedPhoto(doc, 'a', NOW);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('pending');
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('waiting_for_app');
 
     const two = stationDoc([
       photo('a', 'P01', 'verified'),
@@ -125,7 +130,7 @@ describe('guided workflow engine', () => {
     doc = { ...two, workflowProgress: doc.workflowProgress };
     doc = workflowAfterUploadedPhoto(doc, 'b', LATER);
     expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01).toMatchObject({
-      status: 'complete',
+      status: 'ticked_by_app',
       completedBy: 'auto',
     });
   });
@@ -137,7 +142,7 @@ describe('guided workflow engine', () => {
     const staleB = photo('old-b', 'P01', 'verified', undefined, '2026-05-01T08:01:00.000Z', '2026-05-01T08:01:02.000Z');
     let doc: GardenDocument = { ...stationDoc([staleA, staleB]), workflowProgress: progress };
     doc = workflowAfterUploadedPhoto(doc, 'old-b', NOW);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('pending');
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('waiting_for_app');
 
     const missingTime = photo('bare', 'P01', 'verified');
     delete missingTime.originalFile?.capturedAt;
@@ -146,18 +151,18 @@ describe('guided workflow engine', () => {
     const earlyReceive = photo('early', 'P01', 'verified', undefined, '2026-06-01T12:03:00.000Z', '2026-05-30T08:00:00.000Z');
     doc = { ...stationDoc([staleA, staleB, missingTime, earlyReceive]), workflowProgress: doc.workflowProgress };
     doc = workflowAfterUploadedPhoto(doc, 'early', LATER);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('pending');
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('waiting_for_app');
 
     const freshA = photo('new-a', 'P01', 'verified', undefined, '2026-06-01T12:01:00.000Z', '2026-06-01T12:01:02.000Z');
     doc = { ...stationDoc([staleA, staleB, freshA]), workflowProgress: doc.workflowProgress };
     doc = workflowAfterUploadedPhoto(doc, 'new-a', LATER);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('pending');
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('waiting_for_app');
 
     const freshB = photo('new-b', 'P01', 'verified', undefined, '2026-06-01T12:04:00.000Z', '2026-06-01T12:04:02.000Z');
     doc = { ...stationDoc([staleA, staleB, freshA, freshB]), workflowProgress: doc.workflowProgress };
     doc = workflowAfterUploadedPhoto(doc, 'new-b', LATER);
     const step = doc.workflowProgress?.runs['circle-field-test']?.steps.stn01;
-    expect(step).toMatchObject({ status: 'complete', completedBy: 'auto' });
+    expect(step).toMatchObject({ status: 'ticked_by_app', completedBy: 'auto' });
     expect(step?.consumedPhotoIds).toEqual(['new-a', 'new-b']);
   });
 
@@ -170,29 +175,29 @@ describe('guided workflow engine', () => {
     expect(run?.finishedAt).toBe(NOW);
     expect(progress.activeId).toBe('print-fit-markers');
     for (const step of printFitMarkers.steps) {
-      expect(run?.steps[step.id]).toMatchObject({ status: 'complete', completedBy: 'manual' });
+      expect(run?.steps[step.id]).toMatchObject({ status: 'ticked_by_you', completedBy: 'manual' });
     }
     const again = restartWorkflow(progress, 'print-fit-markers', LATER);
     expect(again.changed).toBe(true);
     expect(again.progress.runs['print-fit-markers']?.finishedAt).toBeUndefined();
     expect(again.progress.runs['print-fit-markers']?.startedAt).toBe(LATER);
-    expect(again.progress.runs['print-fit-markers']?.steps.assign?.status).toBe('pending');
+    expect(again.progress.runs['print-fit-markers']?.steps.assign?.status).toBe('open');
     expect(again.progress.activeId).toBe('print-fit-markers');
     expect(again.progress.pastRuns).toHaveLength(1);
   });
 
   it('archives sleeve and CHK-BASE notes when a finished run starts over', () => {
     let progress = started();
-    progress = noteWorkflow(progress, 'laser-check', 'CHK-BASE 8.001', NOW).progress;
-    progress = noteWorkflow(progress, 'plumb', 'sleeve R 30.2 mm, height 0.5 m', NOW).progress;
+    progress = noteWorkflow(progress, 'laser-check-baseline', 'CHK-BASE 8.001', NOW).progress;
+    progress = noteWorkflow(progress, 'plumb-canes', 'sleeve R 30.2 mm, height 0.5 m', NOW).progress;
     for (const step of circleFieldTest.steps) {
       progress = tickWorkflow(progress, step.id, undefined, NOW).progress;
     }
     progress = doneWorkflow(progress, LATER).progress;
     const again = restartWorkflow(progress, 'circle-field-test', '2026-06-01T12:10:00.000Z');
     expect(again.progress.pastRuns?.[0]?.notes).toEqual([
-      { stepId: 'laser-check', note: 'CHK-BASE 8.001' },
-      { stepId: 'plumb', note: 'sleeve R 30.2 mm, height 0.5 m' },
+      { stepId: 'laser-check-baseline', note: 'CHK-BASE 8.001' },
+      { stepId: 'plumb-canes', note: 'sleeve R 30.2 mm, height 0.5 m' },
     ]);
     const when = new Date(LATER).toLocaleString('en-GB', {
       dateStyle: 'medium',
@@ -200,7 +205,7 @@ describe('guided workflow engine', () => {
     });
     const line = formatPastRunLine(again.progress.pastRuns?.[0] as WorkflowPastRun);
     expect(line).toBe(
-      `Circle field test · ${when} · Laser CHK-BASE: CHK-BASE 8.001 · Plumb and height: sleeve R 30.2 mm, height 0.5 m`,
+      `Circle field test · ${when} · Laser check of the baseline: CHK-BASE 8.001 · Plumb the canes and note heights: sleeve R 30.2 mm, height 0.5 m`,
     );
     expect(line).not.toContain('circle-field-test');
     expect(line).not.toContain('laser-check');
@@ -213,8 +218,8 @@ describe('guided workflow engine', () => {
         notes: [{ stepId: 'nope', note: 'kept' }],
       }),
     ).toBe('Print & fit markers · Note: kept');
-    expect(again.progress.runs['circle-field-test']?.steps['laser-check']?.note).toBeUndefined();
-    expect(again.progress.runs['circle-field-test']?.steps.plumb?.status).toBe('pending');
+    expect(again.progress.runs['circle-field-test']?.steps['laser-check-baseline']?.note).toBeUndefined();
+    expect(again.progress.runs['circle-field-test']?.steps['plumb-canes']?.status).toBe('open');
 
     const doc = emptyDocument('Noted');
     doc.workflowProgress = progress;
@@ -269,7 +274,7 @@ describe('guided workflow engine', () => {
       lengthM: 8,
     };
     progress = applyWorkflowEvent(progress, saved, NOW);
-    expect(progress.runs['circle-field-test']?.steps['tape-baseline']?.status).toBe('pending');
+    expect(progress.runs['circle-field-test']?.steps['tape-baseline']?.status).toBe('waiting_for_app');
     expect(progress.runs['circle-field-test']?.steps['tape-baseline']?.seen?.length).toBeGreaterThan(0);
 
     const swapped = applyWorkflowEvent(started(), { ...saved, endA: 'BAS02', endB: 'BAS01' }, NOW);
@@ -280,7 +285,7 @@ describe('guided workflow engine', () => {
 
     progress = noteWorkflow(progress, 'tape-baseline', '8.002 and 8.006', LATER).progress;
     expect(progress.runs['circle-field-test']?.steps['tape-baseline']).toMatchObject({
-      status: 'complete',
+      status: 'ticked_by_app',
       completedBy: 'auto',
       note: '8.002 and 8.006',
     });
@@ -293,11 +298,18 @@ describe('guided workflow engine', () => {
 
   it('does not tick Save and send until that step is the current one, and a second save is a no-op', () => {
     const early = applyWorkflowEvent(started(), { type: 'cloud.saved' }, NOW);
-    expect(early.runs['circle-field-test']?.steps['save-send']?.status).toBe('pending');
+    expect(early.runs['circle-field-test']?.steps['save-send']?.status).toBe('waiting_for_app');
 
     let progress = started();
-    for (let i = 0; i < 11; i += 1) progress = advanceWorkflow(progress, NOW).progress;
-    expect(progress.runs['circle-field-test']?.currentStepId).toBe('save-send');
+    for (const step of circleFieldTest.steps) {
+      if (step.id === 'save-to-onedrive') {
+        progress = advanceWorkflow(progress, NOW).progress;
+        break;
+      }
+      progress = tickWorkflow(progress, step.id, undefined, NOW).progress;
+      progress = advanceWorkflow(progress, NOW).progress;
+    }
+    expect(progress.runs['circle-field-test']?.currentStepId).toBe('save-to-onedrive');
     const doc = emptyDocument();
     doc.workflowProgress = progress;
     const once = withWorkflowEvent(doc, { type: 'cloud.saved' }, LATER);
@@ -308,15 +320,17 @@ describe('guided workflow engine', () => {
   });
 
   it('resumes after a JSON round trip and parks step ids the sheet no longer has', () => {
-    let progress = tickWorkflow(started(), 'kit', undefined, NOW).progress;
+    let progress = started();
+    progress = advanceWorkflow(progress, NOW).progress;
+    progress = tickWorkflow(progress, 'gather-kit', undefined, NOW).progress;
     progress = advanceWorkflow(progress, NOW).progress;
     const doc = emptyDocument('Field');
     doc.workflowProgress = progress;
     const loaded = normalizeDocument(JSON.parse(JSON.stringify(doc)) as GardenDocument);
     const resumed = resumeWorkflow(readProgress(loaded), 'circle-field-test', LATER).progress;
     const run = resumed.runs['circle-field-test'];
-    expect(run?.steps.kit?.status).toBe('complete');
-    expect(run?.currentStepId).toBe('set-out');
+    expect(run?.steps['gather-kit']?.status).toBe('ticked_by_you');
+    expect(run?.currentStepId).toBe('set-out-circle');
     expect(resumed.activeId).toBe('circle-field-test');
 
     const stale: WorkflowRun = {
@@ -343,11 +357,11 @@ describe('guided workflow engine', () => {
     expect(progress.activeId).toBe('circle-field-test');
     const cleared = doneWorkflow(progress, LATER).progress;
     expect(cleared.activeId).toBeUndefined();
-    expect(cleared.runs['circle-field-test']?.steps.kit?.status).toBe('complete');
+    expect(cleared.runs['circle-field-test']?.steps['gather-kit']?.status).toBe('ticked_by_you');
 
     let walking = advanceWorkflow(started(), NOW).progress;
     walking = backWorkflow(walking, LATER).progress;
-    expect(walking.runs['circle-field-test']?.currentStepId).toBe('kit');
+    expect(walking.runs['circle-field-test']?.currentStepId).toBe('gather-kit');
   });
 
   it('matches tape, item, and confirmed marks on a one-step definition', () => {
@@ -373,7 +387,7 @@ describe('guided workflow engine', () => {
       endB: 'BAS02',
       lengthM: 8,
     }, NOW);
-    expect(taped.steps.tape?.status).toBe('complete');
+    expect(taped.steps.tape?.status).toBe('ticked_by_app');
     const created = reduceRun(def('item', { on: 'item.created', name: 'Circle', geometry: 'circle' }), run('item'), {
       type: 'item.created',
       name: 'circle',
@@ -386,7 +400,7 @@ describe('guided workflow engine', () => {
       { type: 'photo.marksConfirmed', stationId: 'P01', pointLabel: 'STN01 1', objectName: 'STN01', marks: ['A', 'B'] },
       NOW,
     );
-    expect(marked.steps.marks?.status).toBe('complete');
+    expect(marked.steps.marks?.status).toBe('ticked_by_app');
     const detected = reduceRun(
       def('detected', { on: 'markers.detected', stationId: 'STN01', minPhotos: 2 }),
       run('detected'),
@@ -400,7 +414,7 @@ describe('guided workflow engine', () => {
       },
       NOW,
     );
-    expect(detected.steps.detected?.status).toBe('complete');
+    expect(detected.steps.detected?.status).toBe('ticked_by_app');
     expect(detected.steps.detected?.consumedPhotoIds).toEqual(['p1', 'p2']);
   });
 });

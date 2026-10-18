@@ -63,11 +63,11 @@ describe('workflow progress on the garden document', () => {
     gardenCloudUiForTests.edit(doc);
     expect(gardenIsDirty()).toBe(true);
     expect(gardenCloudUiForTests.saveScheduled()).toBe(true);
-    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.currentStepId).toBe('kit');
+    expect(getState().doc.workflowProgress?.runs['circle-field-test']?.currentStepId).toBe('setup');
 
     const round = normalizeDocument(JSON.parse(JSON.stringify(getState().doc)) as GardenDocument);
     expect(round.workflowProgress?.version).toBe(1);
-    expect(round.workflowProgress?.runs['circle-field-test']?.steps.kit?.status).toBe('pending');
+    expect(round.workflowProgress?.runs['circle-field-test']?.steps.kit?.status).toBe('open');
 
     const older = normalizeDocument(emptyDocument('Before workflows'));
     expect(older.workflowProgress).toBeUndefined();

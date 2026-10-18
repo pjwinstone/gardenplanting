@@ -95,9 +95,27 @@ export type WorkflowEvent =
   | { type: 'cloud.saved' }
   | { type: 'manual.tick'; stepId: string; note?: string };
 
+export type WorkflowStepKind = 'user' | 'app' | 'user+app';
+
+export type StepStatus =
+  | 'open'
+  | 'waiting_for_app'
+  | 'ticked_by_you'
+  | 'ticked_by_app'
+  | 'ticked_with_reason'
+  | 'skipped_with_note'
+  | 'evidence_failed'
+  | 'needs_recheck'
+  /** @deprecated migrated in reconcileRun */
+  | 'pending'
+  /** @deprecated migrated in reconcileRun */
+  | 'complete';
+
 export interface WorkflowStep {
   id: string;
   title: string;
+  kind?: WorkflowStepKind;
+  n?: number;
   /** One line on the collapsed bar. */
   instruction: string;
   /** Shown in place of the title once this step has ticked, while it is still current. */
@@ -122,8 +140,9 @@ export interface WorkflowDefinition {
 }
 
 export interface StepState {
-  status: 'pending' | 'complete';
-  completedBy: 'manual' | 'auto' | null;
+  status: StepStatus;
+  /** Legacy mirror for older tests and saves. */
+  completedBy?: 'manual' | 'auto' | null;
   completedAt?: string;
   /** Sleeve R, two baseline pulls, heights. Not a solver field. */
   note?: string;
@@ -131,7 +150,40 @@ export interface StepState {
   seen?: string[];
   /** Photo ids this step already counted. Not reused by another step in the run. */
   consumedPhotoIds?: string[];
+  /** Plain-language reason when evidence_failed or ticked_with_reason. */
+  reason?: string;
 }
+
+export type SetupStatus = 'unconfirmed' | 'confirmed' | 'changed_mid_run';
+
+export interface FieldTestSetupValues {
+  baseline_length_m: number;
+  bas02_from_peg_m: number;
+  circle_diameter_m: number;
+  calibration_distance_m: number;
+  camera_positions: {
+    left: { to_bas01: number; to_bas02: number };
+    right_near: { to_bas01: number; to_bas02: number };
+    right_far: { to_bas01: number; to_bas02: number };
+  };
+  tolerances_mm: {
+    baseline: number;
+    railway: number;
+    flower_bed: number;
+    tree: number;
+    camera_position: number;
+  };
+}
+
+export interface WorkflowRunSetup {
+  status: SetupStatus;
+  values: FieldTestSetupValues;
+  confirmedAt?: string;
+}
+
+export type RunLogEntry =
+  | { at: string; type: 'config.confirmed' }
+  | { at: string; type: 'config.changed'; changes: { key: string; from: unknown; to: unknown }[] };
 
 export interface WorkflowRun {
   workflowId: WorkflowId;
@@ -141,6 +193,9 @@ export interface WorkflowRun {
   startedAt: string;
   updatedAt: string;
   finishedAt?: string;
+  paused?: boolean;
+  setup?: WorkflowRunSetup;
+  runLog?: RunLogEntry[];
   /** Step ids from an older revision. One line in the sheet, not a solver field. */
   parkedStepIds?: string[];
   steps: Record<string, StepState>;

@@ -6,14 +6,16 @@ const none = { to: 'none' } as const;
 
 export const circleFieldTest: WorkflowDefinition = {
   id: 'circle-field-test',
-  revision: 1,
+  revision: 3,
   status: 'ready',
   title: 'Circle field test',
   summary: 'One phone, about an hour. Look from BAS01 toward BAS02. Left is left.',
   steps: [
     {
-      id: 'kit',
-      title: 'Kit',
+      id: 'gather-kit',
+      n: 1,
+      kind: 'user',
+      title: 'Gather the kit',
       instruction: 'Phone, tapes, canes, sleeves, level, and the pole.',
       detail: [
         'One iPhone. Rear camera, zoom 1×, held landscape. Same phone for every photo, including the calibration.',
@@ -26,7 +28,9 @@ export const circleFieldTest: WorkflowDefinition = {
       link: none,
     },
     {
-      id: 'set-out',
+      id: 'set-out-circle',
+      n: 2,
+      kind: 'user',
       title: 'Set out the circle',
       instruction: '4.000 m from the peg, and 4.000 m from the cane before.',
       detail: [
@@ -39,8 +43,10 @@ export const circleFieldTest: WorkflowDefinition = {
       link: none,
     },
     {
-      id: 'diameters',
-      title: 'Check the diameters',
+      id: 'tape-diameters',
+      n: 3,
+      kind: 'user',
+      title: 'Tape the two diameters',
       instruction: 'CRC01–CRC04 and CRC02–CRC05 are 8.000 m.',
       detail: [
         'Tape level, axis to axis, 8.000 m. Both diameters within 20 mm.',
@@ -50,8 +56,10 @@ export const circleFieldTest: WorkflowDefinition = {
       link: none,
     },
     {
-      id: 'place-baseline',
-      title: 'Place BAS02 and BAS01',
+      id: 'place-baseline-points',
+      n: 4,
+      kind: 'user',
+      title: 'Place the baseline points',
       instruction: 'BAS02 is 4.30 m from the peg. BAS01 is 8.000 m from BAS02.',
       detail: [
         'From the peg through CRC01, 4.30 m is BAS02, about 0.30 m past CRC01. Write the distance you taped.',
@@ -64,6 +72,8 @@ export const circleFieldTest: WorkflowDefinition = {
     },
     {
       id: 'tape-baseline',
+      n: 5,
+      kind: 'user+app',
       title: 'Tape the baseline both ways',
       instruction: 'Sleeve to sleeve, level, then add R. Type the mean.',
       detail: [
@@ -88,8 +98,10 @@ export const circleFieldTest: WorkflowDefinition = {
       link: { to: 'menu', section: 'baseline' },
     },
     {
-      id: 'laser-check',
-      title: 'Laser CHK-BASE',
+      id: 'laser-check-baseline',
+      n: 6,
+      kind: 'user',
+      title: 'Laser check of the baseline',
       instruction: 'Same baseline, sleeve to sleeve. Do not type the laser.',
       detail: [
         'Laser the same baseline, sleeve to sleeve, same height. This is CHK-BASE. It is not typed into the app.',
@@ -100,8 +112,10 @@ export const circleFieldTest: WorkflowDefinition = {
       link: none,
     },
     {
-      id: 'plumb',
-      title: 'Plumb and height',
+      id: 'plumb-canes',
+      n: 7,
+      kind: 'user',
+      title: 'Plumb the canes and note heights',
       instruction: 'Bubble every cane. Write the height you measure.',
       detail: [
         'Bubble CRC01–CRC06, BAS01, BAS02, and CAL. Middle of the bubble, about 1°. A 2° lean at 0.5 m sleeve height is 17 mm.',
@@ -113,8 +127,10 @@ export const circleFieldTest: WorkflowDefinition = {
       link: none,
     },
     {
-      id: 'cal',
-      title: 'Calibration CAL',
+      id: 'camera-calibration',
+      n: 8,
+      kind: 'app',
+      title: 'Calibration photo (focal length)',
       instruction: 'Start this run first. Then one still, about 4 m, phone front to paper.',
       detail: [
         'Start this run before you take the calibration photo. A shot from earlier does not count.',
@@ -123,14 +139,16 @@ export const circleFieldTest: WorkflowDefinition = {
         'On iOS, use the in-app camera. Same capture path and lens as the station photos. fx is per lens and per resolution.',
       ],
       noteLabel: 'CAL, phone front to paper',
-      doneTitle: '1 photo saved at CAL',
-      doneInstruction: 'One calibration still is in. Stations are next.',
-      complete: { on: 'photo.uploaded', stationId: 'CAL', minPhotos: 1 },
+      doneTitle: '1 calibration photo saved',
+      doneInstruction: 'One calibration still is in. Camera positions are next.',
+      complete: { on: 'photo.uploaded', stationId: 'Calibration', minPhotos: 1 },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
-      id: 'stn01',
-      title: 'STN01 — left, 8.00 / 8.00',
+      id: 'camera-left',
+      n: 9,
+      kind: 'app',
+      title: 'Camera position Left (8.00 / 8.00)',
       instruction: 'Landscape, 1×. Both ends, and CRC01 to CRC05.',
       detail: [
         'Left, looking from BAS01 toward BAS02. 8.00 m / 8.00 m. Tape from the pole to the sleeve, level, and add R once.',
@@ -139,14 +157,16 @@ export const circleFieldTest: WorkflowDefinition = {
       ],
       diagram: 'stn01',
       noteLabel: 'STN01 to BAS01 / BAS02',
-      doneTitle: '2 photos saved at STN01',
+      doneTitle: '2 photos saved at camera position Left',
       doneInstruction: 'Turn for CRC06. Keep BAS02. Do not step.',
-      complete: { on: 'photo.uploaded', stationId: 'STN01', minPhotos: 2 },
+      complete: { on: 'photo.uploaded', stationId: 'Left', minPhotos: 2 },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
-      id: 'stn02',
-      title: 'STN02 — right, 6.50 / 9.00',
+      id: 'camera-right-near',
+      n: 10,
+      kind: 'app',
+      title: 'Camera position Right near (6.50 / 9.00)',
       instruction: 'Outside the circle. Do not take CRC05. Do not photograph CRC04.',
       detail: [
         'Right. 6.50 m from BAS01, 9.00 m from BAS02, outside the circle.',
@@ -155,14 +175,16 @@ export const circleFieldTest: WorkflowDefinition = {
         'Do not photograph CRC04 from here.',
       ],
       noteLabel: 'STN02 to BAS01 / BAS02',
-      doneTitle: '2 photos saved at STN02',
-      doneInstruction: 'CRC05 and CRC04 stay out of this station.',
-      complete: { on: 'photo.uploaded', stationId: 'STN02', minPhotos: 2 },
+      doneTitle: '2 photos saved at camera position Right near',
+      doneInstruction: 'CRC05 and CRC04 stay out of this position.',
+      complete: { on: 'photo.uploaded', stationId: 'Right near', minPhotos: 2 },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
-      id: 'stn03',
-      title: 'STN03 — right, 10.50 / 10.50',
+      id: 'camera-right-far',
+      n: 11,
+      kind: 'app',
+      title: 'Camera position Right far (10.50 / 10.50)',
       instruction: 'Required. Two stations are not a finished test.',
       detail: [
         'Right. 10.50 m / 10.50 m. This station is required.',
@@ -170,14 +192,16 @@ export const circleFieldTest: WorkflowDefinition = {
         'Photo 2: turn, keep BAS02. Add CRC06, CRC05, CRC04. Do not step.',
       ],
       noteLabel: 'STN03 to BAS01 / BAS02',
-      doneTitle: '2 photos saved at STN03',
+      doneTitle: '2 photos saved at camera position Right far',
       doneInstruction: 'Both stills are in. Save the garden next.',
-      complete: { on: 'photo.uploaded', stationId: 'STN03', minPhotos: 2 },
+      complete: { on: 'photo.uploaded', stationId: 'Right far', minPhotos: 2 },
       link: { to: 'mode', mode: 'ADD_POINT' },
     },
     {
-      id: 'save-send',
-      title: 'Save and send',
+      id: 'save-to-onedrive',
+      n: 12,
+      kind: 'app',
+      title: 'Save to OneDrive',
       instruction: 'Wait until the file is on OneDrive.',
       detail: [
         'New garden if this phone should not keep an older one. Sign in. Version 1 is /Garden Survey/garden-v1.json.',

@@ -9,7 +9,7 @@ Ready. 12 steps.
 
 One phone, about an hour. Look from BAS01 toward BAS02. Left is left.
 
-### 1. Kit
+### 1. Gather the kit
 
 Phone, tapes, canes, sleeves, level, and the pole.
 
@@ -37,7 +37,7 @@ Opens: —.
 
 Diagram: circle-plan.
 
-### 3. Check the diameters
+### 3. Tape the two diameters
 
 CRC01–CRC04 and CRC02–CRC05 are 8.000 m.
 
@@ -48,7 +48,7 @@ Completes when: Tick by hand.
 
 Opens: —.
 
-### 4. Place BAS02 and BAS01
+### 4. Place the baseline points
 
 BAS02 is 4.30 m from the peg. BAS01 is 8.000 m from BAS02.
 
@@ -76,7 +76,7 @@ Opens: Menu → baseline.
 
 Note: Both pulls, level then +R.
 
-### 6. Laser CHK-BASE
+### 6. Laser check of the baseline
 
 Same baseline, sleeve to sleeve. Do not type the laser.
 
@@ -89,7 +89,7 @@ Opens: —.
 
 Note: CHK-BASE laser.
 
-### 7. Plumb and height
+### 7. Plumb the canes and note heights
 
 Bubble every cane. Write the height you measure.
 
@@ -103,7 +103,7 @@ Opens: —.
 
 Note: Heights, sleeve R, plumb.
 
-### 8. Calibration CAL
+### 8. Calibration photo (focal length)
 
 Start this run first. Then one still, about 4 m, phone front to paper.
 
@@ -112,13 +112,13 @@ Start this run first. Then one still, about 4 m, phone front to paper.
 - Tape that, level, write the raw reading. Axis length is the reading plus that sleeve’s R. One still. Name it CAL.
 - On iOS, use the in-app camera. Same capture path and lens as the station photos. fx is per lens and per resolution.
 
-Completes when: photo.uploaded CAL, 1 photo.
+Completes when: photo.uploaded Calibration, 1 photo.
 
 Opens: Mode ADD_POINT.
 
 Note: CAL, phone front to paper.
 
-### 9. STN01 — left, 8.00 / 8.00
+### 9. Camera position Left (8.00 / 8.00)
 
 Landscape, 1×. Both ends, and CRC01 to CRC05.
 
@@ -126,7 +126,7 @@ Landscape, 1×. Both ends, and CRC01 to CRC05.
 - Photo 1: both baseline ends, and CRC01, CRC02, CRC03, CRC04, CRC05. CRC06 does not fit.
 - Photo 2: turn, keep BAS02, add CRC06. Do not step. 1×, landscape, lens over the middle of the pole, then the bubble.
 
-Completes when: photo.uploaded STN01, 2 photos.
+Completes when: photo.uploaded Left, 2 photos.
 
 Opens: Mode ADD_POINT.
 
@@ -134,7 +134,7 @@ Diagram: stn01.
 
 Note: STN01 to BAS01 / BAS02.
 
-### 10. STN02 — right, 6.50 / 9.00
+### 10. Camera position Right near (6.50 / 9.00)
 
 Outside the circle. Do not take CRC05. Do not photograph CRC04.
 
@@ -143,13 +143,13 @@ Outside the circle. Do not take CRC05. Do not photograph CRC04.
 - Photo 2: turn, keep BAS02. Take CRC02, CRC01, CRC06, CRC03. Do not take CRC05. It sits behind CRC03.
 - Do not photograph CRC04 from here.
 
-Completes when: photo.uploaded STN02, 2 photos.
+Completes when: photo.uploaded Right near, 2 photos.
 
 Opens: Mode ADD_POINT.
 
 Note: STN02 to BAS01 / BAS02.
 
-### 11. STN03 — right, 10.50 / 10.50
+### 11. Camera position Right far (10.50 / 10.50)
 
 Required. Two stations are not a finished test.
 
@@ -157,13 +157,13 @@ Required. Two stations are not a finished test.
 - Photo 1: both baseline ends, and CRC01, CRC02, CRC03.
 - Photo 2: turn, keep BAS02. Add CRC06, CRC05, CRC04. Do not step.
 
-Completes when: photo.uploaded STN03, 2 photos.
+Completes when: photo.uploaded Right far, 2 photos.
 
 Opens: Mode ADD_POINT.
 
 Note: STN03 to BAS01 / BAS02.
 
-### 12. Save and send
+### 12. Save to OneDrive
 
 Wait until the file is on OneDrive.
 
