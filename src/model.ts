@@ -249,6 +249,11 @@ export interface Photo {
   /** Calibrated fx / width. Omitted on older photos: the frame is not resected. */
   fxOverWidth?: number;
   clicks: PhotoClick[];
+  /**
+   * Taps that are not bearings, e.g. the calibration sleeve's top and bottom edge
+   * (SLEEVE-TOP / SLEEVE-BOTTOM, preview pixels). The solver does not read these.
+   */
+  measureTaps?: PhotoClick[];
   /** Baseline whose ends were marked in this frame (sighting). */
   sightedBaselineId?: string;
   exifDateTimeOriginal?: string;

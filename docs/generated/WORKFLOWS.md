@@ -111,12 +111,16 @@ Measures the lens. Landscape, 1×, phone 4.0 m from the cane, sleeve in the midd
 - 1. Plumb one sleeved cane (a circle cane will do). Stand with the front of the phone 4.0 m from the paper (the Set-up distance). Tape it level and write the reading.
 - 2. Hold the phone sideways (landscape) at 1×, at sleeve height, level. Cane in the middle of the frame, whole sleeve in view, seam turned away.
 - 3. Tap the sleeve to lock focus, then the shutter. One photo, in the in-app camera (the Take photos pill opens it).
+- After the shutter the photo fills the screen. Pinch to zoom, tap the top edge of the sleeve, then the bottom edge, then Save.
 - Start this run before you take the calibration photo. A shot from earlier does not count.
 - How it works: the sleeve is 287 mm tall. At 4.0 m plus the sleeve’s R it is about 215 px tall, and focal length in px = pixels × distance ÷ 0.287 m.
 
 Completes when: photo.uploaded Calibration, 1 photo.
 
-Opens: Mode ADD_POINT.
+Opens: Camera at Calibration.
+
+Tap after the photo (sleeve height, not bearings):
+- Photo 1: top edge of the sleeve, bottom edge of the sleeve.
 
 Note: Tape reading, phone front to paper (m).
 
@@ -130,7 +134,11 @@ Landscape, 1×. Both ends, and CRC01 to CRC05.
 
 Completes when: photo.uploaded Left, 2 photos.
 
-Opens: Mode ADD_POINT.
+Opens: Camera at Left.
+
+Tap after the photo (bearings):
+- Photo 1: BAS01, BAS02, CRC01 (or Not in view), CRC02 (or Not in view), CRC03 (or Not in view), CRC04 (or Not in view), CRC05 (or Not in view).
+- Photo 2: BAS02, CRC06 (or Not in view).
 
 Diagram: stn01.
 
@@ -147,7 +155,11 @@ Outside the circle. Do not take CRC05. Do not photograph CRC04.
 
 Completes when: photo.uploaded Right near, 2 photos.
 
-Opens: Mode ADD_POINT.
+Opens: Camera at Right near.
+
+Tap after the photo (bearings):
+- Photo 1: BAS01, BAS02.
+- Photo 2: BAS02, CRC02 (or Not in view), CRC01 (or Not in view), CRC06 (or Not in view), CRC03 (or Not in view).
 
 Note: STN02 to BAS01 / BAS02.
 
@@ -161,7 +173,11 @@ Required. Two stations are not a finished test.
 
 Completes when: photo.uploaded Right far, 2 photos.
 
-Opens: Mode ADD_POINT.
+Opens: Camera at Right far.
+
+Tap after the photo (bearings):
+- Photo 1: BAS01, BAS02, CRC01 (or Not in view), CRC02 (or Not in view), CRC03 (or Not in view).
+- Photo 2: BAS02, CRC06 (or Not in view), CRC05 (or Not in view), CRC04 (or Not in view).
 
 Note: STN03 to BAS01 / BAS02.
 

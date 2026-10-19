@@ -54,6 +54,15 @@ function workflowSection(workflow: WorkflowDefinition): string {
     lines.push(`Completes when: ${triggerText(step.complete)}.`);
     lines.push('');
     lines.push(`Opens: ${linkText(step.link)}.`);
+    if (step.photoTaps) {
+      lines.push('');
+      const kind = step.photoTaps.use === 'sleeve-height' ? 'sleeve height, not bearings' : 'bearings';
+      lines.push(`Tap after the photo (${kind}):`);
+      step.photoTaps.photos.forEach((targets, i) => {
+        const names = targets.map((t) => (t.optional ? `${t.label} (or Not in view)` : t.label)).join(', ');
+        lines.push(`- Photo ${i + 1}: ${names}.`);
+      });
+    }
     if (step.diagram) {
       lines.push('');
       lines.push(`Diagram: ${step.diagram}.`);

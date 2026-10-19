@@ -669,7 +669,8 @@ export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toI
     const run: WorkflowRun = { ...pair.run, currentStepId: nextStep.id, updatedAt: now };
     return {
       progress: { ...ticked, runs: { ...ticked.runs, [pair.def.id]: run } },
-      link: nextStep.link,
+      // Roller: Next / Later only move the cursor (net: next, go_on_waiting). The row pill opens the camera.
+      link: roller ? undefined : nextStep.link,
       changed: true,
     };
   }
@@ -680,7 +681,7 @@ export function advanceWorkflow(progress: WorkflowProgress, now = new Date().toI
   const run: WorkflowRun = { ...pair.run, currentStepId: nextStep.id, updatedAt: now };
   return {
     progress: { ...ticked, runs: { ...ticked.runs, [pair.def.id]: run } },
-    link: nextStep.link,
+    link: roller ? undefined : nextStep.link,
     changed: true,
   };
 }

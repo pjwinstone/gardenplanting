@@ -81,6 +81,11 @@ roller.
 **Details sheet.** Opened with **?**. It holds the full title, the instructions, the diagram, the note or
 reason field, and the less common actions as text buttons. Close it with the grabber or by tapping outside.
 
+**Photo tap screen.** After a guided photo, the photo fills the screen and pinch-zooms. One 44 pt bar at the
+bottom names the next point to tap ("Tap the top edge of the sleeve (1 of 2)") with at most two buttons
+(Not in view, Save). Close and Undo are 44 pt round buttons in the top corner. The labels come from the step,
+never a shared A / B / Target default. No header block, no extra rows over the photo.
+
 **Log (observation log / error log).** Entries are listed in the order they happened. **Tap an entry to mark
 it seen**, and tap again to mark it unseen. Seen entries are dimmed. There is no "Mark all seen" or "Clear"
 button. An unseen *error* keeps the menu badge red; info entries never do. Enter or Space toggles the

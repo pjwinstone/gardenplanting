@@ -83,7 +83,28 @@ import {
   renderGuidedChrome,
   workflowNoteChange,
 } from './workflows/guided/guidedChrome';
-import { hydrateWorkflowProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
+import {
+  commitWorkflow,
+  hydrateWorkflowProgress,
+  readProgress,
+  rejectEvidenceWorkflow,
+  withWorkflowEvent,
+  workflowAfterUploadedPhoto,
+} from './workflows/guided/engine';
+import {
+  photoTapPlan,
+  placeTap,
+  saveTapDraft,
+  screenToPhotoPx,
+  skipTap,
+  startTapDraft,
+  tapBarView,
+  undoTap,
+  zoomTapViewAbout,
+  type PhotoTapDraft,
+  type PhotoTapPlan,
+  type TapView,
+} from './workflows/guided/photoTaps';
 import { cameraPositionHint, checkCameraPositionPhoto, ensureCameraPositionPoint } from './workflows/guided/cameraCapture';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
@@ -226,6 +247,14 @@ type MarkDraft = {
 
 /** Working state for the photo-mark overlay (survives re-renders). */
 let markDraft: MarkDraft | null = null;
+
+/**
+ * Guided photo tap screen (field test photo steps). Labels come from the step definition
+ * (photoTaps), not the A / B / Target screen above. Shown while state.markPhotoId is set.
+ */
+let tapDraft: PhotoTapDraft | null = null;
+/** Pinch zoom on the tap screen; reset for each photo. */
+let tapView: TapView = { scale: 1, x: 0, y: 0 };
 
 type Listener = () => void;
 
@@ -502,7 +531,7 @@ function launchNewPointCamera(): void {
  * Roller pill for a camera position step: no layer / point-type chooser. The photo goes on the
  * camera position point (label = camera position name), so the step ticks when it is verified.
  */
-function startCameraPositionCapture(cameraPositionId: string): void {
+function startCameraPositionCapture(cameraPositionId: string, stepId?: string): void {
   const ensured = ensureCameraPositionPoint(state.doc, cameraPositionId);
   if (ensured.doc !== state.doc) setDoc(ensured.doc, null);
   setState({ menuOpen: false, openErrorLog: false, pointDialog: null, refuseMessage: null });
@@ -510,13 +539,18 @@ function startCameraPositionCapture(cameraPositionId: string): void {
   const hint = cameraPositionHint(state.doc, cameraPositionId);
   setCloudMessage(portrait ? `Turn the phone sideways. ${hint}` : hint);
   const take = (file: File) => {
-    void handleCameraPositionCapture(ensured.pointId, cameraPositionId, file);
+    void handleCameraPositionCapture(ensured.pointId, cameraPositionId, file, stepId);
   };
   // The shutter screen is locked to landscape, so the still is wider than tall.
   void beginSurveyCapture(take, { landscape: true, hint });
 }
 
-async function handleCameraPositionCapture(pointId: string, cameraPositionId: string, file: File): Promise<void> {
+async function handleCameraPositionCapture(
+  pointId: string,
+  cameraPositionId: string,
+  file: File,
+  stepId?: string,
+): Promise<void> {
   try {
     if (await rejectIfDng(file)) return;
     const preview = await buildDisplayPreview(file);
@@ -539,6 +573,11 @@ async function handleCameraPositionCapture(pointId: string, cameraPositionId: st
     if (!check.ok) {
       logError(`Camera position ${cameraPositionId}: ${check.message}`, { source: 'photo', severity: 'info' });
       setCloudMessage(check.message);
+      // Net: app_rejects_evidence. Red error with the reason; the row pill reads Retake.
+      if (stepId) {
+        const move = rejectEvidenceWorkflow(readProgress(state.doc), stepId, check.message);
+        if (move.changed) setDoc(commitWorkflow(state.doc, move.progress), null);
+      }
       return;
     }
     logError(`Camera position ${cameraPositionId} photo: ${check.message}`, { source: 'photo', severity: 'info' });
@@ -736,8 +775,10 @@ async function applyAgainPhotoThumb(
     }
     const photoId = result.doc.session.selectedPhotoId;
     setDoc(result.doc, null);
+    // A guided photo step goes straight to its own tap screen; no point dialog behind it.
+    const guided = photoId ? photoTapPlan(result.doc, photoId) : undefined;
     setState({
-      pointDialog: 'inspect',
+      pointDialog: guided ? null : 'inspect',
       pendingPointThumb: null,
       menuOpen: false,
     });
@@ -962,6 +1003,11 @@ async function openPhotoMark(photoId: string): Promise<void> {
     surfaceFail('Photo has no image to mark.', 'photo');
     return;
   }
+  const guided = photoTapPlan(state.doc, photoId);
+  if (guided) {
+    openPhotoTaps(guided);
+    return;
+  }
   const bl = preferredBaseline(state.doc);
   let width = photo.width;
   let height = photo.height;
@@ -1038,7 +1084,60 @@ async function openPhotoMark(photoId: string): Promise<void> {
 
 function closePhotoMark(): void {
   markDraft = null;
+  tapDraft = null;
   setState({ markPhotoId: null });
+}
+
+function openPhotoTaps(plan: PhotoTapPlan): void {
+  const photo = state.doc.photos.find((p) => p.id === plan.photoId);
+  const existing = plan.use === 'sleeve-height' ? photo?.measureTaps : photo?.clicks;
+  tapDraft = startTapDraft(plan, existing ?? []);
+  markDraft = null;
+  tapView = { scale: 1, x: 0, y: 0 };
+  setState({
+    markPhotoId: plan.photoId,
+    menuOpen: false,
+    pointDialog: null,
+    doc: { ...state.doc, session: { ...state.doc.session, selectedPhotoId: plan.photoId } },
+  });
+}
+
+function rerenderTaps(): void {
+  for (const fn of [...listeners]) fn();
+}
+
+function saveGuidedTaps(): void {
+  if (!tapDraft) return;
+  const draft = tapDraft;
+  const saved = saveTapDraft(state.doc, draft);
+  let doc = saved.doc;
+  let message = saved.message;
+  if (draft.plan.use === 'bearings') {
+    // saveTapDraft keeps the tap order, so click i is tap i resolved to the garden's point id.
+    const endA = saved.clicks.find((_, i) => draft.taps[i]?.pointId === 'BAS01')?.pointId;
+    const endB = saved.clicks.find((_, i) => draft.taps[i]?.pointId === 'BAS02')?.pointId;
+    const baseline =
+      endA && endB
+        ? doc.baselines.find((b) => (b.a === endA && b.b === endB) || (b.a === endB && b.b === endA))
+        : undefined;
+    if (saved.hasBothEnds && baseline) {
+      const result = applyPhotoMarks(doc, draft.plan.photoId, saved.clicks, { sightedBaselineId: baseline.id });
+      doc = result.doc;
+      message = result.stationApplied
+        ? `${saved.message} Camera position ${draft.plan.cameraPositionId} placed from BAS01–BAS02.`
+        : `${saved.message} Could not place the camera position yet. Check BAS01 and BAS02 have coordinates.`;
+    } else {
+      doc = {
+        ...doc,
+        photos: doc.photos.map((p) => (p.id === draft.plan.photoId ? { ...p, clicks: saved.clicks } : p)),
+      };
+      if (saved.hasBothEnds) message = `${saved.message} Save the baseline BAS01–BAS02 to place this camera position.`;
+    }
+  }
+  tapDraft = null;
+  setDoc(doc, null);
+  setState({ markPhotoId: null });
+  setCloudMessage(message);
 }
 
 function placeMarkAt(px: number, py: number): void {
@@ -2317,7 +2416,7 @@ function applyWorkflowLink(link: WorkflowLink): void {
     return;
   }
   if (link.to === 'camera') {
-    startCameraPositionCapture(link.cameraPositionId);
+    startCameraPositionCapture(link.cameraPositionId, link.stepId);
     return;
   }
   const file = encodeURIComponent(link.file);
@@ -2548,7 +2647,24 @@ async function onShellClick(e: Event): Promise<void> {
     return;
   }
   if (cmd === 'close-photo-mark') {
+    if (tapDraft) setCloudMessage('Photo kept. Mark it later from the photo.');
     closePhotoMark();
+    return;
+  }
+  if (cmd === 'photo-tap-undo') {
+    if (!tapDraft) return;
+    tapDraft = undoTap(tapDraft);
+    rerenderTaps();
+    return;
+  }
+  if (cmd === 'photo-tap-skip') {
+    if (!tapDraft) return;
+    tapDraft = skipTap(tapDraft);
+    rerenderTaps();
+    return;
+  }
+  if (cmd === 'photo-tap-save') {
+    saveGuidedTaps();
     return;
   }
   if (cmd === 'photo-mark-role') {
@@ -3407,12 +3523,209 @@ function buildSurveyView(): HTMLElement {
     wrap.appendChild(buildMenuDrawer(doc, coach, legal));
   }
 
-  if (state.markPhotoId && markDraft) {
+  if (state.markPhotoId && tapDraft) {
+    wrap.appendChild(buildPhotoTapOverlay(doc));
+  } else if (state.markPhotoId && markDraft) {
     wrap.appendChild(buildPhotoMarkOverlay(doc));
   }
 
   wrap.appendChild(renderGuidedChrome(doc));
   return wrap;
+}
+
+/**
+ * Guided tap screen: the photo fills the screen and pinch-zooms; one compact bar at the bottom
+ * names the next point to tap (from the step definition). Close and Undo float top-left.
+ */
+function buildPhotoTapOverlay(doc: GardenDocument): HTMLElement {
+  const draft = tapDraft!;
+  const photo = doc.photos.find((p) => p.id === draft.plan.photoId);
+  const view = tapBarView(draft);
+  const overlay = el('div', {
+    className: 'photo-tap',
+    attrs: { role: 'dialog', 'aria-label': view.title, 'data-testid': 'photo-tap' },
+  });
+  const stage = el('div', { className: 'photo-tap__stage', attrs: { 'data-testid': 'photo-tap-stage' } });
+  const frame = el('div', { className: 'photo-tap__frame' });
+  // Fit the photo to the screen above the bar; pins are placed in % of this box.
+  frame.style.setProperty('--photo-ar', String(Math.max(1, photo?.width ?? 4) / Math.max(1, photo?.height ?? 3)));
+  if (photo?.thumbnailDataUrl) {
+    const img = document.createElement('img');
+    img.className = 'photo-tap__img';
+    img.src = photo.thumbnailDataUrl;
+    img.alt = view.title;
+    img.draggable = false;
+    frame.appendChild(img);
+  }
+  const layer = el('div', { className: 'photo-tap__layer' });
+  const pw = Math.max(1, photo?.width ?? 1);
+  const ph = Math.max(1, photo?.height ?? 1);
+  for (const tap of draft.taps) {
+    const target = draft.plan.targets.find((t) => t.id === tap.pointId);
+    const pin = el('div', {
+      className: 'photo-tap__pin',
+      attrs: { style: `left:${(tap.px / pw) * 100}%;top:${(tap.py / ph) * 100}%` },
+    });
+    pin.appendChild(el('span', { className: 'photo-tap__pin-label', text: target?.label ?? tap.pointId }));
+    layer.appendChild(pin);
+  }
+  frame.appendChild(layer);
+  stage.appendChild(frame);
+  overlay.appendChild(stage);
+  frame.style.transform = `translate(${tapView.x}px, ${tapView.y}px) scale(${tapView.scale})`;
+  attachTapGestures(stage, frame);
+
+  const corner = el('div', { className: 'photo-tap__corner' });
+  corner.appendChild(
+    el('button', {
+      className: 'photo-tap__round',
+      text: '×',
+      attrs: { type: 'button', 'data-cmd': 'close-photo-mark', 'aria-label': 'Close. Mark this photo later.', 'data-testid': 'photo-tap-close' },
+    }),
+  );
+  corner.appendChild(
+    el('button', {
+      className: 'photo-tap__round',
+      text: '↶',
+      attrs: {
+        type: 'button',
+        'data-cmd': 'photo-tap-undo',
+        'aria-label': 'Undo the last tap',
+        disabled: view.canUndo ? undefined : 'true',
+        'data-testid': 'photo-tap-undo',
+      },
+    }),
+  );
+  overlay.appendChild(corner);
+
+  const bar = el('div', { className: 'photo-tap__bar' });
+  const text = el('div', { className: 'photo-tap__text' });
+  text.appendChild(el('p', { className: 'photo-tap__title', text: view.title }));
+  text.appendChild(el('p', { className: 'photo-tap__prompt', text: view.prompt, attrs: { 'data-testid': 'photo-tap-prompt' } }));
+  bar.appendChild(text);
+  if (view.secondary) {
+    bar.appendChild(
+      el('button', {
+        className: 'photo-tap__btn',
+        text: view.secondary,
+        attrs: { type: 'button', 'data-cmd': 'photo-tap-skip', 'data-testid': 'photo-tap-skip' },
+      }),
+    );
+  }
+  bar.appendChild(
+    el('button', {
+      className: 'photo-tap__btn photo-tap__btn--primary',
+      text: view.primary,
+      attrs: {
+        type: 'button',
+        'data-cmd': 'photo-tap-save',
+        'data-testid': 'photo-tap-save',
+        disabled: view.primaryEnabled ? undefined : 'true',
+      },
+    }),
+  );
+  overlay.appendChild(bar);
+  return overlay;
+}
+
+/** One finger pans (once zoomed), two fingers pinch; a short still tap places the next point. */
+function attachTapGestures(stage: HTMLElement, frame: HTMLElement): void {
+  const pointers = new Map<number, { x: number; y: number }>();
+  let start: { x: number; y: number; viewX: number; viewY: number } | null = null;
+  let pinch: { dist: number; midX: number; midY: number; view: TapView } | null = null;
+  let moved = false;
+  let multi = false;
+  const apply = () => {
+    frame.style.transform = `translate(${tapView.x}px, ${tapView.y}px) scale(${tapView.scale})`;
+  };
+  const local = (x: number, y: number) => {
+    const r = stage.getBoundingClientRect();
+    return { x: x - r.left - r.width / 2, y: y - r.top - r.height / 2 };
+  };
+  stage.addEventListener('pointerdown', (ev: PointerEvent) => {
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    try {
+      stage.setPointerCapture(ev.pointerId);
+    } catch {
+      /* not capturable */
+    }
+    if (pointers.size === 1) {
+      moved = false;
+      multi = false;
+      start = { x: ev.clientX, y: ev.clientY, viewX: tapView.x, viewY: tapView.y };
+      pinch = null;
+    } else if (pointers.size === 2) {
+      multi = true;
+      const [a, b] = [...pointers.values()];
+      const mid = local((a.x + b.x) / 2, (a.y + b.y) / 2);
+      pinch = { dist: Math.hypot(b.x - a.x, b.y - a.y) || 1, midX: mid.x, midY: mid.y, view: { ...tapView } };
+      start = null;
+    }
+  });
+  stage.addEventListener('pointermove', (ev: PointerEvent) => {
+    if (!pointers.has(ev.pointerId)) return;
+    pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pointers.size === 2 && pinch) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      tapView = zoomTapViewAbout(pinch.view, pinch.view.scale * (dist / pinch.dist), pinch.midX, pinch.midY);
+      apply();
+      ev.preventDefault();
+      return;
+    }
+    if (pointers.size === 1 && start) {
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) moved = true;
+      if (moved && tapView.scale > 1) {
+        tapView = { ...tapView, x: start.viewX + dx, y: start.viewY + dy };
+        apply();
+        ev.preventDefault();
+      }
+    }
+  });
+  const end = (ev: PointerEvent) => {
+    if (!pointers.has(ev.pointerId)) return;
+    pointers.delete(ev.pointerId);
+    try {
+      stage.releasePointerCapture(ev.pointerId);
+    } catch {
+      /* already released */
+    }
+    if (ev.type === 'pointerup' && pointers.size === 0 && !moved && !multi && tapDraft) {
+      const img = frame.querySelector('img');
+      const photo = state.doc.photos.find((p) => p.id === tapDraft!.plan.photoId);
+      if (img && photo) {
+        const at = screenToPhotoPx(ev.clientX, ev.clientY, img.getBoundingClientRect(), photo);
+        if (at) {
+          tapDraft = placeTap(tapDraft, at.px, at.py);
+          rerenderTaps();
+          return;
+        }
+      }
+    }
+    if (pointers.size === 1) {
+      const p = pointers.values().next().value!;
+      start = { x: p.x, y: p.y, viewX: tapView.x, viewY: tapView.y };
+      pinch = null;
+    } else if (pointers.size === 0) {
+      start = null;
+      pinch = null;
+    }
+  };
+  stage.addEventListener('pointerup', end);
+  stage.addEventListener('pointercancel', end);
+  stage.addEventListener(
+    'wheel',
+    (ev: WheelEvent) => {
+      ev.preventDefault();
+      const at = local(ev.clientX, ev.clientY);
+      tapView = zoomTapViewAbout(tapView, tapView.scale * (ev.deltaY < 0 ? 1.12 : 1 / 1.12), at.x, at.y);
+      apply();
+    },
+    { passive: false },
+  );
 }
 
 /** Full-screen photo mark UI — suggest white tags, confirm baseline A/B → camera station. */

@@ -323,6 +323,13 @@ ui_only:   # no token moves; listed so every control has a home
   cog_to_setup: "Small cog in the header. Scrolls the roller to step 0 (Set-up). Same as scrolling there by hand. There is no settings screen."
   setup_form:   "When step 0 is current, the compact form replaces the button row (rows of 44 pt fields, Confirm on the right). Long lists (tolerances) open in Details."
   open_details: "Small '?' on the current roller row opens Details: instructions, diagram, note / reason, and the less common actions Tick by hand, Skip with a note, Untick, Pause. Current row only."
+  photo_taps: >
+    After a photo on a camera step the tap screen opens: the photo full-screen (pinch to zoom), one 44 pt bar
+    naming the next point to tap. What to tap comes from the step's photoTaps in definitions.ts, never a shared
+    A / B / Target default. Calibration: top and bottom edge of the sleeve (kept apart from bearings).
+    Camera positions: the baseline ends (required) and the circle canes the step names ('Not in view' allowed).
+    Close (x) keeps the photo; the taps do not gate the step, which still ticks on the verified upload.
+  next_opens_nothing: "Next / Later only move the cursor. Only the row pill opens the camera or Save baseline."
 
 guards:   # proposed src/workflows/guided/guards.ts
   isUserStep:          "(step) => step.kind === 'user' || step.kind === 'user+app'"
