@@ -7,6 +7,12 @@ name: TestFlight
 # If any environment secret is missing the job exits green and says so.
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   workflow_dispatch:
 
 permissions:
