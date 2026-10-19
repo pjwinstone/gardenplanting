@@ -105,18 +105,20 @@ Note: Heights, sleeve R, plumb.
 
 ### 8. Calibration photo (focal length)
 
-Start this run first. Then one still, about 4 m, phone front to paper.
+Measures the lens. Landscape, 1×, phone 4.0 m from the cane, sleeve in the middle.
 
+- What it is for: the app needs the lens’s real focal length in pixels. A sleeve of known size at a taped distance gives it.
+- 1. Plumb one sleeved cane (a circle cane will do). Stand with the front of the phone 4.0 m from the paper (the Set-up distance). Tape it level and write the reading.
+- 2. Hold the phone sideways (landscape) at 1×, at sleeve height, level. Cane in the middle of the frame, whole sleeve in view, seam turned away.
+- 3. Tap the sleeve to lock focus, then the shutter. One photo, in the in-app camera (the Take photos pill opens it).
 - Start this run before you take the calibration photo. A shot from earlier does not count.
-- Before any station. One plumbed cane. Front of the phone about 4.000 m from the paper, between 3 m and 5 m.
-- Tape that, level, write the raw reading. Axis length is the reading plus that sleeve’s R. One still. Name it CAL.
-- On iOS, use the in-app camera. Same capture path and lens as the station photos. fx is per lens and per resolution.
+- How it works: the sleeve is 287 mm tall. At 4.0 m plus the sleeve’s R it is about 215 px tall, and focal length in px = pixels × distance ÷ 0.287 m.
 
 Completes when: photo.uploaded Calibration, 1 photo.
 
 Opens: Mode ADD_POINT.
 
-Note: CAL, phone front to paper.
+Note: Tape reading, phone front to paper (m).
 
 ### 9. Camera position Left (8.00 / 8.00)
 

@@ -207,8 +207,11 @@ describe('iOS identity', () => {
     expect(auth).toContain(IOS_ENTRA_REDIRECT_URI);
     expect(project).toContain(`PRODUCT_BUNDLE_IDENTIFIER = ${IOS_BUNDLE_ID};`);
     const camera = readFileSync('ios/App/App/GardenCameraPlugin.swift', 'utf8');
-    expect(camera).toContain('videoRotationAngleForHorizonLevelCapture');
-    expect(camera).toContain('horizonCoordinator');
+    // Preview and still follow the screen orientation; field-test captures lock it to landscape.
+    expect(camera).toContain('interfaceRotationAngle');
+    expect(camera).toContain('landscapeOnly ? .landscape : .allButUpsideDown');
+    expect(camera).toContain('call.getBool("landscape")');
+    expect(camera).not.toContain('horizonCoordinator(');
     expect(camera).toContain('photoQualityPrioritization = .speed');
     expect(camera).toContain('isAutoRedEyeReductionEnabled = false');
     expect(camera).toContain('isGeometricDistortionCorrectionEnabled = false');
@@ -224,7 +227,9 @@ describe('iOS identity', () => {
       camera.indexOf('func applyPhotoConnectionRotation'),
     );
     expect(preview.indexOf('sessionQueue.async')).toBeGreaterThan(-1);
-    expect(preview.indexOf('sessionQueue.async')).toBeLessThan(preview.indexOf('horizonCoordinator'));
+    // Rotation is read from the screen on main, then handed to sessionQueue for the still.
+    expect(preview.indexOf('previewLayer.connection')).toBeLessThan(preview.indexOf('sessionQueue.async'));
+    expect(preview).toContain('captureRotationAngle = angle');
     expect(auth).toContain('refreshInFlight');
     expect(auth).toContain('refreshWaiters');
     expect(auth).toContain('InteractiveSignIn');

@@ -41,6 +41,9 @@ public class GardenCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             let camera = GardenCameraViewController()
             camera.modalPresentationStyle = .fullScreen
+            // Field-test camera positions and calibration: the still must be landscape.
+            camera.landscapeOnly = call.getBool("landscape") ?? false
+            camera.hintText = call.getString("hint")
             camera.onFinished = { result in
                 presenter.dismiss(animated: true) {
                     switch result {
@@ -84,6 +87,9 @@ fileprivate enum CameraFinish {
 
 final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureDelegate, PHPickerViewControllerDelegate {
     fileprivate var onFinished: ((CameraFinish) -> Void)?
+    /// Lock the camera screen to landscape, so the still is wider than tall.
+    var landscapeOnly = false
+    var hintText: String?
 
     private let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "garden.camera.session")
@@ -105,10 +111,8 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
     private var configuredZoom: CGFloat = 1
     private var pendingExt = "jpg"
     private var pendingMime = "image/jpeg"
-    /// One coordinator for this device and preview. Creating a new one per frame
-    /// reads the angle before the coordinator has tracked the phone.
-    private var horizonRotation: AnyObject?
-    private weak var horizonRotationDevice: AVCaptureDevice?
+    /// Rotation of the still, from the screen orientation. Written on main, read on `sessionQueue`.
+    private var captureRotationAngle: CGFloat = 90
 
     private let hint = UILabel()
     private let shutter = UIButton(type: .custom)
@@ -122,7 +126,7 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
         previewLayer.session = session
         view.layer.addSublayer(previewLayer)
 
-        hint.text = "Tap the stick, then the shutter. Focus and exposure lock on that tap."
+        hint.text = hintText ?? "Tap the stick, then the shutter. Focus and exposure lock on that tap."
         hint.textColor = .white
         hint.numberOfLines = 0
         hint.font = .preferredFont(forTextStyle: .body)
@@ -161,6 +165,21 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
         shutter.layer.cornerRadius = 34
         hint.frame = CGRect(x: 20, y: safe.top + 12, width: view.bounds.width - 40, height: 72)
         updatePreviewOrientation()
+    }
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        landscapeOnly ? .landscape : .allButUpsideDown
+    }
+
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        landscapeOnly ? .landscapeRight : super.preferredInterfaceOrientationForPresentation
+    }
+
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.updatePreviewOrientation()
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -272,67 +291,66 @@ final class GardenCameraViewController: UIViewController, AVCapturePhotoCaptureD
         }
     }
 
-    /// The same coordinator serves the preview and the still. A new device gets a new one.
-    /// Only call this on `sessionQueue`. The preview and the shutter both read it there.
-    @available(iOS 17.0, *)
-    private func horizonCoordinator(for device: AVCaptureDevice) -> AVCaptureDevice.RotationCoordinator {
-        if horizonRotationDevice === device, let existing = horizonRotation as? AVCaptureDevice.RotationCoordinator {
-            return existing
-        }
-        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: previewLayer)
-        horizonRotation = coordinator
-        horizonRotationDevice = device
-        return coordinator
+    /// The screen orientation the user sees. The preview and the still both follow it, so a
+    /// landscape screen gives a landscape preview and a landscape (wider than tall) still.
+    /// Only call this on main.
+    private func interfaceOrientation() -> UIInterfaceOrientation {
+        let scene = view.window?.windowScene?.interfaceOrientation ?? .unknown
+        let wide = view.bounds.width > view.bounds.height
+        if wide && !scene.isLandscape { return .landscapeRight }
+        if !wide && scene.isLandscape { return .portrait }
+        return scene == .unknown ? (wide ? .landscapeRight : .portrait) : scene
     }
 
+    /// Back camera: 0° is landscape right (home side right), 90° portrait.
+    private func interfaceRotationAngle(_ orientation: UIInterfaceOrientation) -> CGFloat {
+        switch orientation {
+        case .landscapeRight: return 0
+        case .landscapeLeft: return 180
+        case .portraitUpsideDown: return 270
+        default: return 90
+        }
+    }
+
+    private func videoOrientation(_ orientation: UIInterfaceOrientation) -> AVCaptureVideoOrientation {
+        switch orientation {
+        case .landscapeRight: return .landscapeRight
+        case .landscapeLeft: return .landscapeLeft
+        case .portraitUpsideDown: return .portraitUpsideDown
+        default: return .portrait
+        }
+    }
+
+    /// Called on main after layout and after a rotation. The RotationCoordinator this replaces
+    /// was created and read on `sessionQueue`, so it never tracked the screen and stayed portrait.
     private func updatePreviewOrientation() {
-        let fallback = fallbackVideoOrientation()
+        let orientation = interfaceOrientation()
+        let angle = interfaceRotationAngle(orientation)
+        if let connection = previewLayer.connection {
+            if #available(iOS 17.0, *), connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            } else if connection.isVideoOrientationSupported {
+                connection.videoOrientation = videoOrientation(orientation)
+            }
+        }
         sessionQueue.async { [weak self] in
-            guard let self else { return }
-            var angle: CGFloat?
-            if #available(iOS 17.0, *), let device = self.device {
-                angle = self.horizonCoordinator(for: device).videoRotationAngleForHorizonLevelPreview
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.applyPreviewRotation(angle: angle, fallback: fallback)
-            }
+            self?.captureRotationAngle = angle
         }
     }
 
-    private func applyPreviewRotation(angle: CGFloat?, fallback: AVCaptureVideoOrientation) {
-        guard let connection = previewLayer.connection else { return }
-        if #available(iOS 17.0, *), let angle, connection.isVideoRotationAngleSupported(angle) {
-            connection.videoRotationAngle = angle
-        } else if connection.isVideoOrientationSupported {
-            connection.videoOrientation = fallback
-        }
-    }
-
-    /// EXIF orientation follows the phone, not a hardcoded portrait preview.
-    /// `shoot()` calls this on `sessionQueue`, which is the only queue that touches the coordinator.
+    /// `shoot()` calls this on `sessionQueue`. The still uses the same angle as the preview.
     private func applyPhotoConnectionRotation() {
         guard let connection = photoOutput.connection(with: .video) else { return }
-        if #available(iOS 17.0, *), let device {
-            let angle = horizonCoordinator(for: device).videoRotationAngleForHorizonLevelCapture
-            if connection.isVideoRotationAngleSupported(angle) {
-                connection.videoRotationAngle = angle
-            }
+        let angle = captureRotationAngle
+        if #available(iOS 17.0, *), connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
         } else if connection.isVideoOrientationSupported {
-            connection.videoOrientation = fallbackVideoOrientation()
-        }
-    }
-
-    /// UIDevice landscape left/right are swapped relative to AVCaptureVideoOrientation.
-    private func fallbackVideoOrientation() -> AVCaptureVideoOrientation {
-        switch UIDevice.current.orientation {
-        case .landscapeLeft:
-            return .landscapeRight
-        case .landscapeRight:
-            return .landscapeLeft
-        case .portraitUpsideDown:
-            return .portraitUpsideDown
-        default:
-            return .portrait
+            switch angle {
+            case 0: connection.videoOrientation = .landscapeRight
+            case 180: connection.videoOrientation = .landscapeLeft
+            case 270: connection.videoOrientation = .portraitUpsideDown
+            default: connection.videoOrientation = .portrait
+            }
         }
     }
 
