@@ -2,11 +2,17 @@ name: TestFlight
 
 # Signing secrets live on the GitHub environment `testflight`, not as
 # repository secrets. That environment is limited to the main branch.
-# This workflow does not run on pull_request and does not run on a push.
-# Dispatch it by hand from main. The job is skipped on any other ref.
+# This workflow does not run on pull_request. It runs on merge to main
+# (push to main) and manually via workflow_dispatch. The job is skipped on any other ref.
 # If any environment secret is missing the job exits green and says so.
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
   workflow_dispatch:
 
 permissions:

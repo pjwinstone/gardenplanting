@@ -238,6 +238,7 @@ describe('iOS identity', () => {
     expect(flight).toContain('if: always()');
     expect(flight).toContain("require('./package.json').version");
     expect(flight).toContain('GITHUB_RUN_NUMBER');
-    expect(flight).not.toMatch(/^\s*push:\s*$/m);
+    expect(flight).toMatch(/^\s*push:\s*$/m);
+    expect(flight).toMatch(/push:\s*\n\s*branches:\s*\n\s*-\s*main/m);
   });
 });
