@@ -238,6 +238,33 @@ export interface PhotoOriginalFile {
   uploadError?: string;
 }
 
+export interface MeasureDetection {
+  /** 'auto': found from the bands and accepted. 'manual': user tapped the edges (detection unsure or unavailable). */
+  method: 'auto' | 'manual';
+  /** Detector confidence 0–1 (0 when it did not run). */
+  confidence: number;
+  /** Full-resolution edge rows and sleeve length along the axis, when detection ran on the original. */
+  topFullPx?: { x: number; y: number };
+  bottomFullPx?: { x: number; y: number };
+  /** Paper-end length, display only (scaled 287/247 from the code). Do not use for fx. */
+  heightFullPx?: number;
+  /** First and last black edge of the 19-band code, from the fitted grid (full-res px). */
+  codeTopFullPx?: { x: number; y: number };
+  codeBottomFullPx?: { x: number; y: number };
+  /** Code length along the axis = 0.247 m on the sleeve. Base the height and fx on this. */
+  codeLengthFullPx?: number;
+  /** Edge RMS about the fitted grid, in bands. */
+  edgeRmsBands?: number;
+  /** Decoded sleeve ID (codebook word). */
+  id?: string;
+  modulePx?: number;
+  upsideDown?: boolean;
+  /** 19 bands as read, top of the photo first. */
+  bits?: string;
+  /** Why detection was not used. */
+  note?: string;
+}
+
 export interface Photo {
   id: string;
   setupId: string;
@@ -254,6 +281,8 @@ export interface Photo {
    * (SLEEVE-TOP / SLEEVE-BOTTOM, preview pixels). The solver does not read these.
    */
   measureTaps?: PhotoClick[];
+  /** How SLEEVE-TOP / SLEEVE-BOTTOM in measureTaps were found (calibration photo). */
+  measureDetection?: MeasureDetection;
   /** Baseline whose ends were marked in this frame (sighting). */
   sightedBaselineId?: string;
   exifDateTimeOriginal?: string;

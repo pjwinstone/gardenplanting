@@ -326,7 +326,18 @@ ui_only:   # no token moves; listed so every control has a home
   photo_taps: >
     After a photo on a camera step the tap screen opens: the photo full-screen (pinch to zoom), one 44 pt bar
     naming the next point to tap. What to tap comes from the step's photoTaps in definitions.ts, never a shared
-    A / B / Target default. Calibration: top and bottom edge of the sleeve (kept apart from bearings).
+    A / B / Target default. Calibration: ONE rough tap on the sleeve. The app (grey box, sleeveDetect.ts)
+    reads the full-size original from IndexedDB, linearises sRGB, finds every band transition at its own local
+    mid-level and fits a uniform grid: code length = 19 x pitch = 0.247 m (this, not the paper, feeds fx).
+    Paper-end lines (17 mm above, 23 mm below the code) are drawn for display only; the user accepts with
+    Save or goes back with Undo. Guard isConfidentSleeve: confidence >= 0.6 (MIN_CONFIDENCE), and hard rejects:
+    payload not one of the 61 codebook words, wrong ID when known, edge RMS > 0.25 band, bands < 7 px.
+    If not (or original gone, or it does not line up with the preview), the bar asks for the top edge then
+    the bottom edge by hand. Stored in photo.measureTaps (SLEEVE, SLEEVE-TOP, SLEEVE-BOTTOM) and
+    photo.measureDetection (method auto/manual, confidence, full-res edges). Kept apart from bearings.
+    The calibration original is kept in IndexedDB after a verified upload (holdUntilMarked) until the
+    sleeve is saved, then deleted as normal (releaseMarkedOriginal).
+    Same principle for future targets: rough tap, the app refines.
     Camera positions: the baseline ends (required) and the circle canes the step names ('Not in view' allowed).
     Close (x) keeps the photo; the taps do not gate the step, which still ticks on the verified upload.
   next_opens_nothing: "Next / Later only move the cursor. Only the row pill opens the camera or Save baseline."

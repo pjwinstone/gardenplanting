@@ -124,13 +124,17 @@ export interface PhotoTapTarget {
 /**
  * What the tap screen asks for after a photo on this step. Labels come from here, never from
  * a shared default.
- * - 'sleeve-height': two taps on one sleeve (top and bottom edge). Not bearings; the solver ignores them.
+ * - 'sleeve-height': one rough tap on the sleeve (SLEEVE); the app finds the top and bottom edge from the
+ *   printed bands (sleeveDetect.ts). Only when it is unsure does it ask for `fallback` (top, then bottom).
+ *   Not bearings; the solver ignores them.
  * - 'bearings': named points (BAS01, CRC03 …). Saved as photo clicks; both baseline ends place the camera position.
  */
 export interface StepPhotoTaps {
   use: 'sleeve-height' | 'bearings';
   /** One list per photo, in the order taken. A photo past the end uses the last list. */
   photos: PhotoTapTarget[][];
+  /** sleeve-height only: manual taps asked for when detection confidence is low. */
+  fallback?: PhotoTapTarget[];
 }
 
 export interface WorkflowStep {

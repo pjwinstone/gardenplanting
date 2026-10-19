@@ -62,6 +62,9 @@ function workflowSection(workflow: WorkflowDefinition): string {
         const names = targets.map((t) => (t.optional ? `${t.label} (or Not in view)` : t.label)).join(', ');
         lines.push(`- Photo ${i + 1}: ${names}.`);
       });
+      if (step.photoTaps.fallback?.length) {
+        lines.push(`- The app finds the edges from the printed bands. Only if it is unsure: ${step.photoTaps.fallback.map((t) => t.label).join(', ')}.`);
+      }
     }
     if (step.diagram) {
       lines.push('');

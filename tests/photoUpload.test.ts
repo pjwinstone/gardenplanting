@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { quickXorHash } from '../src/quickXorHash';
 import { createMemoryPhotoQueue, normalizeQueueAfterRestart, type PhotoQueueRecord } from '../src/photoQueue';
 import { SIMPLE_UPLOAD_MAX_BYTES, parseRetryAfter, uploadAndVerifyOriginal } from '../src/photoUpload';
 import {
+  releaseMarkedOriginal,
   PHOTO_UPLOAD_MAX_ATTEMPTS,
   discardQueuedPhoto,
   drainPhotoQueue,
@@ -170,6 +171,52 @@ describe('drainPhotoQueue', () => {
     expect(manifestBody).toContain('"receivedAt"');
     expect(manifestBody).toContain('"p/scale"');
     expect(manifestBody).toContain(hash);
+  });
+
+  it('keeps a calibration original after upload until its sleeve is marked, then deletes it', async () => {
+    const queue = createMemoryPhotoQueue();
+    const record = { ...queuedRecord(), holdUntilMarked: true };
+    await queue.put(record);
+    const statuses: string[] = [];
+    const clientFetch = scripted([
+      () => json(409, {}),
+      () => json(409, {}),
+      () => json(200, item(bytes.byteLength, hash)),
+      () => json(404, {}),
+      () => json(200, {}, { etag: '"m1"' }),
+    ]).fetch;
+    const failed = await drainPhotoQueue({
+      queue,
+      getToken: async () => 'tok',
+      fetchImpl: clientFetch,
+      now: () => '2026-10-02T23:30:00.000Z',
+      onStatus: (update) => statuses.push(update.status),
+    });
+    expect(failed).toBe(0);
+    expect(statuses).toEqual(['uploading', 'verified']);
+    const kept = await queue.get(record.id);
+    expect(kept).toMatchObject({ status: 'verified', bytesOnDrive: true, holdUntilMarked: true });
+    expect(kept?.blob).toBeDefined();
+    // A later pass does not drop it or upload it again.
+    const getToken = vi.fn(async () => 'tok');
+    expect(await drainPhotoQueue({ queue, getToken, onStatus: () => undefined })).toBe(0);
+    expect(getToken).not.toHaveBeenCalled();
+    expect(await queue.get(record.id)).toBeDefined();
+    // Sleeve marked: deleted as normal.
+    await releaseMarkedOriginal(record.photoId, queue);
+    expect(await queue.list()).toEqual([]);
+  });
+
+  it('marking before the upload finishes clears the hold, so the verified upload deletes as normal', async () => {
+    const queue = createMemoryPhotoQueue();
+    const record = { ...queuedRecord(), holdUntilMarked: true };
+    await queue.put(record);
+    await releaseMarkedOriginal(record.photoId, queue);
+    expect((await queue.get(record.id))?.holdUntilMarked).toBeUndefined();
+    expect((await queue.get(record.id))?.status).toBe('queued');
+    await queue.put({ ...(await queue.get(record.id))!, status: 'verified', bytesOnDrive: true });
+    await drainPhotoQueue({ queue, getToken: async () => null, onStatus: () => undefined });
+    expect(await queue.list()).toEqual([]);
   });
 
   it('does not ask for a token when the queue is empty or every failure is permanent', async () => {
