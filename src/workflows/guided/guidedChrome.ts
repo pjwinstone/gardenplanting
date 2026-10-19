@@ -4,6 +4,15 @@
  */
 
 import type { GardenDocument } from '../../model';
+import {
+  actionPillClass,
+  actionPillCommand,
+  actionPillLabel,
+  actionReasonLine,
+  deriveActionState,
+  doneBlocker,
+  doneBlockerNotice,
+} from './actionNet';
 import { GUIDED_WORKFLOWS, workflowById } from './definitions';
 import { diagramSvg } from './diagrams';
 import {
@@ -35,7 +44,6 @@ import {
 import {
   attachRollerWheel,
   formatCountsLine,
-  primaryActionLabel,
   reasonLine,
   rollerPositionLabel,
   rollerRowIds,
@@ -191,7 +199,16 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-next') move = advanceWorkflow(progress);
   else if (cmd === 'workflow-later') move = advanceWorkflow(progress);
   else if (cmd === 'workflow-back') move = backWorkflow(progress);
-  else if (cmd === 'workflow-done') move = doneWorkflow(progress);
+  else if (cmd === 'workflow-done') {
+    move = doneWorkflow(progress);
+    // Say exactly which step stopped Done and why (top net guard allActionsDone).
+    const def = progress.activeId ? workflowById(progress.activeId) : undefined;
+    const after = move.progress.activeId ? move.progress.runs[move.progress.activeId] : undefined;
+    if (def && after && !after.finishedAt) {
+      const blocker = doneBlocker(doc, def.steps, after);
+      if (blocker && after.currentStepId === blocker.stepId) move = { ...move, notice: doneBlockerNotice(blocker) };
+    }
+  }
   else if (cmd === 'workflow-scroll') move = scrollWorkflowToStep(progress, stepId || '');
   else if (cmd === 'workflow-jump') {
     const kind = source.getAttribute('data-kind') as 'error' | 'warning' | 'open' | 'recheck' | null;
@@ -319,7 +336,9 @@ function renderRollerPanel(
   run: WorkflowRun,
   progress: WorkflowProgress,
 ): HTMLElement {
-  const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive() });
+  // Action states are part of the key: an upload status change must redraw the pill.
+  const actions = def.steps.map((step) => deriveActionState(chromeDoc, run, step));
+  const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive(), actions });
   if (rollerCache && rollerCache.key === key) {
     const cached = rollerCache;
     requestAnimationFrame(() => {
@@ -374,8 +393,16 @@ function renderRollerPanel(
     row.append(title);
     if (stepId === currentId) {
       const step = def.steps.find((item) => item.id === stepId);
-      const pill = step ? primaryActionLabel(step, run) : undefined;
-      if (pill) row.append(button(pill, pill === 'Retake' ? 'workflow-retake' : 'workflow-go', { className: 'roller-pill', step: stepId, testid: 'roller-pill' }));
+      // Pill colour and text come only from the step's action sub-net (action.net.yaml).
+      const action = step ? deriveActionState(chromeDoc, run, step) : undefined;
+      const pill = step && action ? actionPillLabel(step, action) : undefined;
+      if (pill && action) {
+        const node = button(pill, actionPillCommand(action), { className: actionPillClass(action), step: stepId, testid: 'roller-pill' });
+        node.dataset.action = action.place;
+        if (action.photoId) node.dataset.photoId = action.photoId;
+        if (action.place === 'uploading' || action.place === 'done') node.disabled = true;
+        row.append(node);
+      }
       row.append(button('?', 'workflow-expand', { className: 'roller-q', step: stepId }));
     }
     list.append(row);
@@ -480,7 +507,7 @@ function formTile(label: string, key: string, value: string): HTMLElement {
 
 function renderButtonRow(def: WorkflowDefinition, run: WorkflowRun, step: WorkflowStep): HTMLElement {
   const row = el('div', 'roller-act');
-  const hint = el('div', 'roller-hint', reasonLine(def, run, step));
+  const hint = el('div', 'roller-hint', reasonLine(def, run, step) || actionReasonLine(deriveActionState(chromeDoc, run, step)));
   row.append(hint);
   const state = run.steps[step.id];
   const status = normalizeStatus(state?.status ?? 'open');

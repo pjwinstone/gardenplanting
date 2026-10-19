@@ -3,7 +3,7 @@
  */
 
 import { SETUP_STEP_ID } from './fieldTestMeta';
-import { counts, isSettled, normalizeStatus } from './guards';
+import { counts, normalizeStatus } from './guards';
 import type { WorkflowDefinition, WorkflowRun, WorkflowStep } from './types';
 
 const ROW_PX = 44;
@@ -85,20 +85,6 @@ export function reasonLine(_def: WorkflowDefinition, run: WorkflowRun, step: Wor
   if (status === 'ticked_with_reason') return state.reason ?? '';
   if (status === 'skipped_with_note') return state.note ?? '';
   return '';
-}
-
-export function primaryActionLabel(step: WorkflowStep, run: WorkflowRun): string | undefined {
-  const state = run.steps[step.id];
-  const status = normalizeStatus(state?.status ?? 'open');
-  if (status === 'evidence_failed') return 'Retake';
-  if (step.id === 'tape-baseline' && !isSettled(state)) return 'Save baseline';
-  if (step.id === 'save-to-onedrive' && !isSettled(state)) return 'Save';
-  if (needsPhotos(step) && !isSettled(state)) return 'Take photos';
-  return undefined;
-}
-
-function needsPhotos(step: WorkflowStep): boolean {
-  return step.kind === 'app' && step.id.startsWith('camera-');
 }
 
 export function wheelHeightPx(run: WorkflowRun): number {
