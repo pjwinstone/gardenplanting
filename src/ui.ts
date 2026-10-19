@@ -84,6 +84,7 @@ import {
   workflowNoteChange,
 } from './workflows/guided/guidedChrome';
 import { hydrateWorkflowProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
+import { checkCameraPositionPhoto, ensureCameraPositionPoint } from './workflows/guided/cameraCapture';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
   appendPhotoToPoint,
@@ -494,6 +495,53 @@ function launchNewPointCamera(): void {
     void handleNewPointCapture(file);
   };
   void beginSurveyCapture(take);
+}
+
+/**
+ * Roller pill for a camera position step: no layer / point-type chooser. The photo goes on the
+ * camera position point (label = camera position name), so the step ticks when it is verified.
+ */
+function startCameraPositionCapture(cameraPositionId: string): void {
+  const ensured = ensureCameraPositionPoint(state.doc, cameraPositionId);
+  if (ensured.doc !== state.doc) setDoc(ensured.doc, null);
+  setState({ menuOpen: false, openErrorLog: false, pointDialog: null, refuseMessage: null });
+  const portrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+  setCloudMessage(
+    portrait
+      ? `Turn the phone sideways. Camera position ${cameraPositionId} photos are landscape at 1×.`
+      : `Camera position ${cameraPositionId}: landscape at 1× (main lens).`,
+  );
+  const take = (file: File) => {
+    void handleCameraPositionCapture(ensured.pointId, cameraPositionId, file);
+  };
+  void beginSurveyCapture(take);
+}
+
+async function handleCameraPositionCapture(pointId: string, cameraPositionId: string, file: File): Promise<void> {
+  try {
+    if (await rejectIfDng(file)) return;
+    const preview = await buildDisplayPreview(file);
+    let width: number | undefined;
+    let height: number | undefined;
+    try {
+      const nat = await imageNaturalSize(preview.dataUrl);
+      width = nat.width;
+      height = nat.height;
+    } catch {
+      /* unknown size: orientation is reported as unknown */
+    }
+    const check = checkCameraPositionPhoto({ width, height, zoom: nativeCaptureRecordFor(file)?.videoZoomFactor ?? undefined });
+    if (!check.ok) {
+      logError(`Camera position ${cameraPositionId}: ${check.message}`, { source: 'photo', severity: 'info' });
+      setCloudMessage(check.message);
+      return;
+    }
+    logError(`Camera position ${cameraPositionId} photo: ${check.message}`, { source: 'photo', severity: 'info' });
+    await applyAgainPhotoThumb(pointId, preview.dataUrl, file, preview.pixels);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Could not read photo.';
+    surfaceFail(msg, 'photo');
+  }
 }
 
 function launchAgainPhotoCamera(pointId: string): void {
@@ -2260,6 +2308,10 @@ function applyWorkflowLink(link: WorkflowLink): void {
   }
   if (link.to === 'print-tags') {
     setState({ view: 'tags', menuOpen: false });
+    return;
+  }
+  if (link.to === 'camera') {
+    startCameraPositionCapture(link.cameraPositionId);
     return;
   }
   const file = encodeURIComponent(link.file);

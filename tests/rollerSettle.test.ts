@@ -80,7 +80,7 @@ describe('roller settle', () => {
 describe('row pills and Confirm', () => {
   const NOW = '2026-06-01T12:00:00.000Z';
 
-  it('Take photos opens the camera position flow (link), not nothing', () => {
+  it('Take photos opens the camera for that camera position, not the point-type chooser', () => {
     let progress = startWorkflow(emptyProgress(), 'circle-field-test', NOW).progress;
     progress = confirmSetupWorkflow(progress, undefined, NOW).progress;
     progress = scrollWorkflowToStep(progress, 'camera-left', NOW).progress;
@@ -88,7 +88,7 @@ describe('row pills and Confirm', () => {
     const result = handleWorkflowCommand('workflow-go', doc, {
       getAttribute: (name: string) => (name === 'data-step' ? 'camera-left' : null),
     });
-    expect(result.link).toEqual({ to: 'mode', mode: 'ADD_POINT' });
+    expect(result.link).toEqual({ to: 'camera', stepId: 'camera-left', cameraPositionId: 'Left' });
   });
 
   it('Confirm then a settle-and-re-render keeps the new step', () => {

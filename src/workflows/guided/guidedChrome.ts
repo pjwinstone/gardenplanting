@@ -45,6 +45,7 @@ import {
   stateIconClass,
   wheelHeightPx,
 } from './guidedRoller';
+import { cameraCaptureContext, cameraLink } from './cameraCapture';
 import { SETUP_STEP_ID } from './fieldTestMeta';
 import { firstUnsettledStepId, isSettled, normalizeStatus } from './guards';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
@@ -123,6 +124,17 @@ export function workflowNoteChange(doc: GardenDocument, stepId: string, note: st
   return commitWorkflow(doc, move.progress);
 }
 
+/**
+ * Where a row pill goes. Camera position steps open the camera for that camera position
+ * (no layer / point-type chooser); Save baseline opens the baseline save itself.
+ */
+export function pillLink(def: WorkflowDefinition | undefined, stepId: string): WorkflowLink | undefined {
+  const camera = cameraCaptureContext(def, stepId);
+  if (camera) return cameraLink(camera);
+  if (stepId === 'tape-baseline') return { to: 'mode', mode: 'BASELINE' };
+  return undefined;
+}
+
 export function handleWorkflowCommand(
   cmd: string,
   doc: GardenDocument,
@@ -153,11 +165,13 @@ export function handleWorkflowCommand(
     // Row pill (Take photos / Save baseline / Save): open the place in the app that makes the evidence.
     const def = progress.activeId ? workflowById(progress.activeId) : undefined;
     const step = def?.steps.find((item) => item.id === stepId);
+    sheetOpen = false;
+    const link = pillLink(def, stepId);
+    if (link) return { link };
     if (!step?.link || step.link.to === 'none') {
       sheetOpen = true;
       return {};
     }
-    sheetOpen = false;
     return { link: step.link };
   }
   if (cmd === 'workflow-collapse') {
@@ -219,8 +233,8 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-retake') {
     move = retakeEvidenceWorkflow(progress, stepId);
     const def = progress.activeId ? workflowById(progress.activeId) : undefined;
-    const link = def?.steps.find((item) => item.id === stepId)?.link;
-    if (move.changed && link && !move.link) move = { ...move, link };
+    const link = pillLink(def, stepId) ?? def?.steps.find((item) => item.id === stepId)?.link;
+    if (move.changed && link) move = { ...move, link };
   }
   else if (cmd === 'workflow-untick') move = untickWorkflow(progress, stepId);
   else if (cmd === 'workflow-pause') move = pauseWorkflow(progress);
