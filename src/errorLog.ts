@@ -13,6 +13,10 @@ export interface ErrorLogEntry {
   source?: string;
   /** error → red text + can drive ☰ alert; info → default colour, no ☰ red */
   severity?: LogSeverity;
+  /** How many times this identical line fired. Shown as ×N; absent means once. */
+  count?: number;
+  /** First time it fired, when count > 1. `at` is the latest. */
+  firstAt?: string;
 }
 
 const STORAGE_KEY = 'garden-survey:error-log';
@@ -189,10 +193,28 @@ export function logError(
   const msg = (message || 'Unknown error').trim();
   if (!msg) return;
   const severity = opts.severity ?? classifyLogSeverity(msg, opts.source);
+  const text = msg.slice(0, 2000);
+  const repeat = entries.find((e) => e.message === text && e.source === opts.source);
+  if (repeat) {
+    // One row per identical line: bump the count, move it to the top, and show it as new again.
+    const bumped: ErrorLogEntry = {
+      ...repeat,
+      at: new Date().toISOString(),
+      firstAt: repeat.firstAt ?? repeat.at,
+      count: (repeat.count ?? 1) + 1,
+      stack: opts.stack?.slice(0, 4000) ?? repeat.stack,
+      severity,
+    };
+    entries = [bumped, ...entries.filter((e) => e !== repeat)];
+    if (seenIds.delete(repeat.id)) persistSeenIds();
+    persist();
+    notify();
+    return;
+  }
   const entry: ErrorLogEntry = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     at: new Date().toISOString(),
-    message: msg.slice(0, 2000),
+    message: text,
     stack: opts.stack?.slice(0, 4000),
     source: opts.source,
     severity,

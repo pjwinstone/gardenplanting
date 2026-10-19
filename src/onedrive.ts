@@ -9,6 +9,7 @@ import {
 } from './cloudConfig';
 import { acquireGraphToken, acquireGraphTokenSilent } from './msalAuth';
 import { formatGraphFailure, readGraphErrorParts } from './graphErrors';
+import { boundFetch } from './boundFetch';
 import { normalizeDocument } from './model';
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -105,7 +106,7 @@ export async function saveGardenToOneDrive(
   token?: string,
   opts?: SaveGardenOptions,
 ): Promise<CloudSaveResult> {
-  const fetchImpl = opts?.fetchImpl ?? fetch;
+  const fetchImpl = opts?.fetchImpl ?? boundFetch;
   const auth = token ? { ok: true as const, token } : await withToken();
   if (!auth.ok) return { ok: false, error: auth.error };
 
@@ -144,7 +145,7 @@ export async function saveGardenToOneDrive(
 async function loadNamedFile(
   token: string,
   fileName: string,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = boundFetch,
 ): Promise<CloudLoadResult> {
   // Item metadata keeps the eTag. A GET of `:/content` follows a 302 and drops it.
   const select = encodeURIComponent('eTag,lastModifiedDateTime,@microsoft.graph.downloadUrl');
@@ -233,7 +234,7 @@ export async function loadGardenFromOneDrive(
   fileName = getGardenCloudFileName(),
   opts?: { token?: string; fetchImpl?: typeof fetch; exact?: boolean },
 ): Promise<CloudLoadResult> {
-  const fetchImpl = opts?.fetchImpl ?? fetch;
+  const fetchImpl = opts?.fetchImpl ?? boundFetch;
   const auth = opts?.token ? { ok: true as const, token: opts.token } : await withToken();
   if (!auth.ok) return { ok: false, error: auth.error };
 

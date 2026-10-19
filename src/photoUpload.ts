@@ -218,6 +218,7 @@ async function simpleUpload(
   itemPath: string,
   bytes: Uint8Array,
   contentType: string,
+  retried = false,
 ): Promise<
   { ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string; retryAfterMs?: number }
 > {
@@ -231,7 +232,13 @@ async function simpleUpload(
     body: new Blob([bytes], { type: contentType || 'application/octet-stream' }),
   });
   if (res.status === 409) return readExistingAndReturn(client, itemPath);
-  if (!res.ok) return failResponse(res);
+  if (res.status === 404 && !retried) {
+    // The photos folder was moved or deleted after we checked it. Make it again and retry once.
+    const folder = await ensurePhotosFolder(client);
+    if (!folder.ok) return folder;
+    return simpleUpload(client, itemPath, bytes, contentType, true);
+  }
+  if (!res.ok) return failResponse(res, itemPath);
   const remote = await remoteFromResponse(client, itemPath, res);
   if (!remote.ok) return remote;
   return { ok: true, remote: remote.info, existed: false };
@@ -243,6 +250,7 @@ async function sessionUpload(
   fileName: string,
   bytes: Uint8Array,
   chunkBytes = UPLOAD_CHUNK_BYTES,
+  retried = false,
 ): Promise<
   { ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string; retryAfterMs?: number }
 > {
@@ -261,7 +269,7 @@ async function sessionUpload(
     }),
   });
   if (created.status === 409) return readExistingAndReturn(client, itemPath);
-  if (!created.ok) return failResponse(created);
+  if (!created.ok) return failResponse(created, itemPath);
   const session = (await created.json()) as { uploadUrl?: string };
   if (!session.uploadUrl) return { ok: false, error: 'OneDrive did not return an upload session.' };
 
@@ -277,6 +285,10 @@ async function sessionUpload(
       },
       body: new Blob([slice]),
     });
+    if (last.status === 404 && !retried) {
+      // The upload session expired or was dropped. Start a fresh session once.
+      return sessionUpload(client, itemPath, fileName, bytes, chunkBytes, true);
+    }
     const finished = end === bytes.byteLength;
     if (finished) {
       if (!last.ok) return failResponse(last);
@@ -293,12 +305,13 @@ async function sessionUpload(
 
 async function failResponse(
   res: Response,
+  drivePath?: string,
 ): Promise<{ ok: false; error: string; retryAfterMs?: number }> {
   const retryAfterMs =
     res.status === 429 || res.status === 503
       ? parseRetryAfter(res.headers.get('Retry-After'))
       : undefined;
-  return { ok: false, error: await graphError(res), retryAfterMs };
+  return { ok: false, error: await graphError(res, drivePath), retryAfterMs };
 }
 
 function conflictFailUrl(contentUrl: string): string {
@@ -340,7 +353,7 @@ async function fetchRemoteInfo(
   const res = await client.fetch(url, {
     headers: { Authorization: `Bearer ${client.token}` },
   });
-  if (!res.ok) return { ok: false, error: await graphError(res) };
+  if (!res.ok) return { ok: false, error: await graphError(res, itemPath) };
   try {
     const body = (await res.json()) as GraphItem;
     const parsed = parseGraphItem(body);

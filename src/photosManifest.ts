@@ -320,11 +320,20 @@ async function etagFromPut(res: Response): Promise<string> {
   }
 }
 
-export async function graphError(res: Response): Promise<string> {
+export async function graphError(res: Response, drivePath?: string): Promise<string> {
+  let code = '';
+  let message = '';
   try {
     const j = (await res.json()) as { error?: { message?: string; code?: string } };
-    return j.error?.message || j.error?.code || `${res.status}`;
+    code = j.error?.code ?? '';
+    message = j.error?.message ?? '';
   } catch {
-    return res.statusText || `${res.status}`;
+    message = res.statusText || '';
   }
+  if (res.status === 404 || /itemNotFound/i.test(code)) {
+    // Graph's own text ("The object can not be found here.") does not say what was missing.
+    const where = drivePath ? `/${drivePath}` : 'The OneDrive item';
+    return `${where} was not found on OneDrive (HTTP 404${code ? `, ${code}` : ''}). The app will look it up again.`;
+  }
+  return message || code || `${res.status}`;
 }

@@ -6,6 +6,7 @@ import {
   PHOTO_UPLOAD_MAX_ATTEMPTS,
   discardQueuedPhoto,
   drainPhotoQueue,
+  failureRetryNotBefore,
   photoUploadBackoffMs,
   resetPhotoUploadAttempts,
   retryWaitMs,
@@ -547,3 +548,35 @@ function scripted(
   };
   return { token: 'tok', fetch: fetchImpl };
 }
+
+import { callableFetch, boundFetch } from '../src/boundFetch';
+
+describe('fetch kept on an object (Safari Window.fetch rule)', () => {
+  it('calls fetch with window-safe this when used as client.fetch', async () => {
+    const seen: unknown[] = [];
+    const strict = function (this: unknown) {
+      seen.push(this);
+      if (this !== undefined && this !== globalThis) throw new TypeError('Can only call Window.fetch on instances of Window');
+      return Promise.resolve(new Response('ok'));
+    } as unknown as typeof fetch;
+    const original = globalThis.fetch;
+    globalThis.fetch = strict;
+    try {
+      const client = { fetch: boundFetch };
+      await expect(client.fetch('https://example.test')).resolves.toBeInstanceOf(Response);
+      const injected = { fetch: callableFetch(strict) };
+      await expect(injected.fetch('https://example.test')).resolves.toBeInstanceOf(Response);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe('photo upload backoff', () => {
+  it('holds every failure for at least the exponential backoff', () => {
+    const now = Date.parse('2026-06-01T12:00:00.000Z');
+    expect(Date.parse(failureRetryNotBefore(1, undefined, now)) - now).toBe(photoUploadBackoffMs(1));
+    expect(Date.parse(failureRetryNotBefore(3, undefined, now)) - now).toBe(photoUploadBackoffMs(3));
+    expect(Date.parse(failureRetryNotBefore(1, 30_000, now)) - now).toBe(30_000);
+  });
+});
