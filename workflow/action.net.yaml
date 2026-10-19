@@ -10,7 +10,7 @@ revision: 1
 
 places:
   - {id: idle,        colour: grey,  label: "Not started", pill: "Take photos / Save baseline / Save"}
-  - {id: in_progress, colour: blue,  label: "In progress (camera open, or some photos in)", pill: "Photo n of N"}
+  - {id: in_progress, colour: blue,  label: "In progress (camera open, or some photos in)", pill: "Take photo n of N; Mark photo n of N when taken but its tap screen is not saved (reopens it)"}
   - {id: uploading,   colour: grey,  label: "Uploading / verifying on OneDrive", pill: "Uploading… (disabled)"}
   - {id: done,        colour: green, label: "Done (step settled)", pill: "✓ Photos in / ✓ Done (disabled)"}
   - {id: error,       colour: red,   label: "Error, with a plain reason", pill: "Retake (refused) / Retry upload (failed)"}
@@ -37,6 +37,7 @@ guards:   # src/workflows/guided/actionNet.ts ACTION_GUARDS + evidence predicate
   photoRefusedReason:  "Verified but usabilityNote has 'Not usable', or no capture time, or captured before run start."
   uploadFailed:        "photo.originalFile.uploadStatus == failed."
   uploadInFlight:      "uploadStatus queued or uploading."
+  photoMarked:         "photo.tapsSavedAt, or clicks / measureTaps saved. Unmarked photo -> in_progress with markPhotoId."
 
 marking_from_document: >
   The app does not store the sub-net token; deriveActionState(doc, run, step) reads where it is:

@@ -1164,6 +1164,8 @@ function saveGuidedTaps(): void {
     }
   }
   tapDraft = null;
+  const savedAt = new Date().toISOString();
+  doc = { ...doc, photos: doc.photos.map((p) => (p.id === draft.plan.photoId ? { ...p, tapsSavedAt: savedAt } : p)) };
   setDoc(doc, null);
   setState({ markPhotoId: null });
   setCloudMessage(message);

@@ -281,6 +281,8 @@ export interface Photo {
    * (SLEEVE-TOP / SLEEVE-BOTTOM, preview pixels). The solver does not read these.
    */
   measureTaps?: PhotoClick[];
+  /** When the guided tap screen was saved (also with every cane Not in view). */
+  tapsSavedAt?: string;
   /** How SLEEVE-TOP / SLEEVE-BOTTOM in measureTaps were found (calibration photo). */
   measureDetection?: MeasureDetection;
   /** Baseline whose ends were marked in this frame (sighting). */

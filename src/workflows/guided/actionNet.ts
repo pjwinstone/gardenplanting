@@ -43,6 +43,9 @@ export interface ActionState {
   need?: number;
   /** Photos taken so far incl. ones still uploading (pill text "Photo n of N"). */
   taken?: number;
+  /** Taken but its tap screen not saved yet: the pill reads "Mark photo n of N" and reopens it. */
+  markPhotoId?: string;
+  markNumber?: number;
 }
 
 export interface ActionTransition {
@@ -156,6 +159,14 @@ export function deriveActionState(doc: GardenDocument | null | undefined, run: W
       return { place: 'error', recovery: 'retry', photoId: latest.id, reason: `Upload failed: ${err}`, need, have };
     }
   }
+  // Taken but not marked: say so, and let the pill reopen that photo's tap screen.
+  if (step.photoTaps && have < req.need) {
+    const ordered = [...linked].sort((a, b) => receivedMs(a) - receivedMs(b));
+    const index = ordered.findIndex((photo) => !photoMarked(photo));
+    if (index >= 0) {
+      return { place: 'in_progress', need, have, taken: ordered.length, markPhotoId: ordered[index]!.id, markNumber: index + 1 };
+    }
+  }
   const inFlight = linked.filter(uploadInFlight).length;
   // A two-photo step stays usable while photo 1 uploads: the pill offers photo 2.
   if (inFlight > 0 && have + inFlight < req.need) return { place: 'in_progress', need, have, taken: have + inFlight };
@@ -163,6 +174,11 @@ export function deriveActionState(doc: GardenDocument | null | undefined, run: W
   if (have >= req.need) return { place: 'uploading', need, have }; // verified; the app's tick is due
   if (have > 0 || linked.length > 0) return { place: 'in_progress', need, have };
   return { place: 'idle', need, have: 0 };
+}
+
+/** Guard: the photo's tap screen was saved (taps, sleeve marks, or Save with canes Not in view). */
+export function photoMarked(photo: Photo): boolean {
+  return !!photo.tapsSavedAt || (photo.clicks?.length ?? 0) > 0 || (photo.measureTaps?.length ?? 0) > 0;
 }
 
 function receivedMs(photo: Photo): number {
@@ -186,7 +202,9 @@ export function actionPillLabel(step: WorkflowStep, state: ActionState): string 
     case 'idle':
       return base;
     case 'in_progress':
-      return camera && need > 1 ? `Photo ${Math.min((state.taken ?? have) + 1, need)} of ${need}` : base;
+      if (state.markPhotoId) return `Mark photo ${state.markNumber ?? 1} of ${need}`;
+      if (!camera) return base;
+      return need > 1 ? `Take photo ${Math.min((state.taken ?? have) + 1, need)} of ${need}` : 'Take photo';
     case 'uploading':
       return 'Uploading…';
     case 'done':
@@ -199,6 +217,7 @@ export function actionPillLabel(step: WorkflowStep, state: ActionState): string 
 /** data-cmd for the pill. */
 export function actionPillCommand(state: ActionState): string {
   if (state.place === 'error') return state.recovery === 'retry' ? 'photo-upload-retry' : 'workflow-retake';
+  if (state.markPhotoId) return 'open-photo-mark';
   return 'workflow-go';
 }
 
@@ -206,6 +225,7 @@ export function actionPillCommand(state: ActionState): string {
 export function actionReasonLine(state: ActionState): string {
   if (state.place === 'error') return state.reason ?? '';
   if (state.place === 'uploading') return 'Uploading to OneDrive. The step goes green once it is verified.';
+  if (state.markPhotoId) return `Photo ${state.markNumber ?? 1} is taken. Tap the canes and Save (Not in view for any you cannot see).`;
   if (state.place === 'in_progress' && (state.need ?? 1) > 1) {
     const up = (state.taken ?? 0) - (state.have ?? 0);
     return `${state.have ?? 0} of ${state.need} photos in${up > 0 ? `, ${up} uploading` : ''}.`;
