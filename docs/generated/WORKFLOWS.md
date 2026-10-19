@@ -111,7 +111,7 @@ Measures the lens. Landscape, 1×, phone 4.0 m from the cane, sleeve in the midd
 - 1. Plumb one sleeved cane (a circle cane will do). Stand with the front of the phone 4.0 m from the paper (the Set-up distance). Tape it level and write the reading.
 - 2. Hold the phone sideways (landscape) at 1×, at sleeve height, level. Cane in the middle of the frame, whole sleeve in view, seam turned away.
 - 3. Tap the sleeve to lock focus, then the shutter. One photo, in the in-app camera (the Take photos pill opens it).
-- After the shutter the photo fills the screen. Pinch to zoom, tap the top edge of the sleeve, then the bottom edge, then Save.
+- After the shutter the photo fills the screen. Tap once anywhere on the sleeve. The app finds its top and bottom edge from the bands and draws two lines. If they sit on the paper ends, tap Save. If the app is unsure it asks you to tap the top edge, then the bottom edge.
 - Start this run before you take the calibration photo. A shot from earlier does not count.
 - How it works: the sleeve is 287 mm tall. At 4.0 m plus the sleeve’s R it is about 215 px tall, and focal length in px = pixels × distance ÷ 0.287 m.
 
@@ -120,7 +120,8 @@ Completes when: photo.uploaded Calibration, 1 photo.
 Opens: Camera at Calibration.
 
 Tap after the photo (sleeve height, not bearings):
-- Photo 1: top edge of the sleeve, bottom edge of the sleeve.
+- Photo 1: sleeve.
+- The app finds the edges from the printed bands. Only if it is unsure: top edge of the sleeve, bottom edge of the sleeve.
 
 Note: Tape reading, phone front to paper (m).
 

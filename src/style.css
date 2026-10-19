@@ -1793,6 +1793,23 @@ body {
   pointer-events: none;
 }
 
+.photo-tap__edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.photo-tap__edge {
+  stroke: #34c759;
+  stroke-width: 2;
+}
+.photo-tap__axis {
+  stroke: rgba(52, 199, 89, 0.6);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
 .photo-tap__pin {
   position: absolute;
   width: 0;

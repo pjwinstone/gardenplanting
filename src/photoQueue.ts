@@ -54,6 +54,11 @@ export interface PhotoQueueRecord {
   updatedAt: string;
   /** Set once the survey dropped this original. */
   deletedAt?: string;
+  /**
+   * Calibration photo: keep the original after a verified upload until its sleeve is marked
+   * (sleeve detection reads the full-size image). Cleared by releaseMarkedOriginal.
+   */
+  holdUntilMarked?: boolean;
 }
 
 /** Shape written to IndexedDB (no Blob — WebKit-safe). */

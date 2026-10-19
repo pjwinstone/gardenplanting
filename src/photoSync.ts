@@ -182,6 +182,8 @@ export async function rememberOriginalPhoto(
     sessionStartedAt?: string;
     sessionEndedAt?: string;
     nativeCapture?: NativeCaptureRecord;
+    /** Keep the original after upload until the photo's taps are saved (calibration sleeve). */
+    holdUntilMarked?: boolean;
   },
   queue: PhotoQueue = getAppPhotoQueue(),
 ): Promise<OriginalPhotoDraft> {
@@ -190,6 +192,7 @@ export async function rememberOriginalPhoto(
     id: draft.photoId,
     photoId: draft.photoId,
     stationId: draft.stationId,
+    ...(meta.holdUntilMarked ? { holdUntilMarked: true } : {}),
     observationId: draft.observationId,
     fileName: draft.fileName,
     blob: draft.blob,
@@ -288,6 +291,21 @@ export async function resumePhotoUploads(opts: { keepRetryAfter?: boolean } = {}
   if (!active) return;
   await resetPhotoUploadAttempts(active.queue, active.now?.() ?? new Date().toISOString(), opts);
   kickPhotoUploads();
+}
+
+/**
+ * The photo's sleeve has been marked (detection or manual taps saved). Drop the hold: a verified
+ * original is deleted now, one still uploading is deleted as normal once verified.
+ */
+export async function releaseMarkedOriginal(photoId: string, queue: PhotoQueue = getAppPhotoQueue()): Promise<void> {
+  const records = (await queue.list()).filter((record) => record.photoId === photoId && record.holdUntilMarked);
+  for (const record of records) {
+    if (record.status === 'verified') await queue.delete(record.id);
+    else {
+      const { holdUntilMarked: _held, ...rest } = record;
+      await queue.put(rest);
+    }
+  }
 }
 
 /** User tapped Retry. One photo, or every non-permanent failure when photoId is omitted. */
@@ -408,6 +426,7 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
   const listed = await deps.queue.list();
   for (const record of listed) {
     if (record.status !== 'verified') continue;
+    if (record.holdUntilMarked) continue; // calibration original: kept until its sleeve is marked
     await deps.queue.delete(record.id);
     deps.onStatus(statusOf(record, 'verified'));
   }
@@ -468,7 +487,12 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
       if (!(await deps.queue.get(record.id))) continue;
       if (outcome.ok) {
         const done = outcome.record ?? uploading;
-        await deps.queue.delete(record.id);
+        const liveNow = await deps.queue.get(record.id);
+        if (liveNow?.holdUntilMarked) {
+          await deps.queue.put({ ...done, holdUntilMarked: true, status: 'verified', bytesOnDrive: true, updatedAt: deps.now?.() ?? new Date().toISOString() });
+        } else {
+          await deps.queue.delete(record.id);
+        }
         deps.onStatus(statusOf({ ...done, bytesOnDrive: true }, 'verified'));
       } else {
         failed += 1;

@@ -93,6 +93,9 @@ import {
 import {
   photoTapPlan,
   placeTap,
+  applySleeveDetection,
+  beginSleeveDetection,
+  needsSleeveDetection,
   saveTapDraft,
   screenToPhotoPx,
   skipTap,
@@ -104,6 +107,7 @@ import {
   type PhotoTapPlan,
   type TapView,
 } from './workflows/guided/photoTaps';
+import { detectSleeveFromOriginal } from './workflows/guided/sleeveImage';
 import { cameraPositionHint, checkCameraPositionPhoto, ensureCameraPositionPoint } from './workflows/guided/cameraCapture';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
@@ -149,6 +153,7 @@ import {
   startPhotoUploadLoop,
   surveyPhotoIdsForPoint,
   type PhotoStatusUpdate,
+  releaseMarkedOriginal,
 } from './photoSync';
 import {
   completeCloudSignIn,
@@ -837,6 +842,8 @@ async function queueCapturedOriginal(file: File, pixels?: PreviewPixelMap): Prom
       sessionStartedAt: setup?.startedAt,
       sessionEndedAt: setup?.endedAt,
       nativeCapture: nativeCaptureRecordFor(file),
+      // Calibration: sleeve detection needs the full-size original, so keep it until marked.
+      holdUntilMarked: photoTapPlan(state.doc, photoId)?.use === 'sleeve-height' && !photo.measureTaps?.length,
     });
     applyPhotoUploadStatus(statusFromDraft(photoId, draft, file));
     kickPhotoUploads();
@@ -1094,7 +1101,7 @@ function closePhotoMark(): void {
 function openPhotoTaps(plan: PhotoTapPlan): void {
   const photo = state.doc.photos.find((p) => p.id === plan.photoId);
   const existing = plan.use === 'sleeve-height' ? photo?.measureTaps : photo?.clicks;
-  tapDraft = startTapDraft(plan, existing ?? []);
+  tapDraft = startTapDraft(plan, existing ?? [], plan.use === 'sleeve-height' ? photo?.measureDetection : undefined);
   markDraft = null;
   tapView = { scale: 1, x: 0, y: 0 };
   setState({
@@ -1103,6 +1110,22 @@ function openPhotoTaps(plan: PhotoTapPlan): void {
     pointDialog: null,
     doc: { ...state.doc, session: { ...state.doc.session, selectedPhotoId: plan.photoId } },
   });
+}
+
+/** Rough sleeve tap → find the edges on the full-size original, then show them for the user to accept. */
+async function runSleeveDetection(photo: Photo, px: number, py: number): Promise<void> {
+  if (!tapDraft) return;
+  tapDraft = beginSleeveDetection(tapDraft);
+  const photoId = photo.id;
+  let result: Awaited<ReturnType<typeof detectSleeveFromOriginal>>;
+  try {
+    result = await detectSleeveFromOriginal(photo, px, py);
+  } catch {
+    result = { scaleX: 1, scaleY: 1, unavailable: 'Could not read the full-size photo.' };
+  }
+  if (!tapDraft || tapDraft.plan.photoId !== photoId) return;
+  tapDraft = applySleeveDetection(tapDraft, result);
+  rerenderTaps();
 }
 
 function rerenderTaps(): void {
@@ -1141,6 +1164,7 @@ function saveGuidedTaps(): void {
   setDoc(doc, null);
   setState({ markPhotoId: null });
   setCloudMessage(message);
+  if (draft.plan.use === 'sleeve-height') void releaseMarkedOriginal(draft.plan.photoId).catch(() => undefined);
 }
 
 function placeMarkAt(px: number, py: number): void {
@@ -3563,8 +3587,34 @@ function buildPhotoTapOverlay(doc: GardenDocument): HTMLElement {
   const layer = el('div', { className: 'photo-tap__layer' });
   const pw = Math.max(1, photo?.width ?? 1);
   const ph = Math.max(1, photo?.height ?? 1);
+  const det = draft.plan.use === 'sleeve-height' ? draft.detection : undefined;
+  if (det?.state === 'found' && det.top && det.bottom) {
+    // Two short lines across the stick at the detected paper ends, joined by the axis.
+    const half = Math.max(8, Math.abs(det.bottom.py - det.top.py) * 0.18);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'photo-tap__edges');
+    svg.setAttribute('viewBox', `0 0 ${pw} ${ph}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('data-testid', 'photo-tap-edges');
+    const line = (x1: number, y1: number, x2: number, y2: number, cls: string) => {
+      const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      l.setAttribute('x1', String(x1));
+      l.setAttribute('y1', String(y1));
+      l.setAttribute('x2', String(x2));
+      l.setAttribute('y2', String(y2));
+      l.setAttribute('class', cls);
+      l.setAttribute('vector-effect', 'non-scaling-stroke');
+      svg.appendChild(l);
+    };
+    line(det.top.px, det.top.py, det.bottom.px, det.bottom.py, 'photo-tap__axis');
+    line(det.top.px - half, det.top.py, det.top.px + half, det.top.py, 'photo-tap__edge');
+    line(det.bottom.px - half, det.bottom.py, det.bottom.px + half, det.bottom.py, 'photo-tap__edge');
+    layer.appendChild(svg);
+  }
   for (const tap of draft.taps) {
-    const target = draft.plan.targets.find((t) => t.id === tap.pointId);
+    // Once found, the edges are drawn as lines above, not pins.
+    if (det?.state === 'found') continue;
+    const target = [...draft.plan.targets, ...(draft.plan.fallback ?? [])].find((t) => t.id === tap.pointId);
     const pin = el('div', {
       className: 'photo-tap__pin',
       attrs: { style: `left:${(tap.px / pw) * 100}%;top:${(tap.py / ph) * 100}%` },
@@ -3703,6 +3753,7 @@ function attachTapGestures(stage: HTMLElement, frame: HTMLElement): void {
         const at = screenToPhotoPx(ev.clientX, ev.clientY, img.getBoundingClientRect(), photo);
         if (at) {
           tapDraft = placeTap(tapDraft, at.px, at.py);
+          if (needsSleeveDetection(tapDraft)) void runSleeveDetection(photo, at.px, at.py);
           rerenderTaps();
           return;
         }

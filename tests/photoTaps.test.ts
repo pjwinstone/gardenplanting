@@ -17,6 +17,9 @@ import {
   canSaveTaps,
   clampTapZoom,
   nextTapTarget,
+  applySleeveDetection,
+  beginSleeveDetection,
+  needsSleeveDetection,
   photoTapPlan,
   placeTap,
   saveTapDraft,
@@ -73,31 +76,82 @@ describe('tap screen after each guided photo', () => {
     }
   });
 
-  it('calibration asks only for the top and bottom edge of the sleeve', () => {
+  it('calibration asks for one rough tap on the sleeve; confident detection draws the edges to accept', () => {
     const shot = takePhoto(atStep('camera-calibration'), 'camera-calibration');
     const plan = photoTapPlan(shot.doc, shot.photoId)!;
     expect(plan).toMatchObject({ stepId: 'camera-calibration', use: 'sleeve-height', photoNumber: 1, photoCount: 1 });
-    expect(plan.targets.map((t) => t.id)).toEqual(['SLEEVE-TOP', 'SLEEVE-BOTTOM']);
+    expect(plan.targets.map((t) => t.id)).toEqual(['SLEEVE']);
+    expect(plan.fallback?.map((t) => t.id)).toEqual(['SLEEVE-TOP', 'SLEEVE-BOTTOM']);
     let draft = startTapDraft(plan);
     let bar = tapBarView(draft);
-    expect(bar.prompt).toBe('Tap the top edge of the sleeve (1 of 2)');
+    expect(bar.prompt).toBe('Tap once on the sleeve. The app finds its top and bottom edge.');
     expect(bar.title).toBe('Calibration photo (focal length)');
     expect(bar.secondary).toBeUndefined();
     expect(bar.primaryEnabled).toBe(false);
-    expect(skipTap(draft)).toBe(draft); // required: no "Not in view"
+    expect(skipTap(draft)).toBe(draft);
+    draft = placeTap(draft, 320, 220);
+    expect(needsSleeveDetection(draft)).toBe(true);
+    draft = beginSleeveDetection(draft);
+    expect(tapBarView(draft).prompt).toBe('Finding the sleeve edges…');
+    expect(tapBarView(draft).primaryEnabled).toBe(false);
+    expect(placeTap(draft, 5, 5)).toBe(draft); // no taps while finding
+    // Original is 6.3× the 640 px preview.
+    draft = applySleeveDetection(draft, {
+      scaleX: 6.3,
+      scaleY: 6.3,
+      detection: { topY: 1260, bottomY: 1474.2, topX: 2016, bottomX: 2016, heightPx: 214.2, codeTopY: 1272.7, codeBottomY: 1457, codeTopX: 2016, codeBottomX: 2016, codeLengthPx: 184.3, edgeRmsBands: 0.05, id: '315', modulePx: 9.7, upsideDown: false, confidence: 0.95, bits: '1111000110001010101', reasons: [] },
+    });
+    bar = tapBarView(draft);
+    expect(bar.prompt).toMatch(/^Sleeve found/);
+    expect(bar.primaryEnabled).toBe(true);
+    expect(draft.taps.map((t) => t.pointId)).toEqual(['SLEEVE', 'SLEEVE-TOP', 'SLEEVE-BOTTOM']);
+    expect(draft.detection?.top?.py).toBeCloseTo(200, 6);
+    const saved = saveTapDraft(shot.doc, draft);
+    const photo = saved.doc.photos.find((p) => p.id === shot.photoId)!;
+    expect(photo.measureTaps?.map((t) => t.pointId)).toEqual(['SLEEVE', 'SLEEVE-TOP', 'SLEEVE-BOTTOM']);
+    expect(photo.measureDetection).toMatchObject({ method: 'auto', confidence: 0.95, heightFullPx: 214.2, codeLengthFullPx: 184.3, codeTopFullPx: { x: 2016, y: 1272.7 }, id: '315' });
+    expect(photo.clicks).toEqual([]); // not bearings: the solver never sees them
+    expect(saved.message).toMatch(/Code \(247 mm\) is 184 px long/);
+    expect(saved.message).toMatch(/confidence 95%/);
+    // Reopening keeps the accepted edges; Undo goes back to the rough tap.
+    let again = startTapDraft(plan, photo.measureTaps, photo.measureDetection);
+    expect(again.detection?.state).toBe('found');
+    again = undoTap(again);
+    expect(again.taps).toEqual([]);
+    expect(again.detection).toBeUndefined();
+  });
+
+  it('calibration falls back to manual top and bottom taps when detection is unsure', () => {
+    const shot = takePhoto(atStep('camera-calibration'), 'camera-calibration');
+    const plan = photoTapPlan(shot.doc, shot.photoId)!;
+    let draft = beginSleeveDetection(placeTap(startTapDraft(plan), 320, 220));
+    draft = applySleeveDetection(draft, {
+      scaleX: 6.3,
+      scaleY: 6.3,
+      detection: { topY: 1, bottomY: 2, topX: 1, bottomX: 1, heightPx: 1, codeTopY: 1, codeBottomY: 2, codeTopX: 1, codeBottomX: 1, codeLengthPx: 1, edgeRmsBands: 0.5, modulePx: 2, upsideDown: false, confidence: 0.2, bits: '', reasons: ['sync not found'] },
+    });
+    expect(draft.detection?.state).toBe('unsure');
+    expect(tapBarView(draft).prompt).toBe('Not sure of the edges (sync not found). Tap the top edge of the sleeve (1 of 2)');
+    expect(tapBarView(draft).primaryEnabled).toBe(false);
     draft = placeTap(draft, 320, 200);
     expect(tapBarView(draft).prompt).toBe('Tap the bottom edge of the sleeve (2 of 2)');
     draft = placeTap(draft, 320, 234);
-    bar = tapBarView(draft);
-    expect(bar.prompt).toBe('All marked. Tap Save.');
-    expect(bar.primaryEnabled).toBe(true);
-    expect(placeTap(draft, 1, 1)).toBe(draft); // nothing left to tap
+    expect(tapBarView(draft).primaryEnabled).toBe(true);
     expect(sleeveHeightPx(draft.taps)?.previewPx).toBe(34);
+    const undone = undoTap(draft);
+    expect(undone.taps.map((t) => t.pointId)).toEqual(['SLEEVE', 'SLEEVE-TOP']);
     const saved = saveTapDraft(shot.doc, draft);
     const photo = saved.doc.photos.find((p) => p.id === shot.photoId)!;
-    expect(photo.measureTaps?.map((t) => t.pointId)).toEqual(['SLEEVE-TOP', 'SLEEVE-BOTTOM']);
-    expect(photo.clicks).toEqual([]); // not bearings: the solver never sees them
+    expect(photo.measureDetection).toMatchObject({ method: 'manual', confidence: 0.2 });
     expect(saved.message).toMatch(/34 px tall/);
+  });
+
+  it('calibration with no original on the phone asks for manual taps', () => {
+    const shot = takePhoto(atStep('camera-calibration'), 'camera-calibration');
+    const plan = photoTapPlan(shot.doc, shot.photoId)!;
+    let draft = beginSleeveDetection(placeTap(startTapDraft(plan), 320, 220));
+    draft = applySleeveDetection(draft, { scaleX: 1, scaleY: 1, unavailable: 'The full-size photo is no longer on this phone.' });
+    expect(tapBarView(draft).prompt).toMatch(/^The full-size photo is no longer on this phone\. Tap the top edge/);
   });
 
   const camera: Array<[string, string[][]]> = [

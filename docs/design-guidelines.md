@@ -86,6 +86,13 @@ bottom names the next point to tap ("Tap the top edge of the sleeve (1 of 2)") w
 (Not in view, Save). Close and Undo are 44 pt round buttons in the top corner. The labels come from the step,
 never a shared A / B / Target default. No header block, no extra rows over the photo.
 
+**Rough tap, the app refines.** The user never has to hit an exact edge with a finger. On the calibration
+photo they tap once anywhere on the sleeve ("Tap once on the sleeve. The app finds its top and bottom
+edge."). The bar says "Finding the sleeve edges…" while the full-size photo is read, then two short green
+lines mark the paper ends with a dashed axis between them: "Sleeve found. Check the two lines sit on the
+paper ends, then Save. Undo to tap again." Only when the app is unsure does the bar say why and ask for the
+top edge, then the bottom edge, by hand. New target types follow the same pattern.
+
 **Log (observation log / error log).** Entries are listed in the order they happened. **Tap an entry to mark
 it seen**, and tap again to mark it unseen. Seen entries are dimmed. There is no "Mark all seen" or "Clear"
 button. An unseen *error* keeps the menu badge red; info entries never do. Enter or Space toggles the
