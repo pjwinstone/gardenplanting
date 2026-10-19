@@ -12,13 +12,18 @@ import {
 import { suggestedAction, actionLabel, legalActions, type ModeAction } from './modes';
 import { STAGE2_ENTRY_COACH } from './stage2Checklist';
 import { activeBaselineLabel, stickyChipLabel } from './layers';
+import tolerances from '../workflow/tolerances.json';
+import { workflowById } from './workflows/guided/definitions';
+import { readProgress } from './workflows/guided/engine';
+import { isSettled } from './workflows/guided/guards';
 
 /**
  * All coach copy lives here — edit wording without touching the solver.
  */
 
-const RESIDUAL_GOOD_MM = 15;
-const RESIDUAL_USABLE_MM = 50;
+/** Thresholds come from workflow/tolerances.json (shared app configuration). */
+const RESIDUAL_GOOD_MM = tolerances.baselineMm;
+const RESIDUAL_USABLE_MM = tolerances.cameraPositionMm;
 
 const MODE_BANNER: Record<string, string> = {
   MENU: 'MENU',
@@ -78,16 +83,98 @@ export interface CoachLines {
   geometryLine: string | null;
 }
 
+export type VerdictLevel = 'good' | 'usable' | 'bad' | 'none';
+
+export interface CoachVerdict {
+  level: VerdictLevel;
+  /** One plain sentence, or null when there is nothing to judge yet. */
+  text: string | null;
+}
+
+/** Plain name for a point: its label ("Right far"), never a raw id like CAM-RIGHT-FAR. */
+function plainPointName(doc: GardenDocument, pointId: string | undefined): string | undefined {
+  if (!pointId) return undefined;
+  const point = doc.points.find((p) => p.id === pointId);
+  const label = point?.label?.trim();
+  if (label && !/^[A-Z0-9]+(-[A-Z0-9]+)+$/.test(label)) return label;
+  return undefined;
+}
+
+function metresOrMm(abs: number): string {
+  if (abs < 1) return 'under 1 mm';
+  if (abs < 1000) return `${abs.toFixed(0)} mm`;
+  return `${(abs / 1000).toFixed(1)} m`;
+}
+
+function activeGuidedRun(doc: GardenDocument) {
+  const progress = readProgress(doc);
+  const def = progress.activeId ? workflowById(progress.activeId) : undefined;
+  const run = progress.activeId ? progress.runs[progress.activeId] : undefined;
+  if (!def || !run || run.finishedAt || run.paused) return undefined;
+  return { def, run };
+}
+
+/**
+ * THE verdict. Every quality sentence in the coach comes from here, from the last residual
+ * against workflow/tolerances.json: good ≤ baselineMm, usable ≤ cameraPositionMm, else bad.
+ * session.geometryOk can only lower it (false), never make a bad residual look good.
+ */
+export function coachVerdict(doc: GardenDocument): CoachVerdict {
+  const raw = doc.session.lastResidualMm;
+  const has = raw != null && !Number.isNaN(raw);
+  const abs = has ? Math.abs(raw) : 0;
+  let level: VerdictLevel = !has ? (doc.session.geometryOk === false ? 'bad' : 'none')
+    : abs <= RESIDUAL_GOOD_MM ? 'good'
+      : abs <= RESIDUAL_USABLE_MM ? 'usable'
+        : 'bad';
+  if (doc.session.geometryOk === false && level !== 'none') level = 'bad';
+  if (level === 'none') return { level, text: null };
+
+  const guided = activeGuidedRun(doc);
+  const where = plainPointName(doc, doc.session.currentAddPointId);
+  const subject = where ?? 'The last point';
+  if (!has) return { level, text: 'The plan does not fit together yet. Re-measure the baseline or retake a weak photo.' };
+  const off = `${subject} is ${metresOrMm(abs)} off what the other measurements say.`;
+  if (level === 'good') return { level, text: `${off} That is within tolerance.` };
+  if (guided) {
+    const cal = guided.run.steps['camera-calibration'];
+    const calibrated = !!cal && isSettled(cal);
+    const tail = calibrated
+      ? (level === 'usable' ? 'Usable, but check it again from another camera position.' : 'Retake this camera position.')
+      : 'Expected until the lens is calibrated; recheck after calibration.';
+    return { level, text: `${off} ${tail}` };
+  }
+  return {
+    level,
+    text: level === 'usable'
+      ? `${off} Usable, but check the next point.`
+      : `${off} Re-measure before you trust the plan.`,
+  };
+}
+
 export function buildCoach(doc: GardenDocument): CoachLines {
   const mode = doc.session.mode;
+  const verdict = coachVerdict(doc);
+  // During a guided run: the current step's guidance and one quality line. Nothing legacy.
+  const guided = activeGuidedRun(doc);
+  if (guided) {
+    const step = guided.def.steps.find((s) => s.id === guided.run.currentStepId);
+    const body = step
+      ? [`Step ${step.n ?? ''}: ${step.title}.`.replace('Step : ', ''), step.instruction].filter(Boolean)
+      : ['Step 0: Set-up. Check the values, then Confirm.'];
+    return {
+      banner: guided.def.title,
+      body,
+      nextButton: null,
+      nextAction: null,
+      residualLine: null,
+      geometryLine: verdict.text,
+    };
+  }
   const body: string[] = [MODE_COACH[mode] ?? MODE_COACH.START];
 
   if (mode === 'START') {
     body.push(STAGE2_ENTRY_COACH);
-  }
-
-  if (doc.session.lastAction) {
-    body.push(`Last action: ${doc.session.lastAction}.`);
   }
 
   if (mode === 'ADJUST' && doc.observations.length) {
@@ -103,7 +190,7 @@ export function buildCoach(doc: GardenDocument): CoachLines {
     } else {
       const bl = currentBaseline(doc);
       body.push(
-        `Baseline ${bl?.a}–${bl?.b} is set at ${bl?.lengthM.toFixed(3)} m. Geometry is good enough to take a baseline tie.`,
+        `Baseline ${bl?.a}–${bl?.b} is set at ${bl?.lengthM.toFixed(3)} m.${verdict.level === 'bad' ? '' : ' Next, take a baseline tie.'}`,
       );
     }
   }
@@ -156,8 +243,9 @@ export function buildCoach(doc: GardenDocument): CoachLines {
   }
 
   const next = suggestedAction(doc);
-  const residualLine = formatResidualLine(doc.session.lastResidualMm);
-  const geometryLine = formatGeometryLine(doc);
+  // One verdict line. The old residual and geometry lines could contradict each other.
+  const residualLine = null;
+  const geometryLine = verdict.text ?? formatGeometryLine(doc);
 
   const capped = body.length <= 4 ? body : [body[0], body[1], body[body.length - 1]].filter(Boolean);
 
@@ -174,18 +262,15 @@ export function buildCoach(doc: GardenDocument): CoachLines {
 export function formatResidualLine(mm: number | undefined): string | null {
   if (mm == null || Number.isNaN(mm)) return null;
   const abs = Math.abs(mm);
-  const amount =
-    abs < 1 ? 'Last residual: under 1 mm' : `Last residual: ${abs.toFixed(0)} mm`;
-  if (abs < RESIDUAL_GOOD_MM) return `${amount} — good enough to proceed.`;
-  if (abs < RESIDUAL_USABLE_MM) return `${amount} — usable; watch the next Add point.`;
-  return `${amount} — remeasure before you trust the plan.`;
+  const amount = `Last check is ${metresOrMm(abs)} out`;
+  if (abs <= RESIDUAL_GOOD_MM) return `${amount}, within tolerance.`;
+  if (abs <= RESIDUAL_USABLE_MM) return `${amount}. Usable, but check the next point.`;
+  return `${amount}. Re-measure before you trust the plan.`;
 }
 
 export function formatGeometryLine(doc: GardenDocument): string | null {
   const mode = doc.session.mode;
-  if (doc.session.geometryOk === true) {
-    return 'Geometry looks good enough to keep surveying.';
-  }
+  // geometryOk === true alone is never a verdict: coachVerdict owns that (residual vs tolerances).
   if (doc.session.geometryOk === false && (mode === 'ADJUST' || mode === 'REVIEW')) {
     return 'Geometry is not good enough yet — remeasure baseline/edges or retake a weak photo.';
   }
