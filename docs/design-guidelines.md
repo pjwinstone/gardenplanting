@@ -55,6 +55,8 @@ Colour is never the only signal: always pair it with an icon shape and a word.
 in a glass capsule; rows above and below tilt (`rotateX`), shrink and fade.
 - Scrolling moves the current item. That *is* Back, so there is no Back button.
 - Each row shows its number, a state icon and the title.
+- **Action labels start with a verb** (Take photo 2 of 2, Mark photo 2 of 2, Retake, Retry upload, Save baseline).
+  A bare count such as "Photo 2 of 2" reads as finished. Status text on a disabled pill (Uploading…, ✓ Photos in) is a state, not an action.
 - Only the current row carries actions: one contextual pill (Retake, Take photos, Save) and a small **?** that
   opens Details.
 - The header counts (`7 of 12 ticked · 2 warnings · 1 error · 3 open`) are the jump control: tap a count to

@@ -399,7 +399,8 @@ function renderRollerPanel(
       if (pill && action) {
         const node = button(pill, actionPillCommand(action), { className: actionPillClass(action), step: stepId, testid: 'roller-pill' });
         node.dataset.action = action.place;
-        if (action.photoId) node.dataset.photoId = action.photoId;
+        const photoId = action.markPhotoId ?? action.photoId;
+        if (photoId) node.dataset.photoId = photoId;
         if (action.place === 'uploading' || action.place === 'done') node.disabled = true;
         row.append(node);
       }

@@ -132,7 +132,8 @@ describe('action sub-net (workflow/action.net.yaml)', () => {
     const step = circleFieldTest.steps.find((s) => s.id === 'camera-left')!;
     const cases: Array<[ActionState, string, string, string]> = [
       [{ place: 'idle', need: 2, have: 0 }, 'act-idle', 'Take photos', 'workflow-go'],
-      [{ place: 'in_progress', need: 2, have: 1 }, 'act-in_progress', 'Photo 2 of 2', 'workflow-go'],
+      [{ place: 'in_progress', need: 2, have: 1 }, 'act-in_progress', 'Take photo 2 of 2', 'workflow-go'],
+      [{ place: 'in_progress', need: 2, have: 1, markPhotoId: 'ph-2', markNumber: 2 }, 'act-in_progress', 'Mark photo 2 of 2', 'open-photo-mark'],
       [{ place: 'uploading', need: 2, have: 1 }, 'act-uploading', 'Uploading…', 'workflow-go'],
       [{ place: 'done', need: 2, have: 2 }, 'act-done', '✓ Photos in', 'workflow-go'],
       [{ place: 'error', recovery: 'retake', reason: 'x' }, 'act-error', 'Retake', 'workflow-retake'],
@@ -186,15 +187,21 @@ function setStatus(doc: GardenDocument, photoId: string, status: PhotoUploadStat
   return status === 'verified' ? workflowAfterUploadedPhoto(next, photoId, tick()) : next;
 }
 
+/** Tap screen saved (what saveGuidedTaps records). */
+function markTaps(doc: GardenDocument, photoId: string): GardenDocument {
+  return { ...doc, photos: doc.photos.map((p) => (p.id === photoId ? { ...p, tapsSavedAt: tick() } : p)) };
+}
+
 /** Shutter on the in-app camera for this step. Returns the new photo id. */
-function shoot(doc: GardenDocument, stepId: string): { doc: GardenDocument; photoId: string } {
+function shoot(doc: GardenDocument, stepId: string): { doc: GardenDocument; photoId: string; unmarked: GardenDocument } {
   const ensured = ensureCameraPositionPoint(doc, camera(stepId).stationId);
   const now = vi.spyOn(Date, 'now').mockReturnValue(clock += 1000); // unique ph-<ms> id
   const appended = appendPhotoToPoint(ensured.doc, ensured.pointId, { thumbnailDataUrl: 'data:image/jpeg;base64,AAAA', yawOnly: true, width: 4032, height: 3024 });
   now.mockRestore();
   expect(appended.reason).toBeUndefined();
   const photoId = appended.doc.photos.at(-1)!.id;
-  return { doc: setStatus(appended.doc, photoId, 'queued'), photoId };
+  const queued = setStatus(appended.doc, photoId, 'queued');
+  return { doc: markTaps(queued, photoId), photoId, unmarked: queued };
 }
 
 /** One photo through the sub-net: taken → uploading → verified, checking the pill at each place. */
@@ -207,7 +214,7 @@ function photoThrough(doc: GardenDocument, stepId: string, last: boolean): Garde
   expect(action(doc, stepId).place).toBe(inFlight);
   doc = setStatus(doc, shot.photoId, 'uploading');
   expect(action(doc, stepId).place).toBe(inFlight);
-  if (!last && needed > 1) expect(actionPillLabel(step(stepId), action(doc, stepId))).toBe(`Photo ${needed} of ${needed}`);
+  if (!last && needed > 1) expect(actionPillLabel(step(stepId), action(doc, stepId))).toBe(`Take photo ${needed} of ${needed}`);
   doc = setStatus(doc, shot.photoId, 'verified');
   expect(action(doc, stepId).place).toBe(last ? 'done' : 'in_progress');
   return doc;
@@ -239,12 +246,12 @@ describe('field test with every step\'s action sub-net composed', () => {
     expect(done.progress.runs[ID]?.finishedAt).toBeTruthy();
   });
 
-  it('a two-photo step after one photo reads "Photo 2 of 2" (blue), not red', () => {
+  it('a two-photo step after one photo reads "Take photo 2 of 2" (blue), not red', () => {
     let doc = moveTo(fresh(), 'camera-left');
     doc = photoThrough(doc, 'camera-left', false);
     const a = action(doc, 'camera-left');
     expect(a).toMatchObject({ place: 'in_progress', have: 1, need: 2 });
-    expect(actionPillLabel(step('camera-left'), a)).toBe('Photo 2 of 2');
+    expect(actionPillLabel(step('camera-left'), a)).toBe('Take photo 2 of 2');
   });
 
   it('upload failed → red + Retry upload with the reason; a later verify turns it green', () => {
@@ -354,5 +361,47 @@ describe('field test with every step\'s action sub-net composed', () => {
     const before = action(doc, 'camera-calibration');
     doc = commitWorkflow(doc, advanceWorkflow(readProgress(doc), tick()).progress);
     expect(action(doc, 'camera-calibration')).toEqual(before);
+  });
+
+  it('Paul: step 10 after photo 1 says Take photo 2 of 2; photo 2 taken but not marked says Mark photo 2 of 2', () => {
+    let doc = walkToEnd(fresh(), { stopAt: 'camera-right-near' });
+    doc = moveTo(doc, 'camera-right-near');
+    doc = photoThrough(doc, 'camera-right-near', false);
+    let a = action(doc, 'camera-right-near');
+    expect(a).toMatchObject({ place: 'in_progress', have: 1, need: 2 });
+    expect(actionPillLabel(step('camera-right-near'), a)).toBe('Take photo 2 of 2');
+    expect(actionPillCommand(a)).toBe('workflow-go');
+    // Photo 2 taken, tap screen closed without Save.
+    const shot = shoot(doc, 'camera-right-near');
+    doc = shot.unmarked;
+    a = action(doc, 'camera-right-near');
+    expect(a).toMatchObject({ place: 'in_progress', markPhotoId: shot.photoId, markNumber: 2 });
+    expect(actionPillLabel(step('camera-right-near'), a)).toBe('Mark photo 2 of 2');
+    expect(actionPillCommand(a)).toBe('open-photo-mark');
+    // Saved (even with every cane Not in view), then verified: green. Linkage was never the problem.
+    doc = markTaps(doc, shot.photoId);
+    doc = setStatus(doc, shot.photoId, 'uploading');
+    expect(action(doc, 'camera-right-near').place).toBe('uploading');
+    doc = setStatus(doc, shot.photoId, 'verified');
+    expect(action(doc, 'camera-right-near').place).toBe('done');
+    expect(run(doc).steps['camera-right-near']?.status).toBe('ticked_by_app');
+  });
+
+  it('every enabled pill label starts with a verb (design rule)', () => {
+    const verbs = /^(Take|Mark|Retake|Retry|Save)\b/;
+    const states: ActionState[] = [
+      { place: 'idle', need: 2, have: 0 },
+      { place: 'in_progress', need: 2, have: 1 },
+      { place: 'in_progress', need: 1, have: 0 },
+      { place: 'in_progress', need: 2, have: 1, markPhotoId: 'x', markNumber: 2 },
+      { place: 'error', recovery: 'retake', reason: 'r' },
+      { place: 'error', recovery: 'retry', reason: 'r' },
+    ];
+    for (const s of circleFieldTest.steps) {
+      for (const st of states) {
+        const label = actionPillLabel(s, st);
+        if (label) expect(label, `${s.id} ${st.place}`).toMatch(verbs);
+      }
+    }
   });
 });
