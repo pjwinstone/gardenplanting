@@ -167,49 +167,67 @@ export async function setManifestPhotoDeleted(opts: {
 }
 
 /**
- * Item metadata, then the preauthenticated download URL.
- * A GET of `:/content` is not used: Graph responds 302 and the ETag is lost.
+ * Item metadata (eTag), then the body. Graph does not always return the
+ * `@microsoft.graph.downloadUrl` annotation (OneDrive personal can drop it from a `$select`
+ * response), which used to fail every photo with "has no download URL". Without it the body
+ * is read from `:/content` (fetch follows the 302); the eTag still comes from the metadata.
+ * A 0-byte or unreadable manifest is read as empty and overwritten under its eTag.
  */
-async function readManifest(
+export async function readManifest(
   client: GraphRequest,
   manifestPath: string,
 ): Promise<
-  | { ok: true; manifest: PhotosManifest; etag: string }
+  | { ok: true; manifest: PhotosManifest; etag: string; repaired?: string }
   | { ok: false; missing: true }
   | { ok: false; missing?: false; error: string }
 > {
-  const select = encodeURIComponent('eTag,@microsoft.graph.downloadUrl');
-  const metaUrl = `${graphItemUrl(manifestPath)}?$select=${select}`;
-  const res = await client.fetch(metaUrl, {
+  const select = encodeURIComponent('eTag,size,folder,@microsoft.graph.downloadUrl');
+  const res = await client.fetch(`${graphItemUrl(manifestPath)}?$select=${select}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${client.token}` },
   });
   if (res.status === 404) return { ok: false, missing: true };
   if (!res.ok) return { ok: false, error: await graphError(res) };
 
-  let meta: { eTag?: unknown; '@microsoft.graph.downloadUrl'?: unknown };
+  let meta: { eTag?: unknown; size?: unknown; folder?: unknown; '@microsoft.graph.downloadUrl'?: unknown };
   try {
-    meta = (await res.json()) as { eTag?: unknown; '@microsoft.graph.downloadUrl'?: unknown };
+    meta = (await res.json()) as typeof meta;
   } catch {
     return { ok: false, error: 'Could not read photos manifest metadata.' };
   }
+  if (meta.folder) return { ok: false, error: 'photos/manifest.json is a folder on OneDrive. Rename or remove it.' };
   const etag = typeof meta.eTag === 'string' ? meta.eTag : '';
-  const downloadUrl =
-    typeof meta['@microsoft.graph.downloadUrl'] === 'string' ? meta['@microsoft.graph.downloadUrl'] : '';
   if (!etag) {
     return {
       ok: false,
       error: 'photos/manifest.json has no eTag, so it was not overwritten.',
     };
   }
-  if (!downloadUrl) {
-    return { ok: false, error: 'photos/manifest.json has no download URL.' };
-  }
-
-  const bodyRes = await client.fetch(downloadUrl, { method: 'GET' });
+  const empty = (why: string) => ({
+    ok: true as const,
+    manifest: { version: 1 as const, updatedAt: '', photos: [] },
+    etag,
+    repaired: why,
+  });
+  if (meta.size === 0) return empty('photos/manifest.json was empty on OneDrive; it is being rewritten.');
+  const downloadUrl =
+    typeof meta['@microsoft.graph.downloadUrl'] === 'string' ? meta['@microsoft.graph.downloadUrl'] : '';
+  const bodyRes = downloadUrl
+    ? await client.fetch(downloadUrl, { method: 'GET' })
+    : await client.fetch(graphItemUrl(manifestPath, ':/content'), {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${client.token}` },
+      });
   if (!bodyRes.ok) return { ok: false, error: await graphError(bodyRes) };
+  let text = '';
   try {
-    const body = (await bodyRes.json()) as PhotosManifest;
+    text = await bodyRes.text();
+  } catch {
+    return { ok: false, error: 'Could not read photos/manifest.json.' };
+  }
+  if (!text.trim()) return empty('photos/manifest.json was empty on OneDrive; it is being rewritten.');
+  try {
+    const body = JSON.parse(text) as PhotosManifest;
     const manifest: PhotosManifest = {
       version: 1,
       updatedAt: typeof body?.updatedAt === 'string' ? body.updatedAt : '',
@@ -217,7 +235,7 @@ async function readManifest(
     };
     return { ok: true, manifest, etag };
   } catch {
-    return { ok: false, error: 'photos/manifest.json is not valid JSON.' };
+    return empty('photos/manifest.json was not valid JSON; it is being rewritten.');
   }
 }
 

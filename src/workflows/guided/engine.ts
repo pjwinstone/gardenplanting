@@ -569,19 +569,43 @@ export function startWorkflow(progress: WorkflowProgress, id: string, now = new 
   return { progress: next, link: ready.def.steps[0]?.link, changed: true };
 }
 
+/**
+ * Reopening a field-test run (Resume, or Resume after Pause) lands on the first step that is
+ * not green (firstUnsettledStepId), not wherever the cursor was left. A new run starts on
+ * step 0 (freshRun). The one-line banner says where and why, and that Set-up is above.
+ */
+function resumeLanding(def: WorkflowDefinition, run: WorkflowRun): { run: WorkflowRun; notice?: string } {
+  if (!isFieldTestRoller(def)) return { run };
+  const target = firstUnsettledStepId(def, run) ?? def.steps[def.steps.length - 1]!.id;
+  const landed = { ...run, currentStepId: target };
+  if (target === SETUP_STEP_ID) return { run: landed, notice: 'Resumed at step 0, Set-up is not confirmed yet.' };
+  const step = def.steps.find((item) => item.id === target)!;
+  const state = run.steps[target];
+  const status = normalizeStatus(state?.status ?? 'open');
+  const why = !firstUnsettledStepId(def, run)
+    ? 'every step is done'
+    : status === 'evidence_failed'
+      ? `${step.title} has an error`
+      : status === 'needs_recheck'
+        ? `${step.title} needs a re-check`
+        : `${step.title} is the first step not done`;
+  return { run: landed, notice: `Resumed at step ${step.n ?? ''}, ${why}. Scroll up for Set-up.` };
+}
+
 export function resumeWorkflow(progress: WorkflowProgress, id: string, now = new Date().toISOString()): WorkflowMove {
   const ready = readyDef(id);
   if ('error' in ready) return { progress, notice: ready.error, changed: false };
   const existing = progress.runs[ready.def.id];
   if (!existing || existing.finishedAt) return { progress, notice: `${ready.def.title} has nothing to resume.`, changed: false };
-  const run = reconcileRun(ready.def, existing);
+  const landing = resumeLanding(ready.def, reconcileRun(ready.def, existing));
+  const run = landing.run;
   const changed = progress.activeId !== ready.def.id || progressJson({ version: 1, runs: { [id]: run } }) !== progressJson({ version: 1, runs: { [id]: existing } });
   const next: WorkflowProgress = {
     ...progress,
     activeId: ready.def.id,
     runs: { ...progress.runs, [ready.def.id]: changed ? { ...run, paused: false, updatedAt: now } : { ...run, paused: false } },
   };
-  return { progress: next, changed };
+  return { progress: next, notice: landing.notice, changed };
 }
 
 function archivedRun(def: WorkflowDefinition, run: WorkflowRun, now: string): WorkflowPastRun {
@@ -1174,9 +1198,11 @@ export function resumePausedWorkflow(progress: WorkflowProgress, id: string, now
   if ('error' in ready) return { progress, notice: ready.error, changed: false };
   const existing = progress.runs[ready.def.id];
   if (!existing || existing.finishedAt) return { progress, notice: `${ready.def.title} has nothing to resume.`, changed: false };
-  const run: WorkflowRun = { ...reconcileRun(ready.def, existing), paused: false, updatedAt: now };
+  const landing = resumeLanding(ready.def, reconcileRun(ready.def, existing));
+  const run: WorkflowRun = { ...landing.run, paused: false, updatedAt: now };
   return {
     progress: { ...progress, activeId: ready.def.id, runs: { ...progress.runs, [ready.def.id]: run } },
+    notice: landing.notice,
     changed: true,
   };
 }
