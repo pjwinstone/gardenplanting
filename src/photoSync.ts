@@ -296,9 +296,13 @@ export async function retryPhotoUpload(photoId?: string): Promise<void> {
   if (!active) return;
   const now = active.now?.() ?? new Date().toISOString();
   const records = await active.queue.list();
-  for (const record of records) {
+  for (let record of records) {
     if (photoId && record.photoId !== photoId) continue;
-    if (record.permanent) continue;
+    // A size mismatch that gave up is held as permanent so it stops auto-retrying,
+    // but a tap on Retry may try it again. Hash mismatches stay permanent.
+    const retryableByHand = isSizeMismatchGiveUp(record.lastError);
+    if (record.permanent && !retryableByHand) continue;
+    if (retryableByHand && record.permanent) record = { ...record, permanent: false, status: 'failed' };
     if (record.status !== 'failed' && record.status !== 'queued' && record.status !== 'retire') continue;
     await active.queue.put({
       ...record,
@@ -310,6 +314,10 @@ export async function retryPhotoUpload(photoId?: string): Promise<void> {
     });
   }
   kickPhotoUploads();
+}
+
+export function isSizeMismatchGiveUp(error: string | undefined): boolean {
+  return Boolean(error && /^Size mismatch/.test(error) && /Gave up after/.test(error));
 }
 
 export function kickPhotoUploads(): void {
