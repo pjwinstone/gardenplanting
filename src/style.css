@@ -1744,6 +1744,180 @@ body {
   line-height: 1.25;
 }
 
+/* Guided photo tap screen (field test). Photo fills the screen above one 44 pt bar.
+   Spacing per docs/design-guidelines.md: 4 pt gaps, 44 pt targets, no extra rows. */
+.photo-tap {
+  --tap-bar: 44px;
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: #000;
+  color: #f6f1e6;
+  font-family: -apple-system, 'SF Pro Text', 'Source Sans 3', system-ui, sans-serif;
+}
+
+.photo-tap__stage {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: calc(var(--tap-bar) + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.photo-tap__frame {
+  position: relative;
+  line-height: 0;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+.photo-tap__img {
+  display: block;
+  width: min(100vw, calc((100vh - var(--tap-bar) - env(safe-area-inset-bottom, 0px)) * var(--photo-ar, 1.333)));
+  width: min(100vw, calc((100dvh - var(--tap-bar) - env(safe-area-inset-bottom, 0px)) * var(--photo-ar, 1.333)));
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.photo-tap__layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.photo-tap__pin {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.photo-tap__pin::before,
+.photo-tap__pin::after {
+  content: '';
+  position: absolute;
+  background: #ffd400;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.6);
+}
+
+.photo-tap__pin::before {
+  left: -8px;
+  top: -0.5px;
+  width: 16px;
+  height: 1px;
+}
+
+.photo-tap__pin::after {
+  left: -0.5px;
+  top: -8px;
+  width: 1px;
+  height: 16px;
+}
+
+.photo-tap__pin-label {
+  position: absolute;
+  left: 6px;
+  top: -18px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.65);
+  color: #ffd400;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.photo-tap__corner {
+  position: absolute;
+  top: max(4px, env(safe-area-inset-top, 0px));
+  left: max(4px, env(safe-area-inset-left, 0px));
+  display: flex;
+  gap: 8px;
+}
+
+.photo-tap__round {
+  width: 44px;
+  height: 44px;
+  border-radius: 22px;
+  border: 1px solid rgb(255 255 255 / 0.8);
+  background: rgb(0 0 0 / 0.45);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+}
+
+.photo-tap__round:disabled {
+  opacity: 0.35;
+}
+
+.photo-tap__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--tap-bar);
+  padding: 0 max(8px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(8px, env(safe-area-inset-left, 0px));
+  box-sizing: content-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgb(20 20 20 / 0.92);
+}
+
+.photo-tap__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.photo-tap__title {
+  margin: 0;
+  font-size: 12px;
+  color: rgb(246 241 230 / 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-tap__prompt {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.photo-tap__btn {
+  flex: 0 0 auto;
+  height: 44px;
+  min-width: 44px;
+  padding: 0 16px;
+  border-radius: 22px;
+  border: 1px solid rgb(255 255 255 / 0.8);
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.photo-tap__btn--primary {
+  border: none;
+  background: #1f6feb;
+}
+
+.photo-tap__btn:disabled {
+  opacity: 0.4;
+}
+
 .point-dialog__thumb {
   position: relative;
 }

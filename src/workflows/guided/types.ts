@@ -113,6 +113,26 @@ export type StepStatus =
   /** @deprecated migrated in reconcileRun */
   | 'complete';
 
+/** One point to tap on a photo after capture. `id` is what is stored; `label` is shown. */
+export interface PhotoTapTarget {
+  id: string;
+  label: string;
+  /** Can be passed with "Not in view". Required targets must be tapped before Save. */
+  optional?: boolean;
+}
+
+/**
+ * What the tap screen asks for after a photo on this step. Labels come from here, never from
+ * a shared default.
+ * - 'sleeve-height': two taps on one sleeve (top and bottom edge). Not bearings; the solver ignores them.
+ * - 'bearings': named points (BAS01, CRC03 …). Saved as photo clicks; both baseline ends place the camera position.
+ */
+export interface StepPhotoTaps {
+  use: 'sleeve-height' | 'bearings';
+  /** One list per photo, in the order taken. A photo past the end uses the last list. */
+  photos: PhotoTapTarget[][];
+}
+
 export interface WorkflowStep {
   id: string;
   title: string;
@@ -130,6 +150,8 @@ export interface WorkflowStep {
   noteLabel?: string;
   complete: WorkflowTrigger;
   link: WorkflowLink;
+  /** Photo steps only: what to tap on each photo after capture. */
+  photoTaps?: StepPhotoTaps;
 }
 
 export interface WorkflowDefinition {

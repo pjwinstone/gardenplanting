@@ -1,8 +1,13 @@
 /** Circle field test and marker fitting, plus the two later rows. */
 
-import type { WorkflowDefinition } from './types';
+import type { PhotoTapTarget, StepPhotoTaps, WorkflowDefinition } from './types';
 
 const none = { to: 'none' } as const;
+
+/** Baseline ends must be tapped (they place the camera position); circle canes can be "Not in view". */
+const end = (id: string): PhotoTapTarget => ({ id, label: id });
+const cane = (id: string): PhotoTapTarget => ({ id, label: id, optional: true });
+const bearings = (...photos: PhotoTapTarget[][]): StepPhotoTaps => ({ use: 'bearings', photos });
 
 export const circleFieldTest: WorkflowDefinition = {
   id: 'circle-field-test',
@@ -137,6 +142,7 @@ export const circleFieldTest: WorkflowDefinition = {
         '1. Plumb one sleeved cane (a circle cane will do). Stand with the front of the phone 4.0 m from the paper (the Set-up distance). Tape it level and write the reading.',
         '2. Hold the phone sideways (landscape) at 1×, at sleeve height, level. Cane in the middle of the frame, whole sleeve in view, seam turned away.',
         '3. Tap the sleeve to lock focus, then the shutter. One photo, in the in-app camera (the Take photos pill opens it).',
+        'After the shutter the photo fills the screen. Pinch to zoom, tap the top edge of the sleeve, then the bottom edge, then Save.',
         'Start this run before you take the calibration photo. A shot from earlier does not count.',
         'How it works: the sleeve is 287 mm tall. At 4.0 m plus the sleeve’s R it is about 215 px tall, and focal length in px = pixels × distance ÷ 0.287 m.',
       ],
@@ -144,7 +150,14 @@ export const circleFieldTest: WorkflowDefinition = {
       doneTitle: '1 calibration photo saved',
       doneInstruction: 'One calibration still is in. Camera positions are next.',
       complete: { on: 'photo.uploaded', stationId: 'Calibration', minPhotos: 1 },
-      link: { to: 'mode', mode: 'ADD_POINT' },
+      link: { to: 'camera', stepId: 'camera-calibration', cameraPositionId: 'Calibration' },
+      photoTaps: {
+        use: 'sleeve-height',
+        photos: [[
+          { id: 'SLEEVE-TOP', label: 'top edge of the sleeve' },
+          { id: 'SLEEVE-BOTTOM', label: 'bottom edge of the sleeve' },
+        ]],
+      },
     },
     {
       id: 'camera-left',
@@ -162,7 +175,11 @@ export const circleFieldTest: WorkflowDefinition = {
       doneTitle: '2 photos saved at camera position Left',
       doneInstruction: 'Turn for CRC06. Keep BAS02. Do not step.',
       complete: { on: 'photo.uploaded', stationId: 'Left', minPhotos: 2 },
-      link: { to: 'mode', mode: 'ADD_POINT' },
+      link: { to: 'camera', stepId: 'camera-left', cameraPositionId: 'Left' },
+      photoTaps: bearings(
+        [end('BAS01'), end('BAS02'), cane('CRC01'), cane('CRC02'), cane('CRC03'), cane('CRC04'), cane('CRC05')],
+        [end('BAS02'), cane('CRC06')],
+      ),
     },
     {
       id: 'camera-right-near',
@@ -180,7 +197,11 @@ export const circleFieldTest: WorkflowDefinition = {
       doneTitle: '2 photos saved at camera position Right near',
       doneInstruction: 'CRC05 and CRC04 stay out of this position.',
       complete: { on: 'photo.uploaded', stationId: 'Right near', minPhotos: 2 },
-      link: { to: 'mode', mode: 'ADD_POINT' },
+      link: { to: 'camera', stepId: 'camera-right-near', cameraPositionId: 'Right near' },
+      photoTaps: bearings(
+        [end('BAS01'), end('BAS02')],
+        [end('BAS02'), cane('CRC02'), cane('CRC01'), cane('CRC06'), cane('CRC03')],
+      ),
     },
     {
       id: 'camera-right-far',
@@ -197,7 +218,11 @@ export const circleFieldTest: WorkflowDefinition = {
       doneTitle: '2 photos saved at camera position Right far',
       doneInstruction: 'Both stills are in. Save the garden next.',
       complete: { on: 'photo.uploaded', stationId: 'Right far', minPhotos: 2 },
-      link: { to: 'mode', mode: 'ADD_POINT' },
+      link: { to: 'camera', stepId: 'camera-right-far', cameraPositionId: 'Right far' },
+      photoTaps: bearings(
+        [end('BAS01'), end('BAS02'), cane('CRC01'), cane('CRC02'), cane('CRC03')],
+        [end('BAS02'), cane('CRC06'), cane('CRC05'), cane('CRC04')],
+      ),
     },
     {
       id: 'save-to-onedrive',
