@@ -89,6 +89,8 @@ export interface PhotoUploadDeps {
   /** User must tap Sign in. Do not redirect from here. */
   onInteractionRequired?: () => void;
   onStorageWarning?: (message: string) => void;
+  /** photos/manifest.json could not be updated. The photo itself is verified; logged once per message. */
+  onManifestWarning?: (message: string) => void;
   now?: () => string;
   /** Test hook. Defaults to the Graph 4 MB simple-upload limit. */
   simpleUploadMaxBytes?: number;
@@ -227,6 +229,7 @@ export function startPhotoUploadLoop(
     onStatus: deps.onStatus,
     onInteractionRequired: deps.onInteractionRequired,
     onStorageWarning: deps.onStorageWarning,
+    onManifestWarning: deps.onManifestWarning,
     now: deps.now,
     simpleUploadMaxBytes: deps.simpleUploadMaxBytes,
     fetchImpl: deps.fetchImpl,
@@ -683,7 +686,9 @@ async function uploadNamed(
     record: { ...record, bytesOnDrive: true },
     now: stampOf(deps),
   });
-  if (!manifest.ok) return { ok: false, error: manifest.error, bytesOnDrive: true, record };
+  // The original is on OneDrive and verified. A bad manifest must not fail (and re-try) every
+  // photo: warn once and carry on; the next upload rewrites the manifest row.
+  if (!manifest.ok) deps.onManifestWarning?.(`Photos manifest not updated: ${manifest.error}`);
   const afterManifest = await pendingDeletion(deps, record.id);
   if (afterManifest.gone || afterManifest.deletedAt) {
     return retireUploaded(

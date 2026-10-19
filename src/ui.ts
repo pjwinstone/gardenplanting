@@ -942,6 +942,9 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
 }
 
 /** One log line per photo per distinct error; retries of the same failure are not re-logged. */
+/** One line per distinct manifest problem for the whole session, not one per photo. */
+const logManifestWarning = createOncePerKeyLogger((msg) => logError(msg, { source: 'photo-upload', severity: 'info' }));
+
 const logPhotoUploadFailure = createOncePerKeyLogger((msg) => logError(msg, { source: 'photo-upload' }));
 
 async function hydratePhotoUploadStatus(): Promise<void> {
@@ -2286,6 +2289,7 @@ export function mount(root: HTMLElement): void {
     },
     onInteractionRequired: () => notePhotoSignIn(true),
     onStorageWarning: (message) => setCloudMessage(message),
+    onManifestWarning: (message) => logManifestWarning('manifest', message),
     onStatus: applyPhotoUploadStatus,
   });
   void hydratePhotoUploadStatus();
