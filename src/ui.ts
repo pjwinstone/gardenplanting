@@ -49,7 +49,6 @@ import {
   logError,
   isErrorLogEntrySeen,
   toggleErrorLogEntrySeen,
-  subscribeErrorLog,
   clearErrorLog,
   unseenErrorCount,
 } from './errorLog';
@@ -159,6 +158,7 @@ import {
   gardenSaveIsOwed,
 } from './cloudSignIn';
 import { silentGraphToken } from './onedrive';
+import { bindErrorLogView, createOncePerKeyLogger } from './errorLogBinding';
 import {
   applyRedirectOwedSave,
   commitGardenSave,
@@ -930,9 +930,12 @@ function applyPhotoUploadStatus(update: PhotoStatusUpdate): void {
   } else if (update.status === 'failed') {
     const msg = `Photo upload failed: ${update.error ?? 'unknown error'}`;
     setCloudMessage(msg);
-    logError(msg, { source: 'photo-upload' });
+    logPhotoUploadFailure(update.photoId, msg);
   }
 }
+
+/** One log line per photo per distinct error; retries of the same failure are not re-logged. */
+const logPhotoUploadFailure = createOncePerKeyLogger((msg) => logError(msg, { source: 'photo-upload' }));
 
 async function hydratePhotoUploadStatus(): Promise<void> {
   let records;
@@ -2235,7 +2238,7 @@ export function mount(root: HTMLElement): void {
   subscribe(render);
   subscribeAuth(render);
   subscribeCloud(render);
-  subscribeErrorLog(render);
+  bindErrorLogView({ refreshInPlace: refreshErrorLogInPlace });
   installWorkflowChrome(
     () => setState({}),
     (update) => {
@@ -4470,6 +4473,93 @@ function baselineSectionStatus(
   return { tone: 'warn', inline: 'not set' };
 }
 
+/** Contents of the error-log panel. Used by the menu build and the in-place refresh. */
+function fillErrorLogBody(errBody: HTMLElement): void {
+  const entries = getErrorLog();
+  if (!entries.length) {
+    errBody.appendChild(
+      el('p', { className: 'menu-drawer__empty', text: 'No errors captured this session.' }),
+    );
+  } else {
+    const head = el('div', { className: 'log-roller__head' });
+    const errors = entries.filter((e) => (e.severity ?? 'error') === 'error' && !isErrorLogEntrySeen(e.id)).length;
+    head.appendChild(
+      el('span', {
+        className: 'log-roller__counts',
+        text: `${entries.length} line${entries.length === 1 ? '' : 's'}${errors ? ` · ${errors} unseen error${errors === 1 ? '' : 's'}` : ''}`,
+      }),
+    );
+    head.appendChild(
+      el('button', {
+        className: 'log-roller__clear',
+        text: 'Clear all',
+        attrs: { type: 'button', 'data-cmd': 'clear-error-log', 'data-testid': 'error-log-clear' },
+      }),
+    );
+    errBody.appendChild(head);
+    const list = el('ul', { className: 'log-roller', attrs: { role: 'list' } });
+    for (const entry of entries) {
+      const isError = (entry.severity ?? 'error') === 'error';
+      const seen = isErrorLogEntrySeen(entry.id);
+      const item = el('li', {
+        className:
+          'log-roller__row' +
+          (isError ? ' log-roller__row--error' : ' log-roller__row--warn') +
+          (seen ? ' log-roller__row--seen' : ''),
+        attrs: {
+          'data-cmd': 'toggle-error-log-entry',
+          'data-entry-id': entry.id,
+          'data-testid': isError ? 'error-log-entry' : 'error-log-entry-info',
+          role: 'button',
+          tabindex: '0',
+          'aria-pressed': seen ? 'true' : 'false',
+          'aria-label': `${isError ? 'Error' : 'Warning'}${seen ? ', seen' : ''}: ${entry.message}${(entry.count ?? 1) > 1 ? `, ${entry.count} times` : ''}. Tap to mark ${seen ? 'unseen' : 'seen'}.`,
+          title: entry.stack ? `${entry.message}\n${entry.stack}` : entry.message,
+        },
+      });
+      item.appendChild(el('span', { className: 'log-roller__dot', attrs: { 'aria-hidden': 'true' } }));
+      const body = el('span', { className: 'log-roller__body' });
+      const when = new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      body.appendChild(el('span', { className: 'log-roller__meta', text: `${when}${entry.source ? ` · ${entry.source}` : ''}` }));
+      body.appendChild(el('span', { className: 'log-roller__msg', text: entry.message }));
+      item.appendChild(body);
+      if ((entry.count ?? 1) > 1) {
+        item.appendChild(el('span', { className: 'log-roller__count', text: `×${entry.count}` }));
+      }
+      list.appendChild(item);
+    }
+    errBody.appendChild(list);
+  }
+}
+
+/**
+ * A log line arrived: patch the open log, its menu status and the ☰ button only.
+ * Keeps the roller's scroll position and never rebuilds the app.
+ */
+function refreshErrorLogInPlace(): void {
+  if (typeof document === 'undefined') return;
+  const errBody = document.getElementById('error-log');
+  if (errBody) {
+    const oldList = errBody.querySelector('.log-roller') as HTMLElement | null;
+    const scrollTop = oldList?.scrollTop ?? 0;
+    errBody.replaceChildren();
+    fillErrorLogBody(errBody);
+    const newList = errBody.querySelector('.log-roller') as HTMLElement | null;
+    if (newList) newList.scrollTop = scrollTop;
+    const acc = errBody.closest('details');
+    const summary = acc?.querySelector('summary');
+    if (acc && summary) {
+      const fresh = menuAccordion('error-log', 'Error log', el('div'), errorLogSectionStatus());
+      acc.className = fresh.className;
+      acc.setAttribute('data-status', fresh.getAttribute('data-status') ?? 'idle');
+      const freshSummary = fresh.querySelector('summary');
+      if (freshSummary) summary.replaceWith(freshSummary);
+    }
+  }
+  const burger = document.querySelector('[data-testid="hamburger"]');
+  if (burger) burger.replaceWith(buildHamburgerButton());
+}
+
 function errorLogSectionStatus(): {
   tone: 'ok' | 'warn' | 'error' | 'idle';
   inline?: string;
@@ -5405,61 +5495,7 @@ function buildMenuDrawer(
     className: 'menu-acc__body menu-drawer__errors',
     attrs: { 'data-testid': 'error-log', id: 'error-log' },
   });
-  const entries = getErrorLog();
-  if (!entries.length) {
-    errBody.appendChild(
-      el('p', { className: 'menu-drawer__empty', text: 'No errors captured this session.' }),
-    );
-  } else {
-    const head = el('div', { className: 'log-roller__head' });
-    const errors = entries.filter((e) => (e.severity ?? 'error') === 'error' && !isErrorLogEntrySeen(e.id)).length;
-    head.appendChild(
-      el('span', {
-        className: 'log-roller__counts',
-        text: `${entries.length} line${entries.length === 1 ? '' : 's'}${errors ? ` · ${errors} unseen error${errors === 1 ? '' : 's'}` : ''}`,
-      }),
-    );
-    head.appendChild(
-      el('button', {
-        className: 'log-roller__clear',
-        text: 'Clear all',
-        attrs: { type: 'button', 'data-cmd': 'clear-error-log', 'data-testid': 'error-log-clear' },
-      }),
-    );
-    errBody.appendChild(head);
-    const list = el('ul', { className: 'log-roller', attrs: { role: 'list' } });
-    for (const entry of entries) {
-      const isError = (entry.severity ?? 'error') === 'error';
-      const seen = isErrorLogEntrySeen(entry.id);
-      const item = el('li', {
-        className:
-          'log-roller__row' +
-          (isError ? ' log-roller__row--error' : ' log-roller__row--warn') +
-          (seen ? ' log-roller__row--seen' : ''),
-        attrs: {
-          'data-cmd': 'toggle-error-log-entry',
-          'data-entry-id': entry.id,
-          'data-testid': isError ? 'error-log-entry' : 'error-log-entry-info',
-          role: 'button',
-          tabindex: '0',
-          'aria-pressed': seen ? 'true' : 'false',
-          'aria-label': `${isError ? 'Error' : 'Warning'}${seen ? ', seen' : ''}: ${entry.message}${(entry.count ?? 1) > 1 ? `, ${entry.count} times` : ''}. Tap to mark ${seen ? 'unseen' : 'seen'}.`,
-          title: entry.stack ? `${entry.message}\n${entry.stack}` : entry.message,
-        },
-      });
-      item.appendChild(el('span', { className: 'log-roller__dot', attrs: { 'aria-hidden': 'true' } }));
-      const body = el('span', { className: 'log-roller__body' });
-      const when = new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      body.appendChild(el('span', { className: 'log-roller__meta', text: `${when}${entry.source ? ` · ${entry.source}` : ''}` }));
-      body.appendChild(el('span', { className: 'log-roller__msg', text: entry.message }));
-      item.appendChild(body);
-      if ((entry.count ?? 1) > 1) {
-        item.appendChild(el('span', { className: 'log-roller__count', text: `×${entry.count}` }));
-      }
-      list.appendChild(item);
-    }
-    errBody.appendChild(list);
-  }
+  fillErrorLogBody(errBody);
   const errAcc = menuAccordion(
     'error-log',
     'Error log',

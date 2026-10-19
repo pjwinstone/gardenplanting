@@ -27,6 +27,21 @@ export const UPLOAD_CHUNK_BYTES = 320 * 1024 * 10;
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 
+/** Extra upload passes when OneDrive reports the wrong size (e.g. a 0-byte file). */
+export const SIZE_MISMATCH_RETRIES = 2;
+const SIZE_MISMATCH_BACKOFF_MS = 1500;
+
+/**
+ * Request body as a plain ArrayBuffer holding exactly these bytes.
+ * WKWebView can send a Blob body (or a Uint8Array view into a larger buffer) as an
+ * empty request, which leaves a 0-byte file on OneDrive. A fresh ArrayBuffer is safe.
+ */
+export function bodyBytes(bytes: Uint8Array): ArrayBuffer {
+  const out = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(out).set(bytes);
+  return out;
+}
+
 export interface RemoteFileInfo {
   size: number;
   quickXorHash: string;
@@ -107,34 +122,63 @@ export async function uploadAndVerifyOriginal(opts: {
   simpleUploadMaxBytes?: number;
   /** Test hook. Production chunks are multiples of 320 KiB. */
   chunkBytes?: number;
+  /** Test hooks for the size-mismatch retry. */
+  sizeMismatchRetries?: number;
+  sleep?: (ms: number) => Promise<void>;
 }): Promise<
   | { ok: true; remote: RemoteFileInfo; existed: boolean }
-  | { ok: false; error: string; permanent?: boolean; conflict?: boolean; retryAfterMs?: number }
+  | {
+      ok: false;
+      error: string;
+      permanent?: boolean;
+      conflict?: boolean;
+      retryAfterMs?: number;
+      sizeMismatch?: boolean;
+    }
 > {
   const folder = await ensurePhotosFolder(opts.client);
   if (!folder.ok) return folder;
 
   const limit = opts.simpleUploadMaxBytes ?? SIMPLE_UPLOAD_MAX_BYTES;
   const itemPath = `${photosFolderPath()}/${opts.fileName}`;
-  const uploaded =
-    opts.bytes.byteLength <= limit
-      ? await simpleUpload(opts.client, itemPath, opts.bytes, opts.contentType)
-      : await sessionUpload(opts.client, itemPath, opts.fileName, opts.bytes, opts.chunkBytes);
-  if (!uploaded.ok) return uploaded;
+  const maxRetries = opts.sizeMismatchRetries ?? SIZE_MISMATCH_RETRIES;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let replace = false;
+  let lastReason = '';
+  for (let pass = 0; pass <= maxRetries; pass += 1) {
+    if (pass > 0) await sleep(SIZE_MISMATCH_BACKOFF_MS * 2 ** (pass - 1));
+    const uploaded =
+      opts.bytes.byteLength <= limit
+        ? await simpleUpload(opts.client, itemPath, opts.bytes, opts.contentType, false, replace)
+        : await sessionUpload(opts.client, itemPath, opts.fileName, opts.bytes, opts.chunkBytes, false, replace);
+    if (!uploaded.ok) return uploaded;
 
-  const check = verifyRemoteFile(
-    { size: opts.bytes.byteLength, quickXorHash: opts.localHash },
-    uploaded.remote,
-  );
-  if (!check.ok) {
-    return {
-      ok: false,
-      error: check.reason,
-      permanent: check.permanent,
-      conflict: uploaded.existed && check.permanent,
-    };
+    const check = verifyRemoteFile(
+      { size: opts.bytes.byteLength, quickXorHash: opts.localHash },
+      uploaded.remote,
+    );
+    if (check.ok) return { ok: true, remote: uploaded.remote, existed: uploaded.existed };
+    const sizeWrong = uploaded.remote.size !== opts.bytes.byteLength;
+    // A 0-byte or short file at our name is a broken earlier upload of this photo, not
+    // someone else's file: overwrite it. Same size + different hash is a real conflict.
+    if (!sizeWrong) {
+      return {
+        ok: false,
+        error: check.reason,
+        permanent: check.permanent,
+        conflict: uploaded.existed && check.permanent,
+      };
+    }
+    lastReason = check.reason;
+    replace = true;
   }
-  return { ok: true, remote: uploaded.remote, existed: uploaded.existed };
+  // Still the wrong size after bounded retries: stop, so the photo is marked failed once.
+  return {
+    ok: false,
+    error: `${lastReason} Gave up after ${maxRetries + 1} tries; tap Retry to try again.`,
+    permanent: true,
+    sizeMismatch: true,
+  };
 }
 
 /**
@@ -219,24 +263,25 @@ async function simpleUpload(
   bytes: Uint8Array,
   contentType: string,
   retried = false,
+  replace = false,
 ): Promise<
   { ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string; retryAfterMs?: number }
 > {
-  const url = conflictFailUrl(graphItemUrl(itemPath, ':/content'));
+  const url = conflictUrl(graphItemUrl(itemPath, ':/content'), replace ? 'replace' : 'fail');
   const res = await client.fetch(url, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${client.token}`,
       'Content-Type': contentType || 'application/octet-stream',
     },
-    body: new Blob([bytes], { type: contentType || 'application/octet-stream' }),
+    body: bodyBytes(bytes),
   });
   if (res.status === 409) return readExistingAndReturn(client, itemPath);
   if (res.status === 404 && !retried) {
     // The photos folder was moved or deleted after we checked it. Make it again and retry once.
     const folder = await ensurePhotosFolder(client);
     if (!folder.ok) return folder;
-    return simpleUpload(client, itemPath, bytes, contentType, true);
+    return simpleUpload(client, itemPath, bytes, contentType, true, replace);
   }
   if (!res.ok) return failResponse(res, itemPath);
   const remote = await remoteFromResponse(client, itemPath, res);
@@ -251,6 +296,7 @@ async function sessionUpload(
   bytes: Uint8Array,
   chunkBytes = UPLOAD_CHUNK_BYTES,
   retried = false,
+  replace = false,
 ): Promise<
   { ok: true; remote: RemoteFileInfo; existed: boolean } | { ok: false; error: string; retryAfterMs?: number }
 > {
@@ -263,7 +309,7 @@ async function sessionUpload(
     },
     body: JSON.stringify({
       item: {
-        '@microsoft.graph.conflictBehavior': 'fail',
+        '@microsoft.graph.conflictBehavior': replace ? 'replace' : 'fail',
         name: fileName,
       },
     }),
@@ -283,11 +329,11 @@ async function sessionUpload(
       headers: {
         'Content-Range': `bytes ${start}-${end - 1}/${bytes.byteLength}`,
       },
-      body: new Blob([slice]),
+      body: bodyBytes(slice),
     });
     if (last.status === 404 && !retried) {
       // The upload session expired or was dropped. Start a fresh session once.
-      return sessionUpload(client, itemPath, fileName, bytes, chunkBytes, true);
+      return sessionUpload(client, itemPath, fileName, bytes, chunkBytes, true, replace);
     }
     const finished = end === bytes.byteLength;
     if (finished) {
@@ -314,9 +360,9 @@ async function failResponse(
   return { ok: false, error: await graphError(res, drivePath), retryAfterMs };
 }
 
-function conflictFailUrl(contentUrl: string): string {
+function conflictUrl(contentUrl: string, behavior: 'fail' | 'replace'): string {
   const join = contentUrl.includes('?') ? '&' : '?';
-  return `${contentUrl}${join}${encodeURIComponent('@microsoft.graph.conflictBehavior')}=fail`;
+  return `${contentUrl}${join}${encodeURIComponent('@microsoft.graph.conflictBehavior')}=${behavior}`;
 }
 
 async function readExistingAndReturn(
