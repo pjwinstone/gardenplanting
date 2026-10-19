@@ -268,6 +268,8 @@ function reduceStep(step: WorkflowStep, state: StepState, event: WorkflowEvent |
   const note = state.note;
   const check = collect(step.complete, event, new Set(state.seen ?? []), note, step.id, false);
   if (status === 'ticked_by_app') return state;
+  // Settled by hand (skip with a note, tick with a reason): a later event must not reopen it.
+  if (status === 'skipped_with_note' || status === 'ticked_with_reason') return state;
   if (status === 'ticked_by_you' && step.kind === 'user+app') {
     if (!check.done) return mirrorLegacy({ ...state, seen: seenList(check.seen) });
     return mirrorLegacy({
@@ -854,6 +856,35 @@ export function countUploadedPhotosForStep(
     return captured >= start && received >= start;
   }).map((photo) => photo.id);
   return { count: photoIds.length, photoIds };
+}
+
+/**
+ * Every photo linked to this step's camera position in this run, whatever its upload state.
+ * Same linkage and same "not consumed by another step" rule as countUploadedPhotosForStep,
+ * but no verified / usable / time filter: the action sub-net (action.net.yaml) needs to see
+ * queued, uploading, failed and refused photos too, so none is dropped silently.
+ */
+export function linkedPhotosForStep(
+  doc: GardenDocument,
+  stationId: string,
+  run: WorkflowRun,
+  stepId: string,
+): Photo[] {
+  const start = photoTimeMs(run.startedAt);
+  const taken = new Set<string>();
+  const canonicalStep = canonicalStepId(stepId);
+  for (const [id, state] of Object.entries(run.steps)) {
+    if (canonicalStepId(id) === canonicalStep) continue;
+    for (const photoId of state.consumedPhotoIds ?? []) taken.add(photoId);
+  }
+  return doc.photos.filter((photo) => {
+    if (taken.has(photo.id)) return false;
+    if (!photoOnStation(doc, photo, stationId)) return false;
+    const received = photoTimeMs(photo.originalFile?.receivedAt);
+    // Photos from before the run are not this run's; a photo with no record yet is in flight.
+    if (start !== undefined && received !== undefined && received < start) return false;
+    return true;
+  });
 }
 
 function stationIdsOnPhoto(doc: GardenDocument, photo: Photo): string[] {

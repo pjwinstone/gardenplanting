@@ -7,7 +7,8 @@
 
 id: review-field-test
 title: Circle field test (guided checklist)
-revision: 3   # rev 3: Step 0 Set-up (run config) + header cog; config changes mark dependants 'needs re-check'.
+revision: 4   # rev 4: hierarchical — each step instantiates workflow/action.net.yaml for its row pill.
+# rev 3: Step 0 Set-up (run config) + header cog; config changes mark dependants 'needs re-check'.
 # rev 2: rev 2: Back = roller scroll; Retake and Details (?) are row actions; ONE button row (Tick + Next/Later/Done);
                # Pause, Skip with a note, Tick by hand and Untick live in the Details sheet
 glossary_note: >
@@ -97,6 +98,32 @@ steps:
      evidence: "2 photos at camera position 'Right far' (legacy STN03)"}
   - {n: 12, id: save-to-onedrive,      title: Save to OneDrive,                       kind: app,
      evidence: "cloud.saved while this step is current"}
+
+
+# ---------------------------------------------------------------------------
+# Sub-nets (rev 4). Each step token carries one instance of workflow/action.net.yaml.
+# This net sees an instance only as complete (`done`) or not. Camera steps add the guard
+# photoUploadVerified on upload_verified; other steps go idle → done by tick / save.
+# ---------------------------------------------------------------------------
+subnets:
+  action: workflow/action.net.yaml
+  instances:
+    - {step: gather-kit,            net: action, evidence: manual}
+    - {step: set-out-circle,        net: action, evidence: manual}
+    - {step: tape-diameters,        net: action, evidence: manual}
+    - {step: place-baseline-points, net: action, evidence: manual}
+    - {step: tape-baseline,         net: action, evidence: baseline.saved}
+    - {step: laser-check-baseline,  net: action, evidence: manual}
+    - {step: plumb-canes,           net: action, evidence: manual}
+    - {step: camera-calibration,    net: action, evidence: photo.uploaded, min_photos: 1, guard: photoUploadVerified}
+    - {step: camera-left,           net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified}
+    - {step: camera-right-near,     net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified}
+    - {step: camera-right-far,      net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified}
+    - {step: save-to-onedrive,      net: action, evidence: cloud.saved}
+  composition: >
+    step settled (top net) <=> its action instance is in `done`. Done (finish_run) needs
+    allActionsDone(doc, run); otherwise done_go_to_first_open lands on the first step whose
+    instance is not done and names it with the sub-net's reason (doneBlocker / doneBlockerNotice).
 
 rename_map:   # old id -> new id (old ids kept as aliases in reconcileRun so saved runs migrate)
   kit: gather-kit
@@ -288,7 +315,7 @@ transitions:
     consume: [cursor]
     produce: [cursor]
     guard: "hasUnsettledSteps(run)"
-    does: "Done (button row, last step) shows 'Done · N open' when anything is open. Tapping it moves the cursor to the first open (or failed) step and names it."
+    does: "Done (button row, last step) shows 'Done · N open' when anything is open. Tapping it moves the cursor to the first open (or failed) step and names it with the action sub-net reason, e.g. 'Step 8 Calibration photo: Upload failed: Size mismatch'."
 
   - id: finish_run
     title: Done
@@ -296,7 +323,7 @@ transitions:
     consume: [run_active, cursor]
     reads: [setup_config]
     produce: [run_finished]
-    guard: "setupConfirmed(run) && noUnsettledSteps(run)"
+    guard: "setupConfirmed(run) && noUnsettledSteps(run) && allActionsDone(doc, run)"
     does: "Only enabled when every step is settled. Summary lists warnings (ticked by hand, skipped) for the record."
 
   - id: pause_run
@@ -323,6 +350,7 @@ ui_only:   # no token moves; listed so every control has a home
   cog_to_setup: "Small cog in the header. Scrolls the roller to step 0 (Set-up). Same as scrolling there by hand. There is no settings screen."
   setup_form:   "When step 0 is current, the compact form replaces the button row (rows of 44 pt fields, Confirm on the right). Long lists (tolerances) open in Details."
   open_details: "Small '?' on the current roller row opens Details: instructions, diagram, note / reason, and the less common actions Tick by hand, Skip with a note, Untick, Pause. Current row only."
+  row_pill: "Colour and text from the step's action sub-net only (workflow/action.net.yaml): grey idle, blue in progress, grey uploading, green done, red error + Retake / Retry upload with the reason under the row."
   photo_taps: >
     After a photo on a camera step the tap screen opens: the photo full-screen (pinch to zoom), one 44 pt bar
     naming the next point to tap. What to tap comes from the step's photoTaps in definitions.ts, never a shared
@@ -343,6 +371,7 @@ ui_only:   # no token moves; listed so every control has a home
   next_opens_nothing: "Next / Later only move the cursor. Only the row pill opens the camera or Save baseline."
 
 guards:   # proposed src/workflows/guided/guards.ts
+  allActionsDone: "doneBlocker(doc, steps, run) is undefined: every step's action sub-net (action.net.yaml) is in done (actionNet.ts)."
   isUserStep:          "(step) => step.kind === 'user' || step.kind === 'user+app'"
   needsAppEvidence:    "(step) => step.kind === 'app' || step.kind === 'user+app'"
   isCurrentStep:       "(step, run) => run.currentStepId === step.id"

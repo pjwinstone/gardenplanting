@@ -1,0 +1,46 @@
+# action.net.yaml — reusable ACTION sub-net. One instance per field-test step (field-test.net.yaml
+# `subnets`). It owns the colour and text of that step's row pill and nothing else.
+# The top net sees each instance only as `done` (step complete) or not.
+# Grey boxes = app, yellow = you. Guards are named TS predicates in src/workflows/guided/actionNet.ts.
+# The UI derives the pill colour ONLY from the place below (actionPillClass → .act-<place>).
+
+id: action
+title: Step action (row pill)
+revision: 1
+
+places:
+  - {id: idle,        colour: grey,  label: "Not started", pill: "Take photos / Save baseline / Save"}
+  - {id: in_progress, colour: blue,  label: "In progress (camera open, or some photos in)", pill: "Photo n of N"}
+  - {id: uploading,   colour: grey,  label: "Uploading / verifying on OneDrive", pill: "Uploading… (disabled)"}
+  - {id: done,        colour: green, label: "Done (step settled)", pill: "✓ Photos in / ✓ Done (disabled)"}
+  - {id: error,       colour: red,   label: "Error, with a plain reason", pill: "Retake (refused) / Retry upload (failed)"}
+
+initial: idle
+
+transitions:
+  - {id: start,           user: true,  from: [idle],                 to: in_progress, does: "Tap the pill. Camera steps open the camera at 1× landscape."}
+  - {id: photo_taken,     user: true,  from: [in_progress],          to: uploading,   does: "Shutter accepted (landscape, 1×). Original queued for OneDrive."}
+  - {id: upload_verified, user: false, from: [uploading],            to: done,        guard: photoUploadVerified, does: "Size + hash checked on OneDrive, usable, captured after run start, and this was the last photo the step needs."}
+  - {id: upload_verified, user: false, from: [uploading],            to: in_progress, guard: morePhotosNeeded,    does: "Verified, but the step needs another photo (Photo 2 of 2)."}
+  - {id: photo_refused,   user: false, from: [in_progress, uploading], to: error,     recovery: retake, does: "Portrait, not 1×, 'Not usable for …', no capture time, or taken before the run. Reason shown."}
+  - {id: upload_failed,   user: false, from: [uploading],            to: error,       recovery: retry,  does: "OneDrive upload gave up (e.g. size mismatch, 0 bytes). Reason = the upload error."}
+  - {id: retake,          user: true,  from: [error],                to: in_progress, guard: recoveryIsRetake, does: "Red Retake pill: opens the camera again."}
+  - {id: retry,           user: true,  from: [error],                to: uploading,   guard: recoveryIsRetry,  does: "Red Retry upload pill: re-sends that photo (photo-upload-retry)."}
+  - {id: settled_by_hand, user: true,  from: [idle, in_progress, uploading, error], to: done, does: "Tick by hand with a reason, or Skip with a note (Details). Top net: step settled."}
+  - {id: recheck,         user: false, from: [done],                 to: idle,        does: "A Set-up value this step depends on changed (top net needs_recheck)."}
+
+guards:   # src/workflows/guided/actionNet.ts ACTION_GUARDS + evidence predicates
+  photoUploadVerified: "This verify brings usable verified photos up to the step's minPhotos (countUploadedPhotosForStep)."
+  morePhotosNeeded:    "Usable verified photos after this verify are still below minPhotos."
+  recoveryIsRetake:    "error came from photo_refused."
+  recoveryIsRetry:     "error came from upload_failed."
+  photoRefusedReason:  "Verified but usabilityNote has 'Not usable', or no capture time, or captured before run start."
+  uploadFailed:        "photo.originalFile.uploadStatus == failed."
+  uploadInFlight:      "uploadStatus queued or uploading."
+
+marking_from_document: >
+  The app does not store the sub-net token; deriveActionState(doc, run, step) reads where it is:
+  settled → done; evidence_failed → error(retake); newest linked photo refused → error(retake);
+  newest linked photo failed → error(retry); any in flight (or verified but the tick not yet
+  applied) → uploading; some photos → in_progress; else idle. Only the NEWEST photo can make it
+  red, so a good retake supersedes an earlier bad one. Non-camera steps are idle or done.

@@ -145,12 +145,19 @@
   height: 30px;
   padding: 0 12px;
   border-radius: 15px;
-  background: #c62828;
   color: #fff;
   font-size: 13px;
   font-weight: 600;
   border: none;
 }
+
+/* Colour comes only from the action sub-net place (action.net.yaml). */
+.roller-pill.act-idle { background: #5f6b66; }
+.roller-pill.act-in_progress { background: #1f6feb; }
+.roller-pill.act-uploading { background: #6b7c74; }
+.roller-pill.act-done { background: #2e7d32; }
+.roller-pill.act-error { background: #c62828; }
+.roller-pill:disabled { opacity: 0.9; }
 
 .roller-q {
   width: 30px;
