@@ -32,6 +32,7 @@ function linkText(link: WorkflowLink): string {
   if (link.to === 'mode') return `Mode ${link.mode}`;
   if (link.to === 'menu') return `Menu → ${link.section}`;
   if (link.to === 'print-tags') return 'Print tags';
+  if (link.to === 'camera') return `Camera at ${link.cameraPositionId}`;
   return `PDF docs/markers/${link.file}`;
 }
 

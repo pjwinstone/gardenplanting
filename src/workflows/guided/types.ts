@@ -18,7 +18,9 @@ export type WorkflowLink =
   | { to: 'mode'; mode: 'BASELINE' | 'ADD_POINT' }
   | { to: 'menu'; section: 'baseline' | 'cloud' | 'tools' }
   | { to: 'print-tags' }
-  | { to: 'marker-pdf'; file: string };
+  | { to: 'marker-pdf'; file: string }
+  /** Straight to the camera for one camera position (roller pill). */
+  | { to: 'camera'; stepId: string; cameraPositionId: string };
 
 export type WorkflowTrigger =
   | { on: 'manual' }
