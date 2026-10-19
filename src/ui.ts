@@ -84,7 +84,7 @@ import {
   workflowNoteChange,
 } from './workflows/guided/guidedChrome';
 import { hydrateWorkflowProgress, withWorkflowEvent, workflowAfterUploadedPhoto } from './workflows/guided/engine';
-import { checkCameraPositionPhoto, ensureCameraPositionPoint } from './workflows/guided/cameraCapture';
+import { cameraPositionHint, checkCameraPositionPhoto, ensureCameraPositionPoint } from './workflows/guided/cameraCapture';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
   appendPhotoToPoint,
@@ -115,6 +115,7 @@ import {
   nativeCaptureRecordFor,
   nativeSurveyCaptureAvailable,
   readInstalledNativeFile,
+  type NativeCaptureOptions,
 } from './surveyCapture';
 import {
   discardQueuedPhoto,
@@ -506,15 +507,13 @@ function startCameraPositionCapture(cameraPositionId: string): void {
   if (ensured.doc !== state.doc) setDoc(ensured.doc, null);
   setState({ menuOpen: false, openErrorLog: false, pointDialog: null, refuseMessage: null });
   const portrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
-  setCloudMessage(
-    portrait
-      ? `Turn the phone sideways. Camera position ${cameraPositionId} photos are landscape at 1×.`
-      : `Camera position ${cameraPositionId}: landscape at 1× (main lens).`,
-  );
+  const hint = cameraPositionHint(state.doc, cameraPositionId);
+  setCloudMessage(portrait ? `Turn the phone sideways. ${hint}` : hint);
   const take = (file: File) => {
     void handleCameraPositionCapture(ensured.pointId, cameraPositionId, file);
   };
-  void beginSurveyCapture(take);
+  // The shutter screen is locked to landscape, so the still is wider than tall.
+  void beginSurveyCapture(take, { landscape: true, hint });
 }
 
 async function handleCameraPositionCapture(pointId: string, cameraPositionId: string, file: File): Promise<void> {
@@ -530,7 +529,13 @@ async function handleCameraPositionCapture(pointId: string, cameraPositionId: st
     } catch {
       /* unknown size: orientation is reported as unknown */
     }
-    const check = checkCameraPositionPhoto({ width, height, zoom: nativeCaptureRecordFor(file)?.videoZoomFactor ?? undefined });
+    const native = nativeCaptureRecordFor(file);
+    const check = checkCameraPositionPhoto({
+      width,
+      height,
+      zoom: native?.videoZoomFactor ?? undefined,
+      gravity: native?.gravity ?? undefined,
+    });
     if (!check.ok) {
       logError(`Camera position ${cameraPositionId}: ${check.message}`, { source: 'photo', severity: 'info' });
       setCloudMessage(check.message);
@@ -556,13 +561,14 @@ function launchAgainPhotoCamera(pointId: string): void {
  * then the system camera or library input. Both paths hand the same File to
  * the existing original-upload queue.
  */
-async function beginSurveyCapture(onFile: (file: File) => void): Promise<void> {
+async function beginSurveyCapture(onFile: (file: File) => void, cameraOptions?: NativeCaptureOptions): Promise<void> {
   if (nativeSurveyCaptureAvailable()) {
     try {
       const choice = await captureSurveyPhoto({
         native: true,
         camera: installedCameraClient(),
         readFile: readInstalledNativeFile,
+        cameraOptions,
       });
       if (choice.route === 'cancelled') return;
       if (choice.route === 'library') {

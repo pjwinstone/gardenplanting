@@ -23,8 +23,14 @@ export type NativeCameraResult =
   | { useLibrary: true }
   | NativeCaptureSidecar;
 
+/** Field-test camera positions: lock the shutter screen to landscape and show a step hint. */
+export interface NativeCaptureOptions {
+  landscape?: boolean;
+  hint?: string;
+}
+
 export interface NativeCameraClient {
-  capture(): Promise<NativeCameraResult>;
+  capture(options?: NativeCaptureOptions): Promise<NativeCameraResult>;
 }
 
 export type SurveyCaptureChoice =
@@ -89,10 +95,11 @@ export async function captureSurveyPhoto(options: {
   camera: NativeCameraClient | null;
   readFile: (sidecar: NativeCaptureSidecar) => Promise<Blob>;
   release?: (path: string) => Promise<void>;
+  cameraOptions?: NativeCaptureOptions;
 }): Promise<SurveyCaptureChoice> {
   if (!options.native) return { route: 'web' };
   if (!options.camera) throw new Error('The native camera is not available.');
-  const result = await options.camera.capture();
+  const result = await options.camera.capture(options.cameraOptions);
   if ('cancelled' in result) return { route: 'cancelled' };
   if ('useLibrary' in result) return { route: 'library' };
   const file = await fileFromNativeStill(result, () => options.readFile(result), options.release);
@@ -115,7 +122,7 @@ export async function fileFromNativeStill(
 }
 
 interface GardenCameraPlugin {
-  capture(): Promise<Record<string, unknown>>;
+  capture(options?: NativeCaptureOptions): Promise<Record<string, unknown>>;
   release(options: { path: string }): Promise<void>;
 }
 
@@ -123,9 +130,9 @@ const GardenCamera = Capacitor.registerPlugin<GardenCameraPlugin>('GardenCamera'
 
 export function installedCameraClient(): NativeCameraClient {
   return {
-    async capture() {
+    async capture(options?: NativeCaptureOptions) {
       try {
-        return sidecarFromPlugin(await GardenCamera.capture());
+        return sidecarFromPlugin(await GardenCamera.capture(options ?? {}));
       } catch (error) {
         if (isCaptureCancel(error)) return { cancelled: true };
         throw error;
