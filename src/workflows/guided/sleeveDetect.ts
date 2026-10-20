@@ -29,6 +29,11 @@ const CODEBOOK = new Set(CODEBOOK_HEX.split(' '));
 export interface DetectOptions {
   /** The sleeve's ID (e.g. '315') when the app knows which cane was photographed. A different ID is rejected. */
   expectedId?: string;
+  /**
+   * Hard band-size gate in px (default MIN_BAND_PX = 7, the height / fx gate). The whole-photo scan
+   * passes 4 to read IDs and rays from smaller sleeves; those are flagged not-for-CAL.
+   */
+  minBandPx?: number;
 }
 
 /** sRGB 0–255 to linear light 0–1. */
@@ -421,7 +426,8 @@ export function detectSleeve(img: GreyImage, tapX: number, tapY: number, opts: D
   }
   if (cand.reject) confidence = 0;
   if (rms > MAX_EDGE_RMS_BANDS) { confidence = 0; reasons.push(`band edges uneven (RMS ${rms.toFixed(2)} band)`); }
-  if (pitch < MIN_BAND_PX) { confidence = 0; reasons.push(`bands ${pitch.toFixed(1)} px, under ${MIN_BAND_PX} px; move closer`); }
+  const minBand = opts.minBandPx ?? MIN_BAND_PX;
+  if (pitch < minBand) { confidence = 0; reasons.push(`bands ${pitch.toFixed(1)} px, under ${minBand} px; move closer`); }
   if (opts.expectedId && cand.id && cand.id !== opts.expectedId.toUpperCase()) {
     confidence = 0;
     reasons.push(`sleeve ${cand.id}, expected ${opts.expectedId.toUpperCase()}`);

@@ -1838,6 +1838,15 @@ body {
   height: 16px;
 }
 
+/* A sleeve found by the whole-photo scan: green ring, label "BAS01 · 315". Tap it to fix. */
+.photo-tap__pin--auto {
+  border-color: #3ddc84;
+  box-shadow: 0 0 0 2px rgb(61 220 132 / 0.45);
+}
+.photo-tap__pin--auto .photo-tap__pin-label {
+  color: #3ddc84;
+}
+
 .photo-tap__pin-label {
   position: absolute;
   left: 6px;
