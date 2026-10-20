@@ -5,7 +5,7 @@
  */
 import { sleeveBits } from '../../scripts/markerSleeve';
 const bits = sleeveBits('315');
-export type SimOpt = { sleevePx: number; sigma: number; gamma: boolean; grad: number; lambert: boolean; usm: number; expo: number; flip?: boolean; reverse?: boolean; partial?: number; glare?: number; glareU?: number; bits?: string };
+export type SimOpt = { sleevePx: number; sigma: number; gamma: boolean; grad: number; lambert: boolean; usm: number; expo: number; flip?: boolean; reverse?: boolean; partial?: number; glare?: number; glareU?: number; bits?: string; bandRefl?: Record<number, number> };
 function gauss1d(a: Float64Array, w: number, h: number, s: number, horiz: boolean) {
   if (s <= 0) return a; const r = Math.ceil(3 * s); const k: number[] = []; let t = 0;
   for (let i = -r; i <= r; i++) { const v = Math.exp(-i * i / (2 * s * s)); k.push(v); t += v; }
@@ -25,7 +25,7 @@ export function render(o: SimOpt) {
       let refl: number;
       if (Math.abs(u) <= R && v >= 0 && v <= 287) {
         const c = v - 17; refl = 0.8;
-        if (c >= 0 && c < 247) { const k = Math.floor(c / 13); if (o.partial == null || k >= o.partial) refl = b[k] === '1' ? 0.04 : 0.8; }
+        if (c >= 0 && c < 247) { const k = Math.floor(c / 13); if (o.partial == null || k >= o.partial) refl = o.bandRefl?.[k] ?? (b[k] === '1' ? 0.04 : 0.8); }
         if (o.lambert) refl *= Math.max(0.05, Math.cos(Math.asin(Math.min(1, u / R)) - 0.6)); // side light 34°
         if (o.glare && Math.abs(u / R - (o.glareU ?? 0)) < 0.12) refl += o.glare;
       } else if (Math.abs(u) <= R) refl = 0.25; else refl = 0.18;

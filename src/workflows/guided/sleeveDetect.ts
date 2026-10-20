@@ -9,6 +9,7 @@
  *
  * Pure TypeScript on a grey image (full resolution, never the 640 px preview).
  */
+import tolerances from '../../../workflow/tolerances.json';
 
 export const SLEEVE_H_MM = 287;
 export const CODE_MM = 247;
@@ -34,7 +35,12 @@ export interface DetectOptions {
    * passes 4 to read IDs and rays from smaller sleeves; those are flagged not-for-CAL.
    */
   minBandPx?: number;
+  /** Bit margin as a fraction of the local black-to-white gap (default tolerances.json sleeveBitMarginFraction). */
+  bitMarginFraction?: number;
 }
+
+/** A payload band nearer the black/white midpoint than this fraction of the gap is unreadable. */
+export const BIT_MARGIN_FRACTION: number = tolerances.sleeveBitMarginFraction;
 
 /** sRGB 0–255 to linear light 0–1. */
 const LINEAR = (() => {
@@ -372,6 +378,47 @@ function detectOnProfile(p: Float64Array, tapY: number, h: number): Candidate | 
 }
 
 /**
+ * Bit margin (vision review): a payload band whose linear-light mean sits within
+ * `fraction` × (local white − local black) of the local midpoint is not trusted, so a partly
+ * covered sleeve cannot slide 4 bits into another garden ID. Local levels: medians of the
+ * band means of each colour within ±4 bands (all bands if a colour is missing there).
+ * Returns the weak payload bit numbers (1–12, reading order).
+ */
+export function weakPayloadBands(
+  lin: Float64Array,
+  codeTop: number,
+  pitch: number,
+  bits: string,
+  upsideDown: boolean,
+  fraction: number,
+): number[] {
+  const means: number[] = [];
+  for (let i = 0; i < BANDS; i += 1) {
+    const a = Math.round(codeTop + (i + 0.3) * pitch);
+    const b = Math.round(codeTop + (i + 0.7) * pitch);
+    let s = 0;
+    let n = 0;
+    for (let y = a; y <= Math.max(a, b); y += 1) if (Number.isFinite(lin[y])) { s += lin[y]; n += 1; }
+    means.push(n ? s / n : NaN);
+  }
+  const med = (v: number[]) => { const t = v.filter(Number.isFinite).sort((x, y) => x - y); return t.length ? t[Math.floor(t.length / 2)] : NaN; };
+  const level = (i: number, colour: '0' | '1') => {
+    const near = means.filter((_, j) => Math.abs(j - i) <= 4 && j !== i && bits[j] === colour);
+    return near.length ? med(near) : med(means.filter((_, j) => j !== i && bits[j] === colour));
+  };
+  const weak: number[] = [];
+  for (let k = 5; k < 17; k += 1) {
+    const i = upsideDown ? BANDS - 1 - k : k;
+    const m = means[i];
+    const dark = level(i, '1');
+    const light = level(i, '0');
+    const gap = light - dark;
+    if (!Number.isFinite(m) || !(gap > 0) || Math.abs(m - (dark + light) / 2) < fraction * gap) weak.push(k - 4);
+  }
+  return weak;
+}
+
+/**
  * Detect the sleeve from a rough tap at (tapX, tapY) in this image's pixels (sRGB grey).
  * Returns undefined when nothing like a sleeve is near the tap. Hard rejects come back with
  * confidence 0 and a reason, so the app falls back to manual taps.
@@ -425,6 +472,13 @@ export function detectSleeve(img: GreyImage, tapX: number, tapY: number, opts: D
     reasons.push('band edges could not be fitted');
   }
   if (cand.reject) confidence = 0;
+  if (grid) {
+    const weak = weakPayloadBands(profile, codeTop, pitch, cand.bits, cand.upsideDown, opts.bitMarginFraction ?? BIT_MARGIN_FRACTION);
+    if (weak.length) {
+      confidence = 0;
+      reasons.push(`payload band${weak.length > 1 ? 's' : ''} ${weak.join(', ')} too close to grey to read safely`);
+    }
+  }
   if (rms > MAX_EDGE_RMS_BANDS) { confidence = 0; reasons.push(`band edges uneven (RMS ${rms.toFixed(2)} band)`); }
   const minBand = opts.minBandPx ?? MIN_BAND_PX;
   if (pitch < minBand) { confidence = 0; reasons.push(`bands ${pitch.toFixed(1)} px, under ${minBand} px; move closer`); }
