@@ -82,13 +82,13 @@ setup:
 
 steps:
   - {n: 1,  id: gather-kit,            title: Gather the kit,                         kind: user, evidence: none}
-  - {n: 2,  id: place-baseline-points, title: Place the baseline points,              kind: user, evidence: none,
+  - {n: 2,  id: place-baseline-points, title: 'Start the base grid (BAS01, BAS02)',     kind: user, evidence: none,
      note: "BAS01, BAS02 outside the circle, tangential, at least D/2 apart."}
-  - {n: 3,  id: tape-baseline,         title: Tape the baseline both ways,            kind: user+app,
+  - {n: 3,  id: tape-baseline,         title: Tape BAS01–BAS02 both ways,               kind: user+app,
      evidence: "baseline.saved BAS01–BAS02, tape measurement, offsets 0", note: "You tick when taped; the app ticks when the baseline is saved. Both needed."}
-  - {n: 4,  id: laser-check-baseline,  title: Laser check of the baseline,            kind: user, evidence: none,
+  - {n: 4,  id: laser-check-baseline,  title: Laser check of BAS01–BAS02,               kind: user, evidence: none,
      note: "Was 'Laser CHK-BASE'. Write the laser reading in the note; do not enter it as a tape measurement."}
-  - {n: 5,  id: add-base-points,       title: Add base points (N/E tie form),          kind: user, evidence: "base-tie.saved entries in the run log; you tick",
+  - {n: 5,  id: add-base-points,       title: Grow the base grid (N/E tie form),        kind: user, evidence: "base-tie.saved entries in the run log; you tick",
      note: "Grid frame: BAS01 is the origin, the grid is set to north (grid-to-north σ display only). Base points BAS03, BAS04… use the printed BAS sleeves (former EDG codes). For each new point: from a point already placed, tape East and North (σ 4 mm per tape plus a 1° squareness σ, correlated per tie), then the diagonal as the check. Extra ties are welcome. Every save re-adjusts the network (adjustGridNetwork), logs the tie on the run, and shows each diagonal's w; |w| > 3.29 is red: re-tape that tie. Hint only: spread several base points so each edge point sees 4+ at good angles."}
   - {n: 6,  id: camera-calibration,    title: Calibration photo (focal length),       kind: app,
      evidence: "1 photo at camera position 'Calibration' (legacy CAL); σ_fx ≤ 0.5 % or circle-result says 'calibrate first'"}

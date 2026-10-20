@@ -135,6 +135,11 @@ export interface StepPhotoTaps {
   photos: PhotoTapTarget[][];
   /** sleeve-height only: manual taps asked for when detection confidence is low. */
   fallback?: PhotoTapTarget[];
+  /**
+   * bearings only: targets the sleeve scan may fill but the tap bar never asks for (the bottom
+   * sleeves BASnnB of two-sleeve posts). Kept with the photo's clicks like any target.
+   */
+  scanOnly?: PhotoTapTarget[];
 }
 
 export interface WorkflowStep {
@@ -199,10 +204,11 @@ export type RunLogEntry =
   | { at: string; type: 'config.confirmed' }
   | { at: string; type: 'config.changed'; changes: { key: string; from: unknown; to: unknown }[] }
   | { at: string; type: 'base-tie.saved'; tie: BaseTie; summary: string }
-  | { at: string; type: 'base-tie.removed'; tie: BaseTie };
+  | { at: string; type: 'base-tie.removed'; tie: BaseTie }
+  | { at: string; type: 'base-post.saved'; point: string; separationM: number | null };
 
 /**
- * 'Add base points' (rev 6): one tie from a point already placed to another point on the N/E grid.
+ * 'Grow the base grid' (step id add-base-points, rev 6): one tie from a point already placed to another point on the N/E grid.
  * East and North are taped offsets (to − from, m, signed); the diagonal is the taped check.
  * Any reading may be left out on an extra tie. BAS01 is the grid origin.
  */
@@ -237,6 +243,11 @@ export interface WorkflowRun {
   circleTape?: CircleTape;
   /** Circle field test rev 6: the base-point ties on the N/E grid, in the order they were saved. */
   baseTies?: BaseTie[];
+  /**
+   * Two-sleeve posts: top-to-bottom sleeve distance per base point, m, where it differs from the
+   * Set-up default (post_separation_m). Only used when the bottom sleeve BASnnB is in a photo.
+   */
+  basePostSeparationM?: Record<string, number>;
   updatedAt: string;
   finishedAt?: string;
   paused?: boolean;

@@ -36,6 +36,7 @@ import {
   retakeOnePhotoInDoc,
   removeBaseTieWorkflow,
   saveBaseTieWorkflow,
+  saveBasePostWorkflow,
   ADD_BASE_POINTS_STEP_ID,
   linkedPhotosForStep,
   saveCircleTapeWorkflow,
@@ -63,7 +64,7 @@ import {
   wheelHeightPx,
 } from './guidedRoller';
 import { cameraCaptureContext, cameraLink } from './cameraCapture';
-import { canonicalStepId, SETUP_STEP_ID } from './fieldTestMeta';
+import { canonicalStepId, migrateFieldTestSetup, SETUP_STEP_ID } from './fieldTestMeta';
 import { firstUnsettledStepId, isSettled, normalizeStatus } from './guards';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
 import type { CircleTape, CircleTapeEdge, FieldTestSetupValues, WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
@@ -301,7 +302,13 @@ export function handleWorkflowCommand(
       return {};
     }
     move = saveBaseTieWorkflow(progress, tie);
-    if (move.changed) baseTieDraft = { from: tie.to, to: '', e: '', n: '', d: '' };
+    if (move.changed) baseTieDraft = { from: tie.to, to: '', e: '', n: '', d: '', s: '' };
+  }
+  else if (cmd === 'workflow-base-post') {
+    const text = baseTieDraft.s.replace(',', '.').trim();
+    const sep = text ? Number(text) : null;
+    move = saveBasePostWorkflow(progress, baseTieDraft.to, sep === null || Number.isFinite(sep) ? sep : NaN);
+    if (move.changed) baseTieDraft = { ...baseTieDraft, s: '' };
   }
   else if (cmd === 'workflow-base-tie-remove') {
     move = removeBaseTieWorkflow(progress, source.getAttribute('data-tie') ?? '');
@@ -537,11 +544,12 @@ function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElemen
   const grid = el('div', 'roller-form-grid');
   grid.append(formTile('Circle diameter (m)', 'circle_diameter_m', values.circle_diameter_m.toFixed(2)));
   grid.append(formTile('Edge points (at least 8)', 'edge_points', String(values.edge_points)));
-  grid.append(formTile('Baseline BAS01–BAS02 (m)', 'baseline_length_m', values.baseline_length_m.toFixed(3)));
+  grid.append(formTile('Base grid start, BAS01–BAS02 (m)', 'baseline_length_m', values.baseline_length_m.toFixed(3)));
+  grid.append(formTile('Two-sleeve post: sleeves apart, default (m)', 'post_separation_m', values.post_separation_m.toFixed(3)));
   grid.append(formTile('Calibration distance (m)', 'calibration_distance_m', values.calibration_distance_m.toFixed(1)));
   grid.append(formTile('Archive age before clean-out (days)', 'photo_archive_age_days', String(values.photo_archive_age_days)));
-  grid.append(formTile('Tolerance baseline (mm)', 'tolerances_mm.baseline', String(values.tolerances_mm.baseline)));
-  grid.append(formTile('Circle diameter limit, baseline class (mm)', 'tolerances_mm.circle_diameter_baseline', String(values.tolerances_mm.circle_diameter_baseline)));
+  grid.append(formTile('Tolerance BAS01–BAS02 tape (mm)', 'tolerances_mm.baseline', String(values.tolerances_mm.baseline)));
+  grid.append(formTile('Circle diameter limit, base-grid class (mm)', 'tolerances_mm.circle_diameter_baseline', String(values.tolerances_mm.circle_diameter_baseline)));
   grid.append(formTile('Circle diameter limit, plantable (mm)', 'tolerances_mm.circle_diameter_plantable', String(values.tolerances_mm.circle_diameter_plantable)));
   form.append(grid);
   const act = el('div', 'roller-form-act');
@@ -635,10 +643,10 @@ function renderMeasurementStrength(detail: ReturnType<typeof circleResultDetailF
   return wrap;
 }
 
-let baseTieDraft: { from: string; to: string; e: string; n: string; d: string } = { from: 'BAS01', to: 'BAS02', e: '', n: '', d: '' };
+let baseTieDraft: { from: string; to: string; e: string; n: string; d: string; s: string } = { from: 'BAS01', to: 'BAS02', e: '', n: '', d: '', s: '' };
 
 /** Parse the tie form. null when From / To are missing or no reading is a number. */
-export function baseTieFromDraft(draft = baseTieDraft): { from: string; to: string; eastM?: number; northM?: number; diagonalM?: number } | null {
+export function baseTieFromDraft(draft: { from: string; to: string; e: string; n: string; d: string; s?: string } = baseTieDraft): { from: string; to: string; eastM?: number; northM?: number; diagonalM?: number } | null {
   const num = (t: string): number | undefined => {
     const v = t.replace(',', '.').trim();
     if (!v) return undefined;
@@ -656,7 +664,7 @@ export function baseTieFromDraft(draft = baseTieDraft): { from: string; to: stri
   return { from, to, eastM, northM, diagonalM };
 }
 
-/** 'Add base points': the N/E/diagonal tie form, the ties so far and the network's checks. */
+/** 'Grow the base grid': the N/E/diagonal tie form, two-sleeve posts, the ties so far and the network's checks. */
 function renderBaseTieForm(run: WorkflowRun): HTMLElement {
   const form = el('div', 'roller-setup-form');
   form.dataset.testid = 'base-tie-form';
@@ -679,11 +687,16 @@ function renderBaseTieForm(run: WorkflowRun): HTMLElement {
   field('East (m, minus = west)', 'e', 'decimal');
   field('North (m, minus = south)', 'n', 'decimal');
   field('Diagonal (m, the check)', 'd', 'decimal');
+  field('Post sleeves apart at To (m, two-sleeve post)', 's', 'decimal');
   form.append(grid);
   const act = el('div', 'roller-form-act');
-  act.append(el('div', 'roller-hint', 'Tape East, then North, then the diagonal. The app re-adjusts after each tie.'));
+  act.append(el('div', 'roller-hint', 'Tape East, then North, then the diagonal. The app re-adjusts after each tie. Two-sleeve post: type the top-to-bottom sleeve distance and Save post (blank = Set-up default).'));
   act.append(button('Save tie', 'workflow-base-tie', { primary: true, testid: 'workflow-base-tie' }));
+  act.append(button('Save post', 'workflow-base-post', { testid: 'workflow-base-post' }));
   form.append(act);
+  const posts = Object.entries(run.basePostSeparationM ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const dflt = migrateFieldTestSetup(run.setup?.values).post_separation_m;
+  form.append(el('p', 'roller-hint', `Two-sleeve posts (bottom sleeve BASnnB): ${posts.length ? posts.map(([id, m]) => `${id} ${m.toFixed(3)} m`).join(', ') + '; others' : 'all'} ${dflt.toFixed(3)} m (Set-up default).`));
   const ties = run.baseTies ?? [];
   const net = baseNetworkForRun(run);
   if (ties.length && !net) form.append(el('p', 'roller-hint roller-hint--warn', 'The ties do not place every point yet: a new point needs East and North from a placed point.'));

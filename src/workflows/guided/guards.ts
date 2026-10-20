@@ -91,6 +91,7 @@ export function setupValid(values: FieldTestSetupValues): boolean {
   if (!(values.circle_diameter_m > 0) || !(values.baseline_length_m >= values.circle_diameter_m / 2 - 1e-9)) return false;
   if (!Number.isInteger(values.edge_points) || values.edge_points < 8) return false;
   if (!Number.isInteger(values.photo_archive_age_days) || values.photo_archive_age_days < 1) return false;
+  if (!(values.post_separation_m > 0)) return false;
   // Rev 6: camera positions are gone (one photo per edge point); their legacy values are not checked.
   const tol = Object.values(values.tolerances_mm);
   return tol.every((v) => v > 0);
@@ -117,6 +118,7 @@ export function changedKeys(oldValues: FieldTestSetupValues, nextValues: FieldTe
     'edge_points',
     'photo_archive_age_days',
     'calibration_distance_m',
+    'post_separation_m',
     'tolerances_mm.baseline',
     'tolerances_mm.railway',
     'tolerances_mm.flower_bed',

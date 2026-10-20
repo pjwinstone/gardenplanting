@@ -5,9 +5,21 @@
  * these IDs (docs/marker-detection.md).
  */
 import type { GardenDocument, MarkerAssignment } from '../../model';
-import { CIRCLE_SLEEVES } from '../../../scripts/markerSleeve';
+import { ALL_SLEEVES } from '../../../scripts/markerSleeve';
 
-export const DEFAULT_MARKER_SET: readonly MarkerAssignment[] = CIRCLE_SLEEVES.map((s) => ({ point: s.point, id: s.id }));
+/**
+ * Default set: BAS01–BAS14 (the top sleeve of each base point), then BAS01B–BAS14B, the bottom
+ * sleeve of a two-sleeve post. A base point maps to two codes through the point names: BASnn is
+ * the top (the bearing), BASnnB the bottom (the range with BASnn). Stored clicks on BASnn keep
+ * working unchanged.
+ */
+export const DEFAULT_MARKER_SET: readonly MarkerAssignment[] = ALL_SLEEVES.map((s) => ({ point: s.point, id: s.id }));
+
+/** BAS03B → BAS03; undefined for anything that is not a post bottom sleeve. */
+export function postTopFor(point: string): string | undefined {
+  const m = /^(BAS\d+)B$/.exec(point);
+  return m ? m[1] : undefined;
+}
 
 /** The marker set in use for a document (its own field, else the default). */
 export function markerSetFor(doc?: Pick<GardenDocument, 'markerSet'> | null): readonly MarkerAssignment[] {

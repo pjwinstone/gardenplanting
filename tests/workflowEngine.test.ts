@@ -208,7 +208,7 @@ describe('guided workflow engine', () => {
     });
     const line = formatPastRunLine(again.progress.pastRuns?.[0] as WorkflowPastRun);
     expect(line).toBe(
-      `Circle field test · ${when} · Laser check of the baseline: CHK-BASE 8.001 · Mark the edge points: sleeve R 30.2 mm, height 0.5 m`,
+      `Circle field test · ${when} · Laser check of BAS01–BAS02: CHK-BASE 8.001 · Mark the edge points: sleeve R 30.2 mm, height 0.5 m`,
     );
     expect(line).not.toContain('circle-field-test');
     expect(line).not.toContain('laser-check');

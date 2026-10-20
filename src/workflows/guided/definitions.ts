@@ -9,13 +9,18 @@ const bearings = (...photos: PhotoTapTarget[][]): StepPhotoTaps => ({ use: 'bear
 
 /** Base points the edge-photo tap screen offers: the garden's BAS01… sleeves. */
 const BASE_POINT_TAPS: PhotoTapTarget[] = Array.from({ length: 14 }, (_, i) => cane(`BAS${String(i + 1).padStart(2, '0')}`));
+/** Bottom sleeves BAS01B… of two-sleeve posts: found by the sleeve scan, not asked for one by one. */
+const POST_BOTTOM_TAPS: PhotoTapTarget[] = Array.from({ length: 14 }, (_, i) => {
+  const id = `BAS${String(i + 1).padStart(2, '0')}`;
+  return { id: `${id}B`, label: `${id} bottom sleeve`, optional: true };
+});
 
 export const circleFieldTest: WorkflowDefinition = {
   id: 'circle-field-test',
   revision: 6,
   status: 'ready',
   title: 'Circle field test',
-  summary: 'Your own garden circle (about 12 m). Base points on a N/E grid, then one photo from each edge point. No canes.',
+  summary: 'Your own garden circle (about 12 m). A base grid of base points on North/East tapes, then one photo from each edge point. No canes.',
   steps: [
     {
       id: 'gather-kit',
@@ -27,6 +32,7 @@ export const circleFieldTest: WorkflowDefinition = {
         'One iPhone. Rear camera, zoom 1×, held landscape. Same phone for every photo, including the calibration.',
         'A tape that reaches across the circle (about 12 m) clear, and a shorter one for the base-point ties.',
         'Base-point sleeves from Print & fit markers (BAS01, BAS02, BAS03…), each on a post or 60 mm dowel. Matte. Each sleeve’s own R. A spirit level.',
+        'Two-sleeve posts (optional, for spots behind bushes where only 2 base points show): a second, bottom sleeve BASnnB on the same post, 1.2 m below the top one (Set-up), centre to centre.',
         'One peg per edge point (Set-up, 12 by default). Edge points carry no sleeve: you stand on them for one photo each.',
         'Camera location off. Leave Offset A (mm) and Offset B (mm) at 0.',
       ],
@@ -37,14 +43,14 @@ export const circleFieldTest: WorkflowDefinition = {
       id: 'place-baseline-points',
       n: 2,
       kind: 'user',
-      title: 'Place the baseline points',
-      instruction: 'Outside the circle, along it (tangential). At least half the diameter long.',
+      title: 'Start the base grid (BAS01, BAS02)',
+      instruction: 'The first two base points of the grid: outside the circle, along it (tangential), at least half the diameter apart.',
       detail: [
         'Put BAS01 and BAS02 just outside the circle, side by side along its edge, about 2 m clear of it. The line BAS01–BAS02 runs along the circle, not towards its middle.',
-        'Length: the Set-up baseline (at least half the circle diameter: 6 m for a 12 m circle). Looking from BAS01 toward BAS02, the circle is on your left.',
+        'Distance: the Set-up BAS01–BAS02 length (at least half the circle diameter: 6 m for a 12 m circle). Looking from BAS01 toward BAS02, the circle is on your left. More base points join the grid in step 5.',
         'Plumb both canes (bubble, about 1°) and write each sleeve’s R and height.',
       ],
-      noteLabel: 'Baseline sleeve R, heights',
+      noteLabel: 'BAS01, BAS02 sleeve R, heights',
       complete: { on: 'manual' },
       link: none,
     },
@@ -52,12 +58,12 @@ export const circleFieldTest: WorkflowDefinition = {
       id: 'tape-baseline',
       n: 3,
       kind: 'user+app',
-      title: 'Tape the baseline both ways',
+      title: 'Tape BAS01–BAS02 both ways',
       instruction: 'Sleeve to sleeve, level, then add R. Type the mean.',
       detail: [
         'Tape BAS01–BAS02 both ways, sleeve to sleeve, level. Level each reading, then add that end’s measured R.',
         'The two axis lengths must agree within 10 mm. The mean is the length you type. Do not average a pair that disagrees by more than 10 mm.',
-        'Menu → Baseline. End A BAS01, End B BAS02. Measure with Tape. Offset A and Offset B stay 0. Save baseline.',
+        'Menu → Baseline (the app’s name for a taped pair). End A BAS01, End B BAS02. Measure with Tape. Offset A and Offset B stay 0. Save baseline.',
       ],
       noteLabel: 'Both pulls, level then +R',
       complete: {
@@ -79,10 +85,10 @@ export const circleFieldTest: WorkflowDefinition = {
       id: 'laser-check-baseline',
       n: 4,
       kind: 'user',
-      title: 'Laser check of the baseline',
-      instruction: 'Same baseline, sleeve to sleeve. Do not type the laser.',
+      title: 'Laser check of BAS01–BAS02',
+      instruction: 'Same two base points, sleeve to sleeve. Do not type the laser.',
       detail: [
-        'Laser the same baseline, sleeve to sleeve, same height. This is CHK-BASE. It is not typed into the app.',
+        'Laser BAS01–BAS02 again, sleeve to sleeve, same height. This is CHK-BASE. It is not typed into the app.',
         'Retake if the dot is more than half that sleeve’s R (about 15 mm) off the middle. Level, then add R for each sleeved end.',
       ],
       noteLabel: 'CHK-BASE laser',
@@ -93,13 +99,14 @@ export const circleFieldTest: WorkflowDefinition = {
       id: 'add-base-points',
       n: 5,
       kind: 'user',
-      title: 'Add base points',
-      instruction: 'Grow the network: East, North, then the diagonal as the check. The app re-adjusts after each one.',
+      title: 'Grow the base grid',
+      instruction: 'Add base points anywhere that suits the garden: East, North, then the diagonal as the check. The app re-adjusts after each one.',
       detail: [
         'BAS01 is the origin of a North/East grid. Set North and East by eye or with the compass; the grid is the frame, north is for display only.',
         'For each new base point (BAS02, BAS03, … from the marker set): from a point already placed, tape how far East it is and how far North (minus for west or south), then tape the diagonal straight to it. Type the three and Save tie.',
         'The diagonal is the check. If it shows red, re-tape that tie (remove it and save it again). Extra ties to other points make it stronger.',
         'Spread several base points so each edge point will see 4 or more of them at good angles: some near the middle, staggered so none hides behind another. Plumb each post.',
+        'Two-sleeve posts: where bushes leave only 2 base points in view, put a bottom sleeve (BASnnB) on those posts. Type the top-to-bottom distance (centre to centre) in Post sleeves apart and Save post; blank uses the Set-up default (1.2 m). Two such posts give a 2-point fix (amber, unchecked); with 3 or more base points in view their ranges add checks.',
         'Tick when every base point is placed and no diagonal is red.',
       ],
       noteLabel: 'Base points',
@@ -158,7 +165,7 @@ export const circleFieldTest: WorkflowDefinition = {
       instruction: 'Stand on each peg in order, face the base points, one landscape photo at 1×.',
       detail: [
         'Start at EDG01 and go round in order. Stand on the peg, phone at eye height, landscape, 1×, and turn so the base points are in the frame. One photo, no turning, no tape.',
-        'Then tap every base point you can see (the app suggests them from their codes). It needs at least 4 for a checked point; a missing or hidden one turns that point grey.',
+        'Then tap every base point you can see (the app suggests them from their codes), and the bottom sleeve of any two-sleeve post. It needs at least 4 for a checked point, or 3 with a two-sleeve post. Only 2 in view, both two-sleeve posts: a 2-point fix, amber at best. Fewer turns that point grey.',
         'A bad photo: open Photos and Retake that one. The new photo takes the same edge point.',
       ],
       noteLabel: 'Anything odd',
@@ -166,7 +173,7 @@ export const circleFieldTest: WorkflowDefinition = {
       doneInstruction: 'Tape the diameter next.',
       complete: { on: 'photo.uploaded', stationId: 'Edge points', minPhotos: 12 },
       link: { to: 'camera', stepId: 'edge-photos', cameraPositionId: 'Edge points' },
-      photoTaps: bearings(...Array.from({ length: 12 }, () => BASE_POINT_TAPS)),
+      photoTaps: { ...bearings(...Array.from({ length: 12 }, () => BASE_POINT_TAPS)), scanOnly: POST_BOTTOM_TAPS },
     },
     {
       id: 'tape-diameter',
@@ -189,7 +196,7 @@ export const circleFieldTest: WorkflowDefinition = {
       title: 'Circle result',
       instruction: 'The app fits the circle and compares it with your tape.',
       detail: [
-        'First each edge point gets a colour. Green: checked, and no undetected error could move it more than 40 mm. Amber: up to 60 mm, or one reading a little off. Red: a reading disagrees (a base point moved or a wrong tap). Grey: unchecked (too few base points in the photo, or poor angles).',
+        'First each edge point gets a colour. Green: checked, and no undetected error could move it more than 40 mm. Amber: up to 60 mm, or one reading a little off, or a 2-point fix (unchecked: only 2 two-sleeve posts in view). Red: a reading disagrees (a base point moved or a wrong tap). Grey: unchecked (too few base points in the photo, or poor angles).',
         'Then the circle. Green: the fitted diameter agrees with the tape within its uncertainty and within the limit (60 mm). Amber: close. Red: it does not agree.',
         'Not a circle: the points do not sit on one circle; check the pegs are on the edge you taped. Weak: fix the red or grey points first (the lines below say which). Calibrate first: the focal length is not known well enough yet.',
         'Tick when you have read the result.',

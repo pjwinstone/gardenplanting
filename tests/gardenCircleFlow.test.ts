@@ -8,6 +8,7 @@ import {
   doneWorkflow,
   emptyProgress,
   removeBaseTieWorkflow,
+  saveBasePostWorkflow,
   saveBaseTieWorkflow,
   saveCircleTapeWorkflow,
   startWorkflow,
@@ -107,6 +108,34 @@ describe('garden circle field test (docs/garden-circle.md)', () => {
     const removed = removeBaseTieWorkflow(bad.progress, run.baseTies![2].id, NOW);
     expect(removed.progress.runs[ID]!.baseTies).toHaveLength(2);
     expect(removed.progress.runs[ID]!.runLog?.at(-1)?.type).toBe('base-tie.removed');
+  });
+
+  it('two-sleeve posts: Set-up default 1.2 m, editable per base point, logged; the result re-checks', () => {
+    const d = defaultFieldTestSetup();
+    expect(d.post_separation_m).toBe(1.2);
+    expect(setupValid({ ...d, post_separation_m: 0 })).toBe(false);
+    expect(setupValuesWithDraft(d, { post_separation_m: '1,15' })!.post_separation_m).toBe(1.15);
+    // Older saves without the field get the default.
+    expect(migrateFieldTestSetup({ ...d, post_separation_m: undefined } as never).post_separation_m).toBe(1.2);
+    let p = tickWorkflow(fresh(), 'circle-result', undefined, NOW).progress;
+    expect(saveBasePostWorkflow(p, 'BAS03B', 1.2, NOW).changed).toBe(false);
+    expect(saveBasePostWorkflow(p, 'BAS03', 0.05, NOW).changed).toBe(false);
+    const saved = saveBasePostWorkflow(p, 'bas03', 1.25, NOW);
+    expect(saved.notice).toMatch(/BAS03: post sleeves 1.250 m apart/);
+    p = saved.progress;
+    const run = p.runs[ID]!;
+    expect(run.basePostSeparationM).toEqual({ BAS03: 1.25 });
+    expect(run.runLog?.at(-1)).toMatchObject({ type: 'base-post.saved', point: 'BAS03', separationM: 1.25 });
+    expect(run.steps['circle-result']?.status).toBe('needs_recheck');
+    p = saveBasePostWorkflow(p, 'BAS03', null, NOW).progress;
+    expect(p.runs[ID]!.basePostSeparationM).toEqual({});
+  });
+
+  it('marker set: each base point maps to a top code (BASnn) and a post-bottom code (BASnnB)', () => {
+    expect(pointForMarkerId('315')).toBe('BAS01');
+    expect(pointForMarkerId('222')).toBe('BAS01B');
+    expect(basePointsFor(null)).toHaveLength(14);
+    expect(markerIdsFor(null)).toHaveLength(28);
   });
 
   it('edge photos map to EDG01… in the order taken; a per-photo retake keeps its edge point', () => {

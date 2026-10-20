@@ -40,8 +40,9 @@ describe('negatives: no sleeve, or a sleeve from another garden', { timeout: 120
     });
   }
   it('a readable sleeve whose ID is not in this garden is not reported', () => {
-    const sc = scene('fence', [{ id: '24B', distM: 4, x: 400.4, y: 450, tiltDeg: 6 }]);
-    expect(SET).not.toContain('24B');
+    // 24B is a post bottom sleeve (BAS02B) since rev 7; 22D is still unassigned.
+    const sc = scene('fence', [{ id: '22D', distM: 4, x: 400.4, y: 450, tiltDeg: 6 }]);
+    expect(SET).not.toContain('22D');
     const res = scanSleeves(sc.img, { markerIds: SET, budgetMs: 1e9 });
     expect(res.sleeves).toEqual([]);
   });
