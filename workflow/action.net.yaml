@@ -25,7 +25,7 @@ transitions:
   - {id: photo_refused,   user: false, from: [in_progress, uploading], to: error,     recovery: retake, does: "Portrait, not 1×, 'Not usable for …', no capture time, or taken before the run. Reason shown."}
   - {id: upload_failed,   user: false, from: [uploading],            to: error,       recovery: retry,  does: "OneDrive upload gave up (e.g. size mismatch, 0 bytes). Reason = the upload error."}
   - {id: retake,          user: true,  from: [error],                to: in_progress, guard: recoveryIsRetake, does: "Red Retake pill: opens the camera again."}
-  - {id: retake_done,     user: true,  from: [done, error],          to: in_progress, guard: isPhotoStep,      does: "Retake button beside a done (or upload-failed) photo step, always there: old photos stop counting; later steps resting on them go to re-check."}
+  - {id: retake_done,     user: true,  from: [done, error],          to: in_progress, guard: isPhotoStep,      does: "Retake on a photo in the step's Photos viewer (row button Photos (n); also shown on error): opens the camera at once; old photos stop counting (retakeAfter), move to photos/archive/<run>/, later steps resting on them go to re-check."}
   - {id: retry,           user: true,  from: [error],                to: uploading,   guard: recoveryIsRetry,  does: "Red Retry upload pill: re-sends that photo (photo-upload-retry)."}
   - {id: settled_by_hand, user: true,  from: [idle, in_progress, uploading, error], to: done, does: "Tick by hand with a reason, or Skip with a note (Details). Top net: step settled."}
   - {id: recheck,         user: false, from: [done],                 to: idle,        does: "A Set-up value this step depends on changed (top net needs_recheck)."}

@@ -91,6 +91,18 @@ export function deletedPhotosFolderPath(): string {
   return `${photosFolderPath()}/${ONEDRIVE_PHOTOS_DELETED_DIR}`;
 }
 
+/** Photos superseded by a retake, one folder per run. Cleaned out only after confirmation. */
+export const ONEDRIVE_PHOTOS_ARCHIVE_DIR = 'archive';
+
+export function archivePhotosFolderPath(): string {
+  return `${photosFolderPath()}/${ONEDRIVE_PHOTOS_ARCHIVE_DIR}`;
+}
+
+/** Folder name for one run: its start time, safe for OneDrive (e.g. run-2026-10-20T09-00-00Z). */
+export function archiveRunFolderName(runStartedAt: string): string {
+  return `run-${runStartedAt.replace(/\.\d+Z$/, 'Z').replace(/[:]/g, '-')}`;
+}
+
 /** True when the user (or a successful Load) has stored a garden filename. */
 export function hasStoredGardenCloudFile(): boolean {
   try {

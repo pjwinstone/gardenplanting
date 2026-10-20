@@ -3,12 +3,11 @@
  * Flags live here so a contrast toggle does not dirty the garden.
  */
 
-import type { GardenDocument } from '../../model';
+import type { GardenDocument, Photo } from '../../model';
 import {
   actionPillClass,
   actionPillCommand,
   actionPillLabel,
-  actionRetakeAvailable,
   actionReasonLine,
   deriveActionState,
   doneBlocker,
@@ -32,6 +31,8 @@ import {
   restartWorkflow,
   resumeWorkflow,
   retakeEvidenceWorkflow,
+  retakeStepPhotosInDoc,
+  linkedPhotosForStep,
   saveCircleTapeWorkflow,
   scrollWorkflowToStep,
   skipWithNoteWorkflow,
@@ -83,6 +84,29 @@ export interface WorkflowCommandResult {
   doc?: GardenDocument;
   menuOpen?: boolean;
   link?: WorkflowLink;
+  /** Async photo work the app runs with a Graph client (docs/photo-archive.md). */
+  photoAction?: 'check-photos' | 'clean-archive' | 'archive-orphans' | 'archive-drain';
+}
+
+/** Step whose Photos viewer is open, or null. */
+let photosViewerStep: string | null = null;
+
+export interface PhotoPanelView {
+  /** Plain lines from the last photo check (errors first). */
+  lines: { kind: 'error' | 'warning' | 'info'; text: string }[];
+  /** Unreferenced photos in OneDrive that "Archive N unreferenced photos" would move. */
+  orphanCount: number;
+  busy?: string;
+}
+let photoPanel: PhotoPanelView | null = null;
+
+/** The app sets the Set-up photo panel (check result, busy line). */
+export function setPhotoPanel(view: PhotoPanelView | null): void {
+  photoPanel = view;
+}
+
+export function photosViewerOpen(): string | null {
+  return photosViewerStep;
 }
 
 export function sunlightMode(): 'sun' | 'shade' | 'system' {
@@ -265,6 +289,26 @@ export function handleWorkflowCommand(
     move = saveCircleTapeWorkflow(progress, tape.diametersM, tape.edge);
     if (move.changed) circleTapeDraft = { d: ['', '', ''] };
   }
+  else if (cmd === 'workflow-photos') {
+    photosViewerStep = stepId || null;
+    return {};
+  }
+  else if (cmd === 'workflow-photos-close') {
+    photosViewerStep = null;
+    return {};
+  }
+  else if (cmd === 'workflow-photo-retake') {
+    // Photos viewer: Retake supersedes the step's photos and opens the camera straight away.
+    const r = retakeStepPhotosInDoc(doc, stepId);
+    photosViewerStep = null;
+    const def = progress.activeId ? workflowById(progress.activeId) : undefined;
+    const link = pillLink(def, stepId) ?? def?.steps.find((item) => item.id === stepId)?.link;
+    if (!r.changed) return {};
+    return { doc: r.doc, link, photoAction: r.superseded.length ? 'archive-drain' : undefined };
+  }
+  else if (cmd === 'workflow-check-photos') return { photoAction: 'check-photos' };
+  else if (cmd === 'workflow-clean-archive') return { photoAction: 'clean-archive' };
+  else if (cmd === 'workflow-archive-orphans') return { photoAction: 'archive-orphans' };
   else if (cmd === 'workflow-retake') {
     move = retakeEvidenceWorkflow(progress, stepId);
     const def = progress.activeId ? workflowById(progress.activeId) : undefined;
@@ -340,7 +384,8 @@ function appendActive(root: HTMLElement, progress: WorkflowProgress): void {
   if (!def || !run || def.status !== 'ready' || def.steps.length === 0) return;
   const roller = def.id === 'circle-field-test' && def.revision >= 3;
   if (roller && !run.finishedAt) {
-    if (sheetOpen) root.append(renderDetailsSheet(def, run));
+    if (photosViewerStep) root.append(renderPhotosViewer(def, run, photosViewerStep));
+    else if (sheetOpen) root.append(renderDetailsSheet(def, run));
     else root.append(renderRollerPanel(def, run, progress));
     return;
   }
@@ -421,18 +466,8 @@ function renderRollerPanel(
         if (photoId) node.dataset.photoId = photoId;
         if (action.place === 'uploading' || action.place === 'done') node.disabled = true;
         row.append(node);
-        if (step && actionRetakeAvailable(step, action)) {
-          row.append(button('Retake', 'workflow-retake', { className: 'roller-retake', step: stepId, testid: 'roller-retake' }));
-        }
       }
       row.append(button('?', 'workflow-expand', { className: 'roller-q', step: stepId }));
-    } else {
-      // A done photo step (e.g. calibration) keeps its Retake after the roller has moved on.
-      const step = def.steps.find((item) => item.id === stepId);
-      const action = step ? deriveActionState(chromeDoc, run, step) : undefined;
-      if (step && action && actionRetakeAvailable(step, action)) {
-        row.append(button('Retake', 'workflow-retake', { className: 'roller-retake', step: stepId, testid: 'roller-retake' }));
-      }
     }
     list.append(row);
   }
@@ -486,6 +521,7 @@ function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElemen
   grid.append(formTile('Camera positions (3 or 4)', 'camera_position_count', String(values.camera_position_count)));
   grid.append(formTile('Baseline BAS01–BAS02 (m, at least D/2)', 'baseline_length_m', values.baseline_length_m.toFixed(3)));
   grid.append(formTile('Calibration distance (m)', 'calibration_distance_m', values.calibration_distance_m.toFixed(1)));
+  grid.append(formTile('Archive age before clean-out (days)', 'photo_archive_age_days', String(values.photo_archive_age_days)));
   for (const [i, key] of CAMERA_POSITION_KEYS.entries()) {
     const pos = values.camera_positions[key];
     grid.append(formTile(`Position ${i + 1} to BAS01 (m, 0 = not taped)`, `camera_positions.${key}.to_bas01`, pos.to_bas01.toFixed(2)));
@@ -501,6 +537,7 @@ function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElemen
   act.append(el('div', 'roller-hint', dirty || run.setup?.status === 'changed_mid_run' ? 'Set-up changed. Confirm when ready.' : ''));
   act.append(button('Confirm', 'workflow-confirm-setup', { primary: true, testid: 'workflow-confirm-setup' }));
   form.append(act);
+  form.append(renderPhotoPanel());
   return form;
 }
 
@@ -560,6 +597,87 @@ function renderCircleResult(doc: GardenDocument | null, run: WorkflowRun): HTMLE
   return box;
 }
 
+/** The step's photos (current ones), for the viewer and the Photos button. */
+export function stepPhotos(doc: GardenDocument | null, run: WorkflowRun, step: WorkflowStep): Photo[] {
+  const c = step.complete;
+  if (!doc || !('on' in c) || c.on !== 'photo.uploaded') return [];
+  return linkedPhotosForStep(doc, c.stationId, run, step.id).filter((p) => !p.supersededAt);
+}
+
+/** "Photos (n)": on photo steps that have photos, or whose action is in error (recovery lives in the viewer). */
+function photosButtonFor(run: WorkflowRun, step: WorkflowStep): HTMLElement | null {
+  const c = step.complete;
+  if (!('on' in c) || c.on !== 'photo.uploaded') return null;
+  const n = stepPhotos(chromeDoc, run, step).length;
+  const action = deriveActionState(chromeDoc, run, step);
+  if (n === 0 && action.place !== 'error' && action.place !== 'done') return null;
+  return button(n ? `Photos (${n})` : 'Photos', 'workflow-photos', { step: step.id, testid: 'workflow-photos' });
+}
+
+function photoStatusLine(photo: Photo): string {
+  const of = photo.originalFile;
+  if (!of) return 'Not on record';
+  if (of.uploadStatus === 'failed') return `Upload failed: ${of.uploadError ?? 'unknown error'}`;
+  if (of.uploadStatus === 'verified') return of.usabilityNote ? `On OneDrive. ${of.usabilityNote}` : 'On the phone and OneDrive';
+  return 'Uploading…';
+}
+
+function renderPhotosViewer(def: WorkflowDefinition, run: WorkflowRun, stepId: string): HTMLElement {
+  const sheet = el('section', 'workflow-sheet workflow-photos-sheet');
+  sheet.dataset.testid = 'workflow-photos-viewer';
+  const step = def.steps.find((s) => s.id === stepId);
+  if (!step) return sheet;
+  sheet.append(el('h2', 'workflow-title', `${rowNumber(def, stepId)} ${step.title}: photos`));
+  const photos = stepPhotos(chromeDoc, run, step);
+  const action = deriveActionState(chromeDoc, run, step);
+  if (action.place === 'error') sheet.append(el('p', 'workflow-notice', actionReasonLine(action) || 'This step needs a new photo.'));
+  if (photos.length > 1) sheet.append(el('p', 'workflow-detail', `Retake replaces all ${photos.length} photos of this step; the old ones move to the archive.`));
+  if (!photos.length) {
+    sheet.append(el('p', 'workflow-detail', 'No photos for this step yet.'));
+    const r = button('Retake', 'workflow-photo-retake', { primary: true, step: stepId, testid: 'photo-retake' });
+    sheet.append(r);
+  }
+  for (const photo of photos) {
+    const item = el('div', 'workflow-photo-item');
+    item.dataset.photoId = photo.id;
+    if (photo.thumbnailDataUrl) {
+      const img = document.createElement('img');
+      img.src = photo.thumbnailDataUrl;
+      img.alt = photo.originalFile?.fileName ?? photo.id;
+      img.className = 'workflow-photo-thumb';
+      item.append(img);
+    }
+    item.append(el('div', 'workflow-photo-name', photo.originalFile?.fileName ?? photo.id));
+    item.append(el('div', 'roller-hint', photoStatusLine(photo)));
+    const retake = button('Retake', 'workflow-photo-retake', { step: stepId, testid: 'photo-retake' });
+    retake.dataset.photo = photo.id;
+    item.append(retake);
+    if (photo.originalFile?.uploadStatus === 'failed') {
+      const retry = button('Retry upload', 'photo-upload-retry', { testid: 'photo-upload-retry' });
+      retry.dataset.photoId = photo.id;
+      item.append(retry);
+    }
+    sheet.append(item);
+  }
+  sheet.append(button('Close', 'workflow-photos-close', { testid: 'workflow-photos-close' }));
+  return sheet;
+}
+
+function renderPhotoPanel(): HTMLElement {
+  const box = el('div', 'roller-photo-panel');
+  box.dataset.testid = 'setup-photo-panel';
+  const act = el('div', 'roller-form-act');
+  act.append(button('Check photos', 'workflow-check-photos', { testid: 'workflow-check-photos' }));
+  act.append(button('Clean out archive', 'workflow-clean-archive', { testid: 'workflow-clean-archive' }));
+  if (photoPanel && photoPanel.orphanCount > 0) {
+    act.append(button(`Archive ${photoPanel.orphanCount} unreferenced photo${photoPanel.orphanCount === 1 ? '' : 's'}`, 'workflow-archive-orphans', { testid: 'workflow-archive-orphans' }));
+  }
+  box.append(act);
+  if (photoPanel?.busy) box.append(el('p', 'roller-hint', photoPanel.busy));
+  for (const line of photoPanel?.lines ?? []) box.append(el('p', `roller-hint roller-hint--${line.kind}`, line.text));
+  return box;
+}
+
 function readDotted(values: FieldTestSetupValues, key: string): unknown {
   return key.split('.').reduce<unknown>((obj, part) => (obj as Record<string, unknown> | undefined)?.[part], values);
 }
@@ -606,6 +724,8 @@ function renderButtonRow(def: WorkflowDefinition, run: WorkflowRun, step: Workfl
   const row = el('div', 'roller-act');
   const hint = el('div', 'roller-hint', reasonLine(def, run, step) || actionReasonLine(deriveActionState(chromeDoc, run, step)));
   row.append(hint);
+  const photosButton = photosButtonFor(run, step);
+  if (photosButton) row.append(photosButton);
   const state = run.steps[step.id];
   const status = normalizeStatus(state?.status ?? 'open');
   const last = def.steps[def.steps.length - 1]?.id === step.id;

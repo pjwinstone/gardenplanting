@@ -48,6 +48,8 @@ export interface FieldTestSetupValues {
   /** BAS01–BAS02, tangential to the circle, at least D/2. */
   baseline_length_m: number;
   calibration_distance_m: number;
+  /** Clean out archive: archived photos older than this many days are offered for deletion. */
+  photo_archive_age_days: number;
   /** Legacy (rev 3 peg layout). Kept so older saves load; not shown. */
   bas02_from_peg_m?: number;
   camera_positions: Record<CameraPositionKey, CameraPositionDistances>;
@@ -69,6 +71,7 @@ export function defaultFieldTestSetup(): FieldTestSetupValues {
     camera_position_count: 4,
     baseline_length_m: 6,
     calibration_distance_m: 4,
+    photo_archive_age_days: tolerances.photoArchiveMaxAgeDays,
     camera_positions: {
       // 9 m outside the edge, round the circle; 1 and 4 (the baseline side) are taped.
       position_1: { to_bas01: 14.6, to_bas02: 8.6 },

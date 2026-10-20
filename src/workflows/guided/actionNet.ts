@@ -218,12 +218,6 @@ export function actionPillLabel(step: WorkflowStep, state: ActionState): string 
   }
 }
 
-/** A second, always-on Retake next to the pill: on done photo steps, and on an upload error. */
-export function actionRetakeAvailable(step: WorkflowStep, state: ActionState): boolean {
-  if (!photoNeed(step)) return false;
-  return state.place === 'done' || (state.place === 'error' && state.recovery === 'retry');
-}
-
 /** data-cmd for the pill. */
 export function actionPillCommand(state: ActionState): string {
   if (state.place === 'error') return state.recovery === 'retry' ? 'photo-upload-retry' : 'workflow-retake';

@@ -54,6 +54,10 @@ export interface ManifestPhoto {
   clickSpace: 'upright';
   /** Set when the survey dropped this original. The row stays; the file moves to photos/deleted/. */
   deletedAt?: string;
+  /** Set when a retake (or an orphan clean-up) moved the file to photos/archive/<run>/. */
+  archivedAt?: string;
+  /** Drive path of the archived file, relative to the garden folder. */
+  archivePath?: string;
   /**
    * Survey-shutter sidecar. Geometric distortion correction, quality
    * (`speed`), and requested vs delivered resolution live here next to the
@@ -301,7 +305,7 @@ async function listChildNames(client: GraphRequest, folderPath: string): Promise
   return [...names];
 }
 
-async function writeManifest(
+export async function writeManifest(
   client: GraphRequest,
   manifestPath: string,
   manifest: PhotosManifest,

@@ -138,7 +138,7 @@ describe('uploadAndVerifyOriginal', () => {
 });
 
 describe('drainPhotoQueue', () => {
-  it('uploads, merges the manifest, and drops the queue record', async () => {
+  it('uploads, merges the manifest, and keeps the original on the phone', async () => {
     const queue = createMemoryPhotoQueue();
     const record = queuedRecord();
     await queue.put(record);
@@ -165,7 +165,7 @@ describe('drainPhotoQueue', () => {
     });
     expect(failed).toBe(0);
     expect(statuses).toEqual(['uploading', 'verified']);
-    expect(await queue.list()).toEqual([]);
+    expect((await queue.list()).map((r) => [r.status, r.holdUntilMarked])).toEqual([['verified', undefined]]); // live originals stay on the phone
     expect(manifestBody).toContain(record.fileName);
     expect(manifestBody).toContain('"stationId": "P01"');
     expect(manifestBody).toContain('"receivedAt"');
@@ -173,7 +173,7 @@ describe('drainPhotoQueue', () => {
     expect(manifestBody).toContain(hash);
   });
 
-  it('keeps a calibration original after upload until its sleeve is marked, then deletes it', async () => {
+  it('keeps a calibration original after upload until its sleeve is marked, then just drops the hold', async () => {
     const queue = createMemoryPhotoQueue();
     const record = { ...queuedRecord(), holdUntilMarked: true };
     await queue.put(record);
@@ -204,10 +204,10 @@ describe('drainPhotoQueue', () => {
     expect(await queue.get(record.id)).toBeDefined();
     // Sleeve marked: deleted as normal.
     await releaseMarkedOriginal(record.photoId, queue);
-    expect(await queue.list()).toEqual([]);
+    expect((await queue.list()).map((r) => [r.status, r.holdUntilMarked])).toEqual([['verified', undefined]]); // live originals stay on the phone
   });
 
-  it('marking before the upload finishes clears the hold, so the verified upload deletes as normal', async () => {
+  it('marking before the upload finishes clears the hold, so the verified upload is a normal live photo', async () => {
     const queue = createMemoryPhotoQueue();
     const record = { ...queuedRecord(), holdUntilMarked: true };
     await queue.put(record);
@@ -216,7 +216,7 @@ describe('drainPhotoQueue', () => {
     expect((await queue.get(record.id))?.status).toBe('queued');
     await queue.put({ ...(await queue.get(record.id))!, status: 'verified', bytesOnDrive: true });
     await drainPhotoQueue({ queue, getToken: async () => null, onStatus: () => undefined });
-    expect(await queue.list()).toEqual([]);
+    expect((await queue.list()).map((r) => [r.status, r.holdUntilMarked])).toEqual([['verified', undefined]]); // live originals stay on the phone
   });
 
   it('does not ask for a token when the queue is empty or every failure is permanent', async () => {
@@ -290,7 +290,7 @@ describe('drainPhotoQueue', () => {
     expect(failed).toBe(0);
     expect(names[0]).toContain('P01_20261002T232600123Z.jpg');
     expect(names[1]).toContain('P01_20261002T232600123Z-2.jpg');
-    expect(await queue.list()).toEqual([]);
+    expect((await queue.list()).map((r) => [r.status, r.holdUntilMarked])).toEqual([['verified', undefined]]); // live originals stay on the phone
     expect(photoUploadBackoffMs(1)).toBe(2000);
     expect(photoUploadBackoffMs(2)).toBe(4000);
     expect(photoUploadBackoffMs(8)).toBe(60_000);

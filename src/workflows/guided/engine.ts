@@ -1034,6 +1034,7 @@ export function confirmSetupWorkflow(
   const nextValues = values ?? prev.values;
   if (!setupValid(nextValues)) return { progress, notice: 'Set-up values are not valid.', changed: false };
   const keys = changedKeys(prev.values, nextValues);
+  const surveyKeys = keys.filter((key) => key !== 'photo_archive_age_days');
   const log = [...(pair.run.runLog ?? [])];
   if (keys.length > 0) {
     log.push({
@@ -1047,14 +1048,15 @@ export function confirmSetupWorkflow(
   let run: WorkflowRun = {
     ...pair.run,
     setup: {
-      status: keys.length > 0 ? 'changed_mid_run' : 'confirmed',
+      // The archive age is housekeeping: logged, but no survey result depends on it.
+      status: surveyKeys.length > 0 ? 'changed_mid_run' : 'confirmed',
       values: nextValues,
       confirmedAt: now,
     },
     runLog: log,
     updatedAt: now,
   };
-  if (keys.length > 0) run = markDependantsForRecheck(pair.def, run, keys, now);
+  if (surveyKeys.length > 0) run = markDependantsForRecheck(pair.def, run, surveyKeys, now);
   return { progress: patchRun(progress, pair.def.id, run), changed: true };
 }
 
@@ -1174,6 +1176,65 @@ export function saveCircleTapeWorkflow(
   if (result && isSettled(result)) steps['circle-result'] = mirrorLegacy({ ...result, status: 'needs_recheck' });
   const run: WorkflowRun = { ...pair.run, steps, circleTape: { diametersM: diametersM.slice(0, 3), edge, savedAt: now }, updatedAt: now };
   return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+/**
+ * Retake from the step's Photos viewer: the step's current photos are superseded (they stop
+ * counting, same as retake_done / retakeAfter, and dependants after calibration go to re-check),
+ * and each one becomes an archive job (moved to photos/archive/<run>/ in OneDrive, phone copy
+ * deleted) on the run. Returns the document; unchanged when the step has no photo evidence.
+ */
+export function retakeStepPhotosInDoc(doc: GardenDocument, stepId: string, now = new Date().toISOString()): { doc: GardenDocument; changed: boolean; superseded: string[] } {
+  const progress = readProgress(doc);
+  const pair = activePair(progress);
+  if (!pair) return { doc, changed: false, superseded: [] };
+  const id = canonicalStepId(stepId);
+  const step = pair.def.steps.find((item) => item.id === id);
+  const c = step?.complete;
+  if (!step || !c || !('on' in c) || c.on !== 'photo.uploaded') return { doc, changed: false, superseded: [] };
+  const old = linkedPhotosForStep(doc, c.stationId, pair.run, id);
+  const move = retakeEvidenceWorkflow(progress, id, now);
+  if (!move.changed) return { doc, changed: false, superseded: [] };
+  const run = move.progress.runs[pair.def.id]!;
+  const jobs = old
+    .filter((p) => p.originalFile?.fileName)
+    .map((p) => ({ photoId: p.id, fileName: p.originalFile!.fileName, stepId: id, runStartedAt: run.startedAt, supersededAt: now, reason: 'retake' as const }));
+  const prior = run.photoArchive ?? { pending: [], log: [] };
+  const pending = [...prior.pending.filter((j) => !jobs.some((n) => n.photoId === j.photoId)), ...jobs];
+  const nextRun: WorkflowRun = { ...run, photoArchive: { pending, log: prior.log } };
+  const ids = new Set(old.map((p) => p.id));
+  const photos = doc.photos.map((p) => (ids.has(p.id) ? { ...p, supersededAt: now } : p));
+  const nextProgress = patchRun(move.progress, pair.def.id, nextRun);
+  return { doc: { ...doc, photos, workflowProgress: nextProgress }, changed: true, superseded: [...ids] };
+}
+
+/** Apply a finished archive drain to the document: pending jobs left, log entries added, archived paths on the photos. */
+export function applyArchiveDrain(
+  doc: GardenDocument,
+  result: { pending: import('../../photoArchive').ArchiveJob[]; done: import('../../photoArchive').ArchiveLogEntry[] },
+): GardenDocument {
+  if (!result.done.length) return doc;
+  const progress = readProgress(doc);
+  const runs = { ...progress.runs };
+  const doneIds = new Set(result.done.map((e) => e.photoId).filter(Boolean));
+  for (const [rid, run] of Object.entries(runs)) {
+    if (!run?.photoArchive) continue;
+    // Jobs added while the drain ran stay pending; only finished ones leave.
+    const pending = run.photoArchive.pending.filter((j) => !result.done.some((e) => e.photoId === j.photoId && e.fileName === j.fileName));
+    const log = [...run.photoArchive.log, ...result.done.filter((e) => run.photoArchive!.pending.some((j) => j.photoId === e.photoId))];
+    (runs as Record<string, WorkflowRun>)[rid] = { ...run, photoArchive: { pending, log } };
+  }
+  const byId = new Map(result.done.map((e) => [e.photoId, e]));
+  const photos = doc.photos.map((p) => {
+    const e = doneIds.has(p.id) ? byId.get(p.id) : undefined;
+    return e && p.originalFile ? { ...p, originalFile: { ...p.originalFile, archivePath: e.path } } : p;
+  });
+  return { ...doc, photos, workflowProgress: { ...progress, runs } };
+}
+
+/** All archive jobs still pending, across runs. */
+export function pendingArchiveJobs(doc: GardenDocument): import('../../photoArchive').ArchiveJob[] {
+  return Object.values(readProgress(doc).runs).flatMap((run) => run?.photoArchive?.pending ?? []);
 }
 
 export function rejectEvidenceWorkflow(
