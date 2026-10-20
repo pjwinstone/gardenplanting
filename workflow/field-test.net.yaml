@@ -7,7 +7,7 @@
 
 id: review-field-test
 title: Circle field test (guided checklist)
-revision: 5   # rev 5: Paul's own garden circle (~12 m, docs/garden-circle.md): edge points EDG01…, tape-diameter, circle-result; calibration Retake always on.
+revision: 5   # rev 5: Paul's own garden circle (~12 m, docs/garden-circle.md): edge points EDG01…, tape-diameter, circle-result; calibration Retake via the step's Photos viewer (docs/photo-archive.md).
 # rev 4: hierarchical — each step instantiates workflow/action.net.yaml for its row pill.
 # rev 3: Step 0 Set-up (run config) + header cog; config changes mark dependants 'needs re-check'.
 # rev 2: rev 2: Back = roller scroll; Retake and Details (?) are row actions; ONE button row (Tick + Next/Later/Done);

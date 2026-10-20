@@ -1,3 +1,5 @@
+import { runPhotoAction, type PhotoAppDeps } from './photoArchiveApp';
+import { ARCHIVE_RETRY_BASE_MS } from './photoArchive';
 /** Main UI: plan-first layout, hamburger drawer, print tags. Calls toolbox + workflows. */
 
 import type { GardenDocument, Photo, Point } from './model';
@@ -2317,6 +2319,26 @@ export function mount(root: HTMLElement): void {
     onStatus: applyPhotoUploadStatus,
   });
   void hydratePhotoUploadStatus();
+  // Retake-superseded photos still waiting for their OneDrive archive move (docs/photo-archive.md).
+  firePhotoAction('archive-drain');
+  window.addEventListener('online', () => firePhotoAction('archive-drain'));
+  window.setInterval(() => firePhotoAction('archive-drain'), ARCHIVE_RETRY_BASE_MS);
+}
+
+function photoAppDeps(): PhotoAppDeps {
+  return {
+    getDoc: () => state.doc,
+    setDoc: (doc) => setState({ doc }),
+    refreshPanel: () => setState({}),
+    confirm: (message) => window.confirm(message),
+  };
+}
+
+/** Async photo archive work; its failures land on the error log (patched in place, no redraw). */
+function firePhotoAction(action: Parameters<typeof runPhotoAction>[0]): void {
+  void runPhotoAction(action, photoAppDeps()).catch((err) =>
+    logError(`Photo ${action} failed: ${err instanceof Error ? err.message : String(err)}`, { source: 'photo-archive', severity: 'error' }),
+  );
 }
 
 /**
@@ -2509,6 +2531,8 @@ async function onShellClick(e: Event): Promise<void> {
       setState({});
     }
     if (result.link) applyWorkflowLink(result.link);
+    if (result.photoAction) firePhotoAction(result.photoAction);
+    if (cmd === 'workflow-start' || cmd === 'workflow-resume') firePhotoAction('check-photos');
     return;
   }
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { GardenDocument, Photo } from '../src/model';
 import { emptyDocument } from '../src/model';
 import { circleFieldTest } from '../src/workflows/guided/definitions';
-import { actionRetakeAvailable, deriveActionState, fireAction } from '../src/workflows/guided/actionNet';
+import { deriveActionState, fireAction } from '../src/workflows/guided/actionNet';
 import { confirmSetupWorkflow, countUploadedPhotosForStep, emptyProgress, retakeEvidenceWorkflow, startWorkflow } from '../src/workflows/guided/engine';
 import type { WorkflowProgress } from '../src/workflows/guided/types';
 
@@ -39,12 +39,11 @@ describe('calibration photo can always be retaken', () => {
     const p = doneRun();
     const action = deriveActionState(doc([calPhoto('cal-1', '2026-06-01T12:02:00.000Z')]), p.runs['circle-field-test']!, step);
     expect(action.place).toBe('done');
-    expect(actionRetakeAvailable(step, action)).toBe(true);
     expect(fireAction(action, 'retake_done')).toMatchObject({ place: 'in_progress', have: 0 });
   });
 
-  it('upload error offers Retake as well as Retry', () => {
-    expect(actionRetakeAvailable(step, { place: 'error', recovery: 'retry', need: 1, have: 0 })).toBe(true);
+  it('upload error can still fire retake_done (via the Photos viewer)', () => {
+    expect(fireAction({ place: 'error', recovery: 'retry', need: 1, have: 0 }, 'retake_done')).toMatchObject({ place: 'in_progress' });
   });
 
   it('Retake reopens the step, drops the old photo, and sends dependent results to re-check', () => {

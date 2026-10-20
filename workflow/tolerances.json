@@ -6,5 +6,6 @@
   "cameraPositionMm": 200,
   "circleDiameterCapBaselineMm": 60,
   "circleDiameterCapPlantableMm": 100,
-  "sleeveBitMarginFraction": 0.25
+  "sleeveBitMarginFraction": 0.25,
+  "photoArchiveMaxAgeDays": 90
 }

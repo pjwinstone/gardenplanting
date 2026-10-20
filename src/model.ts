@@ -202,6 +202,8 @@ export interface NativeCaptureRecord {
  */
 export interface PhotoOriginalFile {
   fileName: string;
+  /** Drive path (relative to the garden folder) once the file moved to photos/archive/. */
+  archivePath?: string;
   size: number;
   quickXorHash: string;
   sha256?: string;
@@ -311,6 +313,8 @@ export interface Photo {
   exifDateTimeOriginal?: string;
   /** Original camera file (full resolution). Optional so older garden.json still loads. */
   originalFile?: PhotoOriginalFile;
+  /** Set when a Retake superseded this photo. It no longer counts; it is archived in OneDrive. */
+  supersededAt?: string;
   note?: string;
   /**
    * Phone that took this frame. The same phone and 1× lens share one fx.

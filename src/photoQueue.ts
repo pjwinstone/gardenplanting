@@ -59,6 +59,8 @@ export interface PhotoQueueRecord {
    * (sleeve detection reads the full-size image). Cleared by releaseMarkedOriginal.
    */
   holdUntilMarked?: boolean;
+  /** The app was told this row is verified (live originals stay on the phone after upload). */
+  verifiedReported?: boolean;
 }
 
 /** Shape written to IndexedDB (no Blob — WebKit-safe). */

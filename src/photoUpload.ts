@@ -427,7 +427,7 @@ function parseGraphItem(body: GraphItem): { size?: number; quickXorHash?: string
   };
 }
 
-async function ensurePhotosFolder(
+export async function ensurePhotosFolder(
   client: GraphRequest,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const root = await ensureFolder(client, null, ONEDRIVE_FOLDER);
@@ -435,7 +435,7 @@ async function ensurePhotosFolder(
   return ensureFolder(client, ONEDRIVE_FOLDER, 'photos');
 }
 
-async function ensureFolder(
+export async function ensureFolder(
   client: GraphRequest,
   parentPath: string | null,
   name: string,

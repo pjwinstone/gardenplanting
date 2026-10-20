@@ -214,6 +214,8 @@ export interface WorkflowRun {
   currentStepId: string;
   /** When this run began. Photos captured or received earlier do not tick a station step. */
   startedAt: string;
+  /** Photos superseded by a Retake: still to move to photos/archive/, and what was moved (docs/photo-archive.md). */
+  photoArchive?: { pending: import('../../photoArchive').ArchiveJob[]; log: import('../../photoArchive').ArchiveLogEntry[] };
   /** Circle field test: the diameter tapes (docs/garden-circle.md). */
   circleTape?: CircleTape;
   updatedAt: string;

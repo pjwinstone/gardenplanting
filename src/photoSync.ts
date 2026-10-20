@@ -117,6 +117,18 @@ export function getAppPhotoQueue(): PhotoQueue {
   return appQueue;
 }
 
+/** Graph client for the signed-in account, or null (signed out, offline, sign-in needed). */
+export async function appGraphClient(): Promise<GraphRequest | null> {
+  const deps = loopDeps;
+  if (!deps || !isOnline(deps)) return null;
+  const t = readToken(await deps.getToken());
+  if (!t.token) {
+    if (t.interactionRequired) deps.onInteractionRequired?.();
+    return null;
+  }
+  return { fetch: callableFetch(deps.fetchImpl), token: t.token };
+}
+
 export function photosManifestLink(): { path: string } {
   return { path: PHOTOS_MANIFEST_RELATIVE };
 }
@@ -297,17 +309,15 @@ export async function resumePhotoUploads(opts: { keepRetryAfter?: boolean } = {}
 }
 
 /**
- * The photo's sleeve has been marked (detection or manual taps saved). Drop the hold: a verified
- * original is deleted now, one still uploading is deleted as normal once verified.
+ * The photo's sleeve has been marked (detection or manual taps saved). Drop the hold. The original
+ * stays on the phone like every live photo (docs/photo-archive.md).
  */
 export async function releaseMarkedOriginal(photoId: string, queue: PhotoQueue = getAppPhotoQueue()): Promise<void> {
   const records = (await queue.list()).filter((record) => record.photoId === photoId && record.holdUntilMarked);
   for (const record of records) {
-    if (record.status === 'verified') await queue.delete(record.id);
-    else {
-      const { holdUntilMarked: _held, ...rest } = record;
-      await queue.put(rest);
-    }
+    // Live photos stay on the phone (docs/photo-archive.md): only the hold is dropped.
+    const { holdUntilMarked: _held, ...rest } = record;
+    await queue.put(rest);
   }
 }
 
@@ -430,7 +440,9 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
   for (const record of listed) {
     if (record.status !== 'verified') continue;
     if (record.holdUntilMarked) continue; // calibration original: kept until its sleeve is marked
-    await deps.queue.delete(record.id);
+    // Live originals stay on the phone; report a verify the app may have missed (tab killed) once.
+    if (record.verifiedReported) continue;
+    await deps.queue.put({ ...record, verifiedReported: true });
     deps.onStatus(statusOf(record, 'verified'));
   }
 
@@ -492,9 +504,10 @@ export async function drainPhotoQueue(deps: PhotoUploadDeps): Promise<number> {
         const done = outcome.record ?? uploading;
         const liveNow = await deps.queue.get(record.id);
         if (liveNow?.holdUntilMarked) {
-          await deps.queue.put({ ...done, holdUntilMarked: true, status: 'verified', bytesOnDrive: true, updatedAt: deps.now?.() ?? new Date().toISOString() });
+          await deps.queue.put({ ...done, holdUntilMarked: true, status: 'verified', bytesOnDrive: true, verifiedReported: true, updatedAt: deps.now?.() ?? new Date().toISOString() });
         } else {
-          await deps.queue.delete(record.id);
+          // Live photos stay on the phone too (docs/photo-archive.md); a Retake archives them.
+          await deps.queue.put({ ...done, status: 'verified', bytesOnDrive: true, verifiedReported: true, updatedAt: deps.now?.() ?? new Date().toISOString() });
         }
         deps.onStatus(statusOf({ ...done, bytesOnDrive: true }, 'verified'));
       } else {
