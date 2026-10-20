@@ -65,19 +65,29 @@ function photo(
   };
 }
 
+const STATION = 'Edge points';
+
 function stationDoc(photos: Photo[]): GardenDocument {
   const doc = emptyDocument('Circle');
   doc.objects = [{
     id: 'obj-stn',
     layerId: 'survey',
-    name: 'STN01',
+    name: STATION,
     geometryType: 'point',
     measuredPointIds: ['P01'],
     selectedPointIds: [],
   }];
-  doc.points = [{ id: 'P01', kind: 'OCC', label: 'STN01 1', objectId: 'obj-stn', photoIds: photos.map((item) => item.id) }];
+  doc.points = [{ id: 'P01', kind: 'OCC', label: `${STATION} 1`, objectId: 'obj-stn', photoIds: photos.map((item) => item.id) }];
   doc.photos = photos;
   return doc;
+}
+
+/** n verified photos on P01 taken a minute apart from `fromMin` past 12:00. */
+function fresh(prefix: string, n: number, fromMin = 1): Photo[] {
+  return Array.from({ length: n }, (_, i) => {
+    const m = String(fromMin + i).padStart(2, '0');
+    return photo(`${prefix}-${i}`, 'P01', 'verified', undefined, `2026-06-01T12:${m}:00.000Z`, `2026-06-01T12:${m}:02.000Z`);
+  });
 }
 
 describe('guided workflow engine', () => {
@@ -86,9 +96,9 @@ describe('guided workflow engine', () => {
   });
 
   it('ports the circle sheet and the marker sheet, and leaves the other two for later', () => {
-    expect(circleFieldTest.steps).toHaveLength(13);
+    expect(circleFieldTest.steps).toHaveLength(11);
     expect(printFitMarkers.steps).toHaveLength(7);
-    expect(new Set(circleFieldTest.steps.map((step) => step.id)).size).toBe(13);
+    expect(new Set(circleFieldTest.steps.map((step) => step.id)).size).toBe(11);
     const later = startWorkflow(emptyProgress(), 'house-traverse', NOW);
     expect(later.changed).toBe(false);
     expect(later.notice).toMatch(/coming soon/i);
@@ -97,39 +107,37 @@ describe('guided workflow engine', () => {
 
   it('ticks by hand, including a step the app can detect, and labels that tick manual', () => {
     const progress = started();
+    // 'stn01' is a legacy alias: rev 6 maps it to the edge-photo step.
     const ticked = tickWorkflow(progress, 'stn01', undefined, NOW);
-    const step = ticked.progress.runs['circle-field-test']?.steps.stn01;
+    const step = ticked.progress.runs['circle-field-test']?.steps['edge-photos'];
     expect(step).toMatchObject({ status: 'ticked_by_you', completedBy: 'manual' });
     const again = applyWorkflowEvent(ticked.progress, {
       type: 'photo.uploaded',
-      stationId: 'STN01',
-      pointLabel: 'STN01 1',
-      objectName: 'STN01',
-      photoCount: 2,
-      photoIds: ['a', 'b'],
+      stationId: STATION,
+      pointLabel: `${STATION} 1`,
+      objectName: STATION,
+      photoCount: 12,
+      photoIds: Array.from({ length: 12 }, (_, i) => `p${i}`),
     }, LATER);
-    expect(again.runs['circle-field-test']?.steps.stn01?.completedBy).toBe('auto');
+    expect(again.runs['circle-field-test']?.steps['edge-photos']?.completedBy).toBe('auto');
   });
 
-  it('auto-completes STN01 only after two usable verified photos', () => {
+  it('auto-completes the edge photos only after twelve usable verified photos', () => {
     expect(nameMatchesStation('STN01 1', 'STN01')).toBe(true);
     expect(nameMatchesStation('STN010', 'STN01')).toBe(false);
     expect(nameMatchesStation('STN01-extra', 'STN01')).toBe(true);
 
-    const one = stationDoc([photo('a', 'P01', 'verified'), photo('b', 'P01', 'verified', 'Not usable for focal length.')]);
-    let doc: GardenDocument = { ...one, workflowProgress: started() };
+    const eleven = [...fresh('a', 11), photo('bad', 'P01', 'verified', 'Not usable for focal length.', '2026-06-01T12:30:00.000Z', '2026-06-01T12:30:02.000Z')];
+    let doc: GardenDocument = { ...stationDoc(eleven), workflowProgress: started() };
     const run = doc.workflowProgress?.runs['circle-field-test'];
-    expect(run && countUploadedPhotosForStep(doc, 'STN01', run, 'stn01').count).toBe(1);
-    doc = workflowAfterUploadedPhoto(doc, 'a', NOW);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('waiting_for_app');
+    expect(run && countUploadedPhotosForStep(doc, STATION, run, 'edge-photos').count).toBe(11);
+    doc = workflowAfterUploadedPhoto(doc, 'bad', NOW);
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps['edge-photos']?.status).toBe('waiting_for_app');
 
-    const two = stationDoc([
-      photo('a', 'P01', 'verified'),
-      photo('b', 'P01', 'verified', undefined, '2026-06-01T12:02:00.000Z', '2026-06-01T12:02:02.000Z'),
-    ]);
-    doc = { ...two, workflowProgress: doc.workflowProgress };
-    doc = workflowAfterUploadedPhoto(doc, 'b', LATER);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01).toMatchObject({
+    const twelve = [...eleven, ...fresh('b', 1, 40)];
+    doc = { ...stationDoc(twelve), workflowProgress: doc.workflowProgress };
+    doc = workflowAfterUploadedPhoto(doc, 'b-0', LATER);
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps['edge-photos']).toMatchObject({
       status: 'ticked_by_app',
       completedBy: 'auto',
     });
@@ -138,32 +146,27 @@ describe('guided workflow engine', () => {
   it('does not tick a station from photos captured or uploaded before this run', () => {
     const progress = started();
     expect(progress.runs['circle-field-test']?.startedAt).toBe(NOW);
-    const staleA = photo('old-a', 'P01', 'verified', undefined, '2026-05-01T08:00:00.000Z', '2026-05-01T08:00:02.000Z');
-    const staleB = photo('old-b', 'P01', 'verified', undefined, '2026-05-01T08:01:00.000Z', '2026-05-01T08:01:02.000Z');
-    let doc: GardenDocument = { ...stationDoc([staleA, staleB]), workflowProgress: progress };
-    doc = workflowAfterUploadedPhoto(doc, 'old-b', NOW);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('waiting_for_app');
+    const stale = Array.from({ length: 12 }, (_, i) => photo(`old-${i}`, 'P01', 'verified', undefined, `2026-05-01T08:${String(i).padStart(2, '0')}:00.000Z`, `2026-05-01T08:${String(i).padStart(2, '0')}:02.000Z`));
+    let doc: GardenDocument = { ...stationDoc(stale), workflowProgress: progress };
+    doc = workflowAfterUploadedPhoto(doc, 'old-11', NOW);
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps['edge-photos']?.status).toBe('waiting_for_app');
 
     const missingTime = photo('bare', 'P01', 'verified');
     delete missingTime.originalFile?.capturedAt;
     delete missingTime.originalFile?.receivedAt;
     delete missingTime.exifDateTimeOriginal;
     const earlyReceive = photo('early', 'P01', 'verified', undefined, '2026-06-01T12:03:00.000Z', '2026-05-30T08:00:00.000Z');
-    doc = { ...stationDoc([staleA, staleB, missingTime, earlyReceive]), workflowProgress: doc.workflowProgress };
+    const eleven = fresh('new', 11, 10);
+    doc = { ...stationDoc([...stale, missingTime, earlyReceive, ...eleven]), workflowProgress: doc.workflowProgress };
     doc = workflowAfterUploadedPhoto(doc, 'early', LATER);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('waiting_for_app');
+    expect(doc.workflowProgress?.runs['circle-field-test']?.steps['edge-photos']?.status).toBe('waiting_for_app');
 
-    const freshA = photo('new-a', 'P01', 'verified', undefined, '2026-06-01T12:01:00.000Z', '2026-06-01T12:01:02.000Z');
-    doc = { ...stationDoc([staleA, staleB, freshA]), workflowProgress: doc.workflowProgress };
-    doc = workflowAfterUploadedPhoto(doc, 'new-a', LATER);
-    expect(doc.workflowProgress?.runs['circle-field-test']?.steps.stn01?.status).toBe('waiting_for_app');
-
-    const freshB = photo('new-b', 'P01', 'verified', undefined, '2026-06-01T12:04:00.000Z', '2026-06-01T12:04:02.000Z');
-    doc = { ...stationDoc([staleA, staleB, freshA, freshB]), workflowProgress: doc.workflowProgress };
-    doc = workflowAfterUploadedPhoto(doc, 'new-b', LATER);
-    const step = doc.workflowProgress?.runs['circle-field-test']?.steps.stn01;
+    const last = fresh('last', 1, 40);
+    doc = { ...stationDoc([...stale, missingTime, earlyReceive, ...eleven, ...last]), workflowProgress: doc.workflowProgress };
+    doc = workflowAfterUploadedPhoto(doc, 'last-0', LATER);
+    const step = doc.workflowProgress?.runs['circle-field-test']?.steps['edge-photos'];
     expect(step).toMatchObject({ status: 'ticked_by_app', completedBy: 'auto' });
-    expect(step?.consumedPhotoIds).toEqual(['new-a', 'new-b']);
+    expect(step?.consumedPhotoIds).toEqual([...eleven.map((p) => p.id), 'last-0']);
   });
 
   it('pressing Next through every Print & fit step finishes the run', () => {

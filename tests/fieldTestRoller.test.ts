@@ -112,6 +112,6 @@ describe('circle field test step roller', () => {
     const migrated = reconcileRun(circleFieldTest, run);
     expect(migrated.steps['gather-kit']?.status).toBe('ticked_by_you');
     expect(migrated.steps.stn01?.status).toBe('waiting_for_app');
-    expect(migrated.steps['camera-1']?.status).toBe('waiting_for_app');
+    expect(migrated.steps['edge-photos']?.status).toBe('waiting_for_app');
   });
 });

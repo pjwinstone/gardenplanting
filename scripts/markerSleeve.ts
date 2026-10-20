@@ -35,21 +35,21 @@ export const PUBLISHED_CODEBOOK =
 export const CIRCLE_SLEEVES = [
   { point: 'BAS01', id: '315' },
   { point: 'BAS02', id: '36E' },
-  { point: 'EDG01', id: '459' },
-  { point: 'EDG02', id: '6BA' },
-  { point: 'EDG03', id: '8A3' },
-  { point: 'EDG04', id: '952' },
-  { point: 'EDG05', id: 'DAC' },
-  { point: 'EDG06', id: 'EC5' },
-  // Edge points 7–12 (garden circle, docs/garden-circle.md). The codebook has no word at
+  { point: 'BAS03', id: '459' },
+  { point: 'BAS04', id: '6BA' },
+  { point: 'BAS05', id: '8A3' },
+  { point: 'BAS06', id: '952' },
+  { point: 'BAS07', id: 'DAC' },
+  { point: 'BAS08', id: 'EC5' },
+  // Base points BAS09–BAS14 (were edge sleeves EDG07–EDG12 before rev 6; edge points carry no sleeve now). The codebook has no word at
   // distance 6 from all eight above; these are at least distance 4 (the codebook minimum),
   // no pair differs only inside a 4-band burst, and each has its own top nibble.
-  { point: 'EDG07', id: '2B4' },
-  { point: 'EDG08', id: '389' },
-  { point: 'EDG09', id: '51C' },
-  { point: 'EDG10', id: '8CA' },
-  { point: 'EDG11', id: 'A3B' },
-  { point: 'EDG12', id: 'DB7' },
+  { point: 'BAS09', id: '2B4' },
+  { point: 'BAS10', id: '389' },
+  { point: 'BAS11', id: '51C' },
+  { point: 'BAS12', id: '8CA' },
+  { point: 'BAS13', id: 'A3B' },
+  { point: 'BAS14', id: 'DB7' },
 ];
 
 const SYNC = '11110';

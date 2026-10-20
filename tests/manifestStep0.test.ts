@@ -96,12 +96,12 @@ describe('opening a field test run', () => {
   it('reopening lands on the first step that is not green, with the banner', () => {
     let p = startWorkflow(emptyProgress(), ID, NOW).progress;
     p = confirmSetupWorkflow(p, undefined, NOW).progress;
-    for (const s of circleFieldTest.steps.slice(0, 6)) p = tickWorkflow(p, s.id, undefined, NOW).progress;
-    p = scrollWorkflowToStep(p, 'camera-3', NOW).progress; // cursor left on 11
+    for (const s of circleFieldTest.steps.slice(0, 5)) p = tickWorkflow(p, s.id, undefined, NOW).progress;
+    p = scrollWorkflowToStep(p, 'edge-photos', NOW).progress; // cursor left on 8
     p = { ...p, activeId: undefined };
     const move = resumeWorkflow(p, ID, NOW);
     expect(run(move.progress).currentStepId).toBe('camera-calibration');
-    expect(move.notice).toBe('Resumed at step 7, Calibration photo (focal length) is the first step not done. Scroll up for Set-up.');
+    expect(move.notice).toBe('Resumed at step 6, Calibration photo (focal length) is the first step not done. Scroll up for Set-up.');
   });
 
   it('reopening names an error, and lands on Set-up when it is unconfirmed', () => {
@@ -118,7 +118,7 @@ describe('opening a field test run', () => {
   it('Resume after Pause lands the same way', () => {
     let p = startWorkflow(emptyProgress(), ID, NOW).progress;
     p = confirmSetupWorkflow(p, undefined, NOW).progress;
-    p = scrollWorkflowToStep(p, 'camera-1', NOW).progress;
+    p = scrollWorkflowToStep(p, 'edge-photos', NOW).progress;
     p = pauseWorkflow(p, NOW).progress;
     const move = resumePausedWorkflow(p, ID, NOW);
     expect(run(move.progress).currentStepId).toBe('gather-kit');

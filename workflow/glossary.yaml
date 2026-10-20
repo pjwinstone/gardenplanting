@@ -39,7 +39,7 @@
 
 version: 1
 title: Garden Planting glossary
-revision: 10
+revision: 11
 reviewed_by:
 - agent: geometry-maths-advisor
   agent_id: e7e34885-32ba-4339-98a1-0479c57450a9
@@ -1106,6 +1106,26 @@ terms:
   related:
   - chi-squared-test
   - closure
+  shown_on: []
+- id: reliability-shift
+  term: Reliability shift
+  short: How far an undetected error could move this point.
+  long: 'For each sleeve reading in a photo, the app works out the smallest error the checks would catch
+    (MDB) and how far that error would move the point if it slipped through. The largest of these is the
+    reliability shift (∇x). In the no-cane circle test an edge point is green when it is 40 mm or less,
+    amber up to 60 mm. Shown with r and MDB in the measurement-strength display.'
+  category: quality-check
+  aliases:
+  - external reliability
+  code_names:
+  - reliabilityShiftM
+  - shiftM
+  related:
+  - measurement-strength
+  - mdb
+  - redundancy
+  - w-test
+  units: mm
   shown_on: []
 - id: measurement-strength
   term: Measurement strength

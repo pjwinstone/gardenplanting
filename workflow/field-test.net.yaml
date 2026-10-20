@@ -7,7 +7,8 @@
 
 id: review-field-test
 title: Circle field test (guided checklist)
-revision: 5   # rev 5: Paul's own garden circle (~12 m, docs/garden-circle.md): edge points EDG01…, tape-diameter, circle-result; calibration Retake via the step's Photos viewer (docs/photo-archive.md).
+revision: 6   # rev 6: no-cane circle test (Geometry & Maths Advisor sign-off, sim10/sim11): no special circle set. Base points BAS01, BAS02, BAS03… form a growing network on the N/E grid from BAS01 (East + North offsets + diagonal check, re-adjusted on each add); one 1× photo per edge point facing the centre; session adjust (x, y, yaw per photo, shared fx with step-8 prior, base points as weighted priors); per-point gates in tolerances.json (src/solver/controlCluster.ts). Camera positions 1–4, edge canes and edge sleeves are gone.
+# rev 5: Paul's own garden circle (~12 m, docs/garden-circle.md): edge points EDG01…, tape-diameter, circle-result; calibration Retake via the step's Photos viewer (docs/photo-archive.md).
 # rev 4: hierarchical — each step instantiates workflow/action.net.yaml for its row pill.
 # rev 3: Step 0 Set-up (run config) + header cog; config changes mark dependants 'needs re-check'.
 # rev 2: rev 2: Back = roller scroll; Retake and Details (?) are row actions; ONE button row (Tick + Next/Later/Done);
@@ -48,39 +49,33 @@ setup:
   id: setup
   n: 0
   title: Set-up
-  counted: false          # not part of 'n of 13 ticked'; must be confirmed before Done
+  counted: false          # not part of 'n of 11 ticked'; must be confirmed before Done
   states: [unconfirmed, confirmed, changed_mid_run]
   values:                 # defaults for the Circle field test; units in the label; all editable
     circle_diameter_m: 12.0             # Paul's existing garden circle
-    edge_points: 12                     # EDG01…; at least 8
-    camera_position_count: 4            # 3 or 4; Position 4 is skipped with a note when 3
-    baseline_length_m: 6.000            # BAS01–BAS02, tangential, at least D/2
+    edge_points: 12                     # EDG01…; at least 8; plain pegs, no sleeves
+    baseline_length_m: 6.000            # BAS01–BAS02; BAS01 is the N/E grid origin
     calibration_distance_m: 4.0
-    camera_positions:                   # distances to BAS01 / BAS02, m; 0 = not taped; at least 2 taped
-      position_1: {to_bas01: 14.60, to_bas02: 8.60}
-      position_2: {to_bas01: 0,     to_bas02: 0}
-      position_3: {to_bas01: 0,     to_bas02: 0}
-      position_4: {to_bas01: 7.50,  to_bas02: 13.10}
+    calibration_sigma_fx_max: 0.005     # step 8 σ_fx/fx above this: 'calibrate first', never green
     tolerances_mm:                      # from workflow/tolerances.json (shared app configuration)
       baseline: 30
       railway: 30
       flower_bed: 100
       tree: 150
       camera_position: 200
+      control_shift_green: 40           # controlShiftGreenMm: reliability shift for green
+      control_shift_amber: 60           # controlShiftAmberMm
       circle_diameter_baseline: 60      # circleDiameterCapBaselineMm: the grade's cap
       circle_diameter_plantable: 100    # circleDiameterCapPlantableMm: reported as plantable pass
   depends_on:             # config key -> steps that must be re-checked when it changes
     circle_diameter_m:     [place-baseline-points, tape-diameter, circle-result]
-    edge_points:           [mark-edge-points, circle-result]
-    camera_position_count: [camera-3, camera-4, circle-result]
-    baseline_length_m:     [place-baseline-points, tape-baseline, laser-check-baseline, camera-1, camera-2, camera-3, camera-4]
+    edge_points:           [mark-edge-points, edge-photos, circle-result]
+    baseline_length_m:     [place-baseline-points, tape-baseline, laser-check-baseline]
     calibration_distance_m: [camera-calibration]
-    camera_positions.position_1: [camera-1]
-    camera_positions.position_2: [camera-2]
-    camera_positions.position_3: [camera-3]
-    camera_positions.position_4: [camera-4]
+    calibration_sigma_fx_max: [circle-result]
     tolerances_mm.baseline:        [tape-baseline, laser-check-baseline]
-    tolerances_mm.camera_position: [camera-1, camera-2, camera-3, camera-4]
+    tolerances_mm.control_shift_green: [circle-result]
+    tolerances_mm.control_shift_amber: [circle-result]
     tolerances_mm.circle_diameter_baseline:  [circle-result]
     tolerances_mm.circle_diameter_plantable: [circle-result]
     # railway / flower_bed / tree tolerances: no step in this workflow depends on them
@@ -93,23 +88,20 @@ steps:
      evidence: "baseline.saved BAS01–BAS02, tape measurement, offsets 0", note: "You tick when taped; the app ticks when the baseline is saved. Both needed."}
   - {n: 4,  id: laser-check-baseline,  title: Laser check of the baseline,            kind: user, evidence: none,
      note: "Was 'Laser CHK-BASE'. Write the laser reading in the note; do not enter it as a tape measurement."}
-  - {n: 5,  id: tape-diameter,         title: Tape the diameter,                      kind: user, evidence: "circle tape form (3 diameters ~60° apart, inside/outside edge)",
+  - {n: 5,  id: add-base-points,       title: Add base points (N/E tie form),          kind: user, evidence: "base-tie.saved entries in the run log; you tick",
+     note: "Grid frame: BAS01 is the origin, the grid is set to north (grid-to-north σ display only). Base points BAS03, BAS04… use the printed BAS sleeves (former EDG codes). For each new point: from a point already placed, tape East and North (σ 4 mm per tape plus a 1° squareness σ, correlated per tie), then the diagonal as the check. Extra ties are welcome. Every save re-adjusts the network (adjustGridNetwork), logs the tie on the run, and shows each diagonal's w; |w| > 3.29 is red: re-tape that tie. Hint only: spread several base points so each edge point sees 4+ at good angles."}
+  - {n: 6,  id: camera-calibration,    title: Calibration photo (focal length),       kind: app,
+     evidence: "1 photo at camera position 'Calibration' (legacy CAL); σ_fx ≤ 0.5 % or circle-result says 'calibrate first'"}
+  - {n: 7,  id: mark-edge-points,      title: Mark the edge points,                   kind: user, evidence: none,
+     note: "EDG01… on the taped edge, gaps <= 60°, all the way round, in order. A peg or a chalk mark: no cane, no sleeve (you stand on it)."}
+  - {n: 8,  id: edge-photos,           title: One photo from each edge point,         kind: app,
+     evidence: "photo.uploaded at camera position 'Edge points', 12 photos; the nth live photo is EDGnn (lowest free slot)",
+     note: "Stand on the edge point, face the middle, landscape 1×, as many base points in the frame as you can (4+ needed). Tap the BAS sleeves. Retake is per photo inside the Photos button and replaces only that point's photo. Roll and pitch come from the gravity sidecar."}
+  - {n: 9,  id: tape-diameter,         title: Tape the diameter,                      kind: user, evidence: "circle tape form (3 diameters ~60° apart, inside/outside edge)",
      note: "Save diameters stores run.circleTape and ticks the step; a settled circle-result goes to re-check."}
-  - {n: 6,  id: mark-edge-points,      title: Mark the edge points,                   kind: user, evidence: none,
-     note: "EDG01… on the taped edge, gaps <= 60°, all the way round; IDs from the document marker set (doc.markerSet)."}
-  - {n: 7,  id: camera-calibration,    title: Calibration photo (focal length),       kind: app,
-     evidence: "1 photo at camera position 'Calibration' (legacy CAL)"}
-  - {n: 8,  id: camera-1,              title: Camera position 1 (BAS02 end),          kind: app,
-     evidence: "2 photos at camera position 'Position 1'; taped to BAS01 and BAS02"}
-  - {n: 9,  id: camera-2,              title: Camera position 2 (far side, beyond BAS02), kind: app,
-     evidence: "2 photos at camera position 'Position 2'"}
-  - {n: 10, id: camera-3,              title: Camera position 3 (far side, beyond BAS01), kind: app,
-     evidence: "2 photos at camera position 'Position 3'"}
-  - {n: 11, id: camera-4,              title: Camera position 4 (BAS01 end),          kind: app,
-     evidence: "2 photos at camera position 'Position 4'; taped to BAS01 and BAS02"}
-  - {n: 12, id: circle-result,         title: Circle result,                          kind: user+app, evidence: none,
-     note: "Shows circleVerdict: green / amber / red / not a circle / inconclusive / weak, with plain guidance. You tick after reading."}
-  - {n: 13, id: save-to-onedrive,      title: Save to OneDrive,                       kind: app,
+  - {n: 10, id: circle-result,         title: Circle result,                          kind: user+app, evidence: none,
+     note: "controlCircleVerdict: session adjust + per-point gates (green / amber / red / grey, r, MDB, reliability shift; shown under Measurement strength), then circleVerdict against the tape as before. You tick after reading."}
+  - {n: 11, id: save-to-onedrive,      title: Save to OneDrive,                       kind: app,
      evidence: "cloud.saved while this step is current"}
 
 
@@ -125,17 +117,17 @@ subnets:
     - {step: place-baseline-points, net: action, evidence: manual}
     - {step: tape-baseline,         net: action, evidence: baseline.saved}
     - {step: laser-check-baseline,  net: action, evidence: manual}
-    - {step: tape-diameter,         net: action, evidence: manual}
-    - {step: mark-edge-points,      net: action, evidence: manual}
+    - {step: add-base-points,       net: action, evidence: manual}
     - {step: camera-calibration,    net: action, evidence: photo.uploaded, min_photos: 1, guard: photoUploadVerified, retake: always}
-    - {step: camera-1,              net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified, retake: always}
-    - {step: camera-2,              net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified, retake: always}
-    - {step: camera-3,              net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified, retake: always}
-    - {step: camera-4,              net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified, retake: always}
+    - {step: mark-edge-points,      net: action, evidence: manual}
+    - {step: edge-photos,           net: action, evidence: photo.uploaded, min_photos: 12, guard: photoUploadVerified, retake: per-photo}
+    - {step: tape-diameter,         net: action, evidence: manual}
     - {step: circle-result,         net: action, evidence: manual}
     - {step: save-to-onedrive,      net: action, evidence: cloud.saved}
   retake_depends_on:   # retaking a step's photos sends these, if settled, to needs_recheck (RETAKE_DEPENDS_ON)
-    camera-calibration: [camera-1, camera-2, camera-3, camera-4, circle-result]
+    camera-calibration: [circle-result]
+    edge-photos: [circle-result]
+    # saving or removing a base tie also sends a settled circle-result to needs_recheck
   composition: >
     step settled (top net) <=> its action instance is in `done`. Done (finish_run) needs
     allActionsDone(doc, run); otherwise done_go_to_first_open lands on the first step whose
@@ -153,21 +145,24 @@ rename_map:   # old id -> new id (old ids kept as aliases in reconcileRun so sav
   plumb: mark-edge-points
   plumb-canes: mark-edge-points
   cal: camera-calibration
-  stn01: camera-1
-  stn02: camera-2
-  stn03: camera-3
-  camera-left: camera-1
-  camera-right-near: camera-2
-  camera-right-far: camera-3
+  camera-1: edge-photos   # rev 6: camera positions replaced by one photo per edge point
+  camera-2: edge-photos
+  camera-3: edge-photos
+  camera-4: edge-photos
+  stn01: edge-photos
+  stn02: edge-photos
+  stn03: edge-photos
+  camera-left: edge-photos
+  camera-right-near: edge-photos
+  camera-right-far: edge-photos
   save-send: save-to-onedrive
 
 # ---------------------------------------------------------------------------
 # Places
 # ---------------------------------------------------------------------------
 colours:
-  step: [gather-kit, place-baseline-points, tape-baseline, laser-check-baseline, tape-diameter,
-         mark-edge-points, camera-calibration, camera-1, camera-2, camera-3, camera-4,
-         circle-result, save-to-onedrive]
+  step: [gather-kit, place-baseline-points, tape-baseline, laser-check-baseline, add-base-points,
+         camera-calibration, mark-edge-points, edge-photos, tape-diameter, circle-result, save-to-onedrive]
 
 places:
   - {id: setup_config,  label: Set-up values (step 0), note: "Token: the current config version. Read by every check guard."}
@@ -388,7 +383,7 @@ ui_only:   # no token moves; listed so every control has a home
     The calibration original is kept in IndexedDB after a verified upload (holdUntilMarked) until the
     sleeve is saved, then deleted as normal (releaseMarkedOriginal).
     Same principle for future targets: rough tap, the app refines.
-    Camera positions: the baseline ends (required) and the circle canes the step names ('Not in view' allowed).
+    Edge photos (rev 6): tap each BAS base point in view, all optional (the scan suggests them); the solver reads the image x of each sleeve axis after tilt correction.
     Close (x) keeps the photo; the taps do not gate the step, which still ticks on the verified upload.
   next_opens_nothing: "Next / Later only move the cursor. Only the row pill opens the camera or Save baseline."
 
@@ -422,7 +417,7 @@ counts:   # header text, all from step states (never from the cursor position)
   header:   "'{ticked} of {total} ticked · {warnings} warnings · {errors} error · {open} open' — zero terms left out; each count is tappable and scrolls the roller to the next step of that kind"
   position: "Shown separately as 'Step {n} of {total}', never next to the word 'ticked'."
 
-setup_in_counts: "Step 0 is not counted in 'of 13'. If unconfirmed, the header shows 'Set-up not confirmed' (tappable)."
+setup_in_counts: "Step 0 is not counted in 'of 12'. If unconfirmed, the header shows 'Set-up not confirmed' (tappable)."
 
 bug_this_fixes: >
   Build 0.7.25: Next silently passed the five evidence steps (tape-baseline, cal, stn01-03), the bar showed

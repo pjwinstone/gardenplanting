@@ -197,7 +197,24 @@ export interface WorkflowRunSetup {
 
 export type RunLogEntry =
   | { at: string; type: 'config.confirmed' }
-  | { at: string; type: 'config.changed'; changes: { key: string; from: unknown; to: unknown }[] };
+  | { at: string; type: 'config.changed'; changes: { key: string; from: unknown; to: unknown }[] }
+  | { at: string; type: 'base-tie.saved'; tie: BaseTie; summary: string }
+  | { at: string; type: 'base-tie.removed'; tie: BaseTie };
+
+/**
+ * 'Add base points' (rev 6): one tie from a point already placed to another point on the N/E grid.
+ * East and North are taped offsets (to − from, m, signed); the diagonal is the taped check.
+ * Any reading may be left out on an extra tie. BAS01 is the grid origin.
+ */
+export interface BaseTie {
+  id: string;
+  from: string;
+  to: string;
+  eastM?: number;
+  northM?: number;
+  diagonalM?: number;
+  savedAt: string;
+}
 
 export type CircleTapeEdge = 'inside' | 'outside';
 
@@ -218,6 +235,8 @@ export interface WorkflowRun {
   photoArchive?: { pending: import('../../photoArchive').ArchiveJob[]; log: import('../../photoArchive').ArchiveLogEntry[] };
   /** Circle field test: the diameter tapes (docs/garden-circle.md). */
   circleTape?: CircleTape;
+  /** Circle field test rev 6: the base-point ties on the N/E grid, in the order they were saved. */
+  baseTies?: BaseTie[];
   updatedAt: string;
   finishedAt?: string;
   paused?: boolean;

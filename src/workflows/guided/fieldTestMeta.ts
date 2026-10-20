@@ -1,4 +1,4 @@
-/** Circle field test Set-up defaults and id migration (field-test.net.yaml rev 5). */
+/** Circle field test Set-up defaults and id migration (field-test.net.yaml rev 6). */
 
 import tolerances from '../../../workflow/tolerances.json';
 
@@ -16,12 +16,17 @@ export const FIELD_TEST_STEP_ALIASES: Record<string, string> = {
   plumb: 'mark-edge-points',
   'plumb-canes': 'mark-edge-points',
   cal: 'camera-calibration',
-  stn01: 'camera-1',
-  stn02: 'camera-2',
-  stn03: 'camera-3',
-  'camera-left': 'camera-1',
-  'camera-right-near': 'camera-2',
-  'camera-right-far': 'camera-3',
+  // Rev 6: camera positions 1–4 became one photo per edge point.
+  stn01: 'edge-photos',
+  stn02: 'edge-photos',
+  stn03: 'edge-photos',
+  'camera-left': 'edge-photos',
+  'camera-right-near': 'edge-photos',
+  'camera-right-far': 'edge-photos',
+  'camera-1': 'edge-photos',
+  'camera-2': 'edge-photos',
+  'camera-3': 'edge-photos',
+  'camera-4': 'edge-photos',
   'save-send': 'save-to-onedrive',
 };
 
@@ -41,9 +46,9 @@ export type CameraPositionKey = (typeof CAMERA_POSITION_KEYS)[number];
 export interface FieldTestSetupValues {
   /** Diameter of the existing garden circle, m (docs/garden-circle.md). */
   circle_diameter_m: number;
-  /** Sleeved canes on the circle edge, EDG01…, at least 8. */
+  /** Edge points EDG01… (a peg each, no sleeve), at least 8. One photo from each. */
   edge_points: number;
-  /** Camera positions round the circle, 3 or 4. */
+  /** Legacy (rev 5 camera positions). Kept so older saves load; not shown. */
   camera_position_count: number;
   /** BAS01–BAS02, tangential to the circle, at least D/2. */
   baseline_length_m: number;
@@ -52,6 +57,7 @@ export interface FieldTestSetupValues {
   photo_archive_age_days: number;
   /** Legacy (rev 3 peg layout). Kept so older saves load; not shown. */
   bas02_from_peg_m?: number;
+  /** Legacy (rev 5). Kept so older saves load; not shown. */
   camera_positions: Record<CameraPositionKey, CameraPositionDistances>;
   tolerances_mm: {
     baseline: number;
@@ -107,31 +113,23 @@ export function migrateFieldTestSetup(values: Partial<FieldTestSetupValues> | un
 /** Config key -> step ids that need re-check when the value changes. */
 export const SETUP_DEPENDS_ON: Record<string, string[]> = {
   circle_diameter_m: ['place-baseline-points', 'tape-diameter', 'circle-result'],
-  edge_points: ['mark-edge-points', 'circle-result'],
-  camera_position_count: ['camera-3', 'camera-4', 'circle-result'],
-  baseline_length_m: ['place-baseline-points', 'tape-baseline', 'laser-check-baseline', 'camera-1', 'camera-2', 'camera-3', 'camera-4'],
-  calibration_distance_m: ['camera-calibration'],
-  'camera_positions.position_1': ['camera-1'],
-  'camera_positions.position_2': ['camera-2'],
-  'camera_positions.position_3': ['camera-3'],
-  'camera_positions.position_4': ['camera-4'],
+  edge_points: ['mark-edge-points', 'edge-photos', 'circle-result'],
+  baseline_length_m: ['place-baseline-points', 'tape-baseline', 'laser-check-baseline'],
+  calibration_distance_m: ['camera-calibration', 'circle-result'],
   'tolerances_mm.baseline': ['tape-baseline', 'laser-check-baseline'],
-  'tolerances_mm.camera_position': ['camera-1', 'camera-2', 'camera-3', 'camera-4'],
   'tolerances_mm.circle_diameter_baseline': ['circle-result'],
   'tolerances_mm.circle_diameter_plantable': ['circle-result'],
 };
 
 /** Step id -> later steps whose results rest on its photos. Retaking it sends settled ones to re-check. */
 export const RETAKE_DEPENDS_ON: Record<string, string[]> = {
-  'camera-calibration': ['camera-1', 'camera-2', 'camera-3', 'camera-4', 'circle-result'],
+  'camera-calibration': ['circle-result'],
+  'edge-photos': ['circle-result'],
 };
 
 /** Legacy camera position names still match photo events. */
 export const CAMERA_POSITION_LEGACY: Record<string, string[]> = {
   'camera-calibration': ['CAL', 'Calibration'],
   // Rev 3 names (STN01–03, Left / Right near / Right far) still match, so old photos map over.
-  'camera-1': ['Position 1', 'POS1', 'STN01', 'Left'],
-  'camera-2': ['Position 2', 'POS2', 'STN02', 'Right near', 'Right Near'],
-  'camera-3': ['Position 3', 'POS3', 'STN03', 'Right far', 'Right Far'],
-  'camera-4': ['Position 4', 'POS4'],
+  'edge-photos': ['Edge points', 'Edge photos'],
 };
