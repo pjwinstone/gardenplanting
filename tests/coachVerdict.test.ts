@@ -15,7 +15,7 @@ function paulsDoc(guided: boolean): GardenDocument {
   if (guided) {
     let p = startWorkflow(emptyProgress(), 'circle-field-test', NOW).progress;
     p = confirmSetupWorkflow(p, undefined, NOW).progress;
-    p = scrollWorkflowToStep(p, 'camera-3', NOW).progress;
+    p = scrollWorkflowToStep(p, 'edge-photos', NOW).progress;
     doc = commitWorkflow(doc, p);
   }
   return doc;
@@ -26,7 +26,7 @@ const JARGON = /\+ Photo|\(yaw\)|residual|Last action|Pick a workflow|Mode list|
 describe('coach verdict', () => {
   it("Paul's case during a run: step guidance + one plain line, nothing legacy, no ids", () => {
     const c = buildCoach(paulsDoc(true));
-    expect(c.body[0]).toMatch(/^Step 10: Camera position 3/);
+    expect(c.body[0]).toMatch(/^Step 8: One photo from each edge point/);
     expect(c.geometryLine).toBe('Right far is 1.9 m off what the other measurements say. Expected until the lens is calibrated; recheck after calibration.');
     expect(c.residualLine).toBeNull();
     expect(c.nextButton).toBeNull();

@@ -265,18 +265,18 @@ describe('marker sleeves', () => {
     expect(CIRCLE_SLEEVES).toEqual([
       { point: 'BAS01', id: '315' },
       { point: 'BAS02', id: '36E' },
-      { point: 'EDG01', id: '459' },
-      { point: 'EDG02', id: '6BA' },
-      { point: 'EDG03', id: '8A3' },
-      { point: 'EDG04', id: '952' },
-      { point: 'EDG05', id: 'DAC' },
-      { point: 'EDG06', id: 'EC5' },
-      { point: 'EDG07', id: '2B4' },
-      { point: 'EDG08', id: '389' },
-      { point: 'EDG09', id: '51C' },
-      { point: 'EDG10', id: '8CA' },
-      { point: 'EDG11', id: 'A3B' },
-      { point: 'EDG12', id: 'DB7' },
+      { point: 'BAS03', id: '459' },
+      { point: 'BAS04', id: '6BA' },
+      { point: 'BAS05', id: '8A3' },
+      { point: 'BAS06', id: '952' },
+      { point: 'BAS07', id: 'DAC' },
+      { point: 'BAS08', id: 'EC5' },
+      { point: 'BAS09', id: '2B4' },
+      { point: 'BAS10', id: '389' },
+      { point: 'BAS11', id: '51C' },
+      { point: 'BAS12', id: '8CA' },
+      { point: 'BAS13', id: 'A3B' },
+      { point: 'BAS14', id: 'DB7' },
     ]);
     const words = CIRCLE_SLEEVES.map((sleeve) => {
       expect(issued.has(sleeve.id)).toBe(true);
@@ -292,9 +292,7 @@ describe('marker sleeves', () => {
 
   it('decodes every circle sleeve and checks the page and the 100 mm bar', () => {
     expect(CIRCLE_SLEEVES.map((sleeve) => sleeve.point)).toEqual([
-      'BAS01',
-      'BAS02',
-      ...Array.from({ length: 12 }, (_, i) => `EDG${String(i + 1).padStart(2, '0')}`),
+      ...Array.from({ length: 14 }, (_, i) => `BAS${String(i + 1).padStart(2, '0')}`),
     ]);
     const seen = new Set<string>();
     for (const sleeve of CIRCLE_SLEEVES) {

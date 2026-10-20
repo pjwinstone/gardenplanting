@@ -7,7 +7,7 @@ describe('workflow markdown', () => {
     const file = readFileSync(new URL('../docs/generated/WORKFLOWS.md', import.meta.url), 'utf8');
     const generated = generateWorkflowMarkdown();
     expect(file).toBe(generated);
-    expect(generated).toContain('13 steps');
+    expect(generated).toContain('11 steps');
     expect(generated).toContain('7 steps');
     expect(generated).toContain('CUT HERE');
     expect(generated).toContain('Left: just inside the dash. Right: on the right-hand dashed line, or the sheet edge.');
@@ -23,7 +23,8 @@ describe('workflow markdown', () => {
     expect(generated).toContain('A shot from earlier does not count');
     expect(generated).not.toContain('Camera.app');
     expect(generated).not.toContain('exactly on the dashed line');
-    expect(generated).toContain('photo.uploaded Position 1');
+    expect(generated).toContain('photo.uploaded Edge points');
+    expect(generated).toContain('Add base points');
     expect(generated).toContain('STN01');
     expect(generated).toContain('Tape the diameter');
     expect(generated).toContain('Circle result');

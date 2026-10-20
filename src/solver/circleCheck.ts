@@ -73,6 +73,14 @@ export interface CircleCheckInput {
   cameraClassM?: number;
   /** BAS01–BAS02 length, m, for the baseline-reach warning. */
   baselineM?: number;
+  /**
+   * False for the no-cane control-cluster method (controlCluster.ts): each edge point is a
+   * resected camera position, so the camera-side and ray-intersection gates do not apply; the
+   * per-point gates (gateEdgePoints) replace them and come in as `pointGuidance`.
+   */
+  rayGates?: boolean;
+  /** Extra blocking lines from per-point gates (red / grey edge points). */
+  pointGuidance?: string[];
 }
 
 export interface CircleNetwork {
@@ -291,39 +299,43 @@ export function circleVerdict(input: CircleCheckInput): CircleVerdict {
   if (maxGapDeg > MAX_GAP_DEG && g.from && g.to) {
     guidance.push(`Add a point between ${g.from.id} and ${g.to.id}. The gap there is ${Math.round(maxGapDeg)}°; keep every gap under ${MAX_GAP_DEG}°.`);
   }
-  const camGap = gaps(input.cameras, (p) => azimuth(c, p));
-  if (input.cameras.length < MIN_CAMERA_POSITIONS || camGap.maxGap / DEG >= MAX_CAMERA_GAP_DEG) {
-    const mid = camGap.from && camGap.to && input.cameras.length > 1
-      ? (azimuth(c, camGap.from) + camGap.maxGap / 2) % (2 * Math.PI)
-      : (input.cameras.length === 1 ? (azimuth(c, input.cameras[0]) + Math.PI) % (2 * Math.PI) : Math.PI / 2);
-    const near = nearestPoints(points, c, mid);
-    guidance.push(`Take a photo from ${sideWords(mid, input.bas01, input.bas02)}, outside the circle beyond ${near.join(' and ')}. Cameras need to be on at least ${MIN_CAMERA_POSITIONS} sides.`);
-  }
-  const cams = new Map(input.cameras.map((q) => [q.id, q]));
-  for (const p of points) {
-    const from = [...new Set(input.rays.filter((ray) => ray.pointId === p.id).map((ray) => ray.cameraId))]
-      .map((id) => cams.get(id)).filter((q): q is CircleEdgePoint => !!q);
-    if (from.length < MIN_RAYS_PER_POINT) {
-      const opposite = (azimuth(c, p) + Math.PI) % (2 * Math.PI);
-      guidance.push(`${p.id} is in ${from.length === 1 ? 'only one photo' : 'no photo'}. Take a photo that shows it from ${from.length ? 'a second camera position' : sideWords(opposite, input.bas01, input.bas02)}.`);
-      continue;
+  if (input.rayGates !== false) {
+    const camGap = gaps(input.cameras, (p) => azimuth(c, p));
+    if (input.cameras.length < MIN_CAMERA_POSITIONS || camGap.maxGap / DEG >= MAX_CAMERA_GAP_DEG) {
+      const mid = camGap.from && camGap.to && input.cameras.length > 1
+        ? (azimuth(c, camGap.from) + camGap.maxGap / 2) % (2 * Math.PI)
+        : (input.cameras.length === 1 ? (azimuth(c, input.cameras[0]) + Math.PI) % (2 * Math.PI) : Math.PI / 2);
+      const near = nearestPoints(points, c, mid);
+      guidance.push(`Take a photo from ${sideWords(mid, input.bas01, input.bas02)}, outside the circle beyond ${near.join(' and ')}. Cameras need to be on at least ${MIN_CAMERA_POSITIONS} sides.`);
     }
-    let best = 0;
-    for (let i = 0; i < from.length; i += 1) {
-      for (let j = i + 1; j < from.length; j += 1) {
-        const a1 = Math.atan2(from[i].y - p.y, from[i].x - p.x);
-        const a2 = Math.atan2(from[j].y - p.y, from[j].x - p.x);
-        let d = Math.abs(a1 - a2) % (2 * Math.PI);
-        if (d > Math.PI) d = 2 * Math.PI - d;
-        best = Math.max(best, Math.min(d, Math.PI - d));
+    const cams = new Map(input.cameras.map((q) => [q.id, q]));
+    for (const p of points) {
+      const from = [...new Set(input.rays.filter((ray) => ray.pointId === p.id).map((ray) => ray.cameraId))]
+        .map((id) => cams.get(id)).filter((q): q is CircleEdgePoint => !!q);
+      if (from.length < MIN_RAYS_PER_POINT) {
+        const opposite = (azimuth(c, p) + Math.PI) % (2 * Math.PI);
+        guidance.push(`${p.id} is in ${from.length === 1 ? 'only one photo' : 'no photo'}. Take a photo that shows it from ${from.length ? 'a second camera position' : sideWords(opposite, input.bas01, input.bas02)}.`);
+        continue;
+      }
+      let best = 0;
+      for (let i = 0; i < from.length; i += 1) {
+        for (let j = i + 1; j < from.length; j += 1) {
+          const a1 = Math.atan2(from[i].y - p.y, from[i].x - p.x);
+          const a2 = Math.atan2(from[j].y - p.y, from[j].x - p.x);
+          let d = Math.abs(a1 - a2) % (2 * Math.PI);
+          if (d > Math.PI) d = 2 * Math.PI - d;
+          best = Math.max(best, Math.min(d, Math.PI - d));
+        }
+      }
+      if (best / DEG < MIN_INTERSECTION_DEG) {
+        const away = azimuth(p, from.reduce((s, q) => ({ x: s.x + q.x / from.length, y: s.y + q.y / from.length }), { x: 0, y: 0 }));
+        const side = (away + Math.PI / 2) % (2 * Math.PI);
+        guidance.push(`${p.id} is seen from directions only ${Math.round(best / DEG)}° apart (needs ${MIN_INTERSECTION_DEG}°). Take a photo of it from ${sideWords(side, input.bas01, input.bas02)}.`);
       }
     }
-    if (best / DEG < MIN_INTERSECTION_DEG) {
-      const away = azimuth(p, from.reduce((s, q) => ({ x: s.x + q.x / from.length, y: s.y + q.y / from.length }), { x: 0, y: 0 }));
-      const side = (away + Math.PI / 2) % (2 * Math.PI);
-      guidance.push(`${p.id} is seen from directions only ${Math.round(best / DEG)}° apart (needs ${MIN_INTERSECTION_DEG}°). Take a photo of it from ${sideWords(side, input.bas01, input.bas02)}.`);
-    }
+
   }
+  guidance.push(...(input.pointGuidance ?? []));
 
   // Network solvability (replaces "a baseline end in every photo"): full rank, every camera
   // position inside its class at 95%, every edge point on ≥ 2 rays (above).

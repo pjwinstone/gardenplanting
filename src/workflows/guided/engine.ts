@@ -6,6 +6,7 @@
 import { getGardenCloudFileName, onedrivePathFor } from '../../cloudConfig';
 import type { GardenDocument, Photo } from '../../model';
 import { workflowById } from './definitions';
+import { adjustGridNetwork, type GridNetworkResult } from '../../solver/controlCluster';
 import {
   CAMERA_POSITION_LEGACY,
   canonicalStepId,
@@ -33,6 +34,7 @@ import {
   SETTLED,
 } from './guards';
 import type {
+  BaseTie,
   FieldTestSetupValues,
   StepState,
   WorkflowDefinition,
@@ -874,6 +876,7 @@ export function countUploadedPhotosForStep(
   const retakeAfter = photoTimeMs(run.steps[canonicalStep]?.retakeAfter);
   const photoIds = doc.photos.filter((photo) => {
     if (taken.has(photo.id)) return false;
+    if (photo.supersededAt) return false;
     if (!photoOnStation(doc, photo, stationId)) return false;
     if (photo.originalFile?.uploadStatus !== 'verified') return false;
     if ((photo.originalFile.usabilityNote ?? '').includes('Not usable')) return false;
@@ -1153,6 +1156,74 @@ export function retakeEvidenceWorkflow(
   return { progress: patchRun(progress, pair.def.id, run), changed: true };
 }
 
+export const ADD_BASE_POINTS_STEP_ID = 'add-base-points';
+
+/** Plain summary of the base-point network after a re-adjust, for the notice and the run log. */
+export function baseNetworkSummary(ties: BaseTie[]): { ok: boolean; text: string; net?: GridNetworkResult } {
+  if (!ties.length) return { ok: false, text: 'No ties yet.' };
+  try {
+    const net = adjustGridNetwork('BAS01', ties);
+    const red = net.diagonals.filter((d) => d.flag === 'red');
+    const placed = Object.keys(net.points).length;
+    const text = red.length
+      ? `${placed} base points. Diagonal check fails on ${red.map((d) => `${d.from}→${d.to} (w ${d.w.toFixed(1)})`).join(', ')}: re-tape that tie.`
+      : `${placed} base points placed; every diagonal checks out.`;
+    return { ok: red.length === 0, text, net };
+  } catch (err) {
+    return { ok: false, text: (err as Error).message };
+  }
+}
+
+/** Save one N/E/diagonal tie, re-adjust the base-point network, log it; the circle result re-checks. */
+export function saveBaseTieWorkflow(
+  progress: WorkflowProgress,
+  tie: { from: string; to: string; eastM?: number; northM?: number; diagonalM?: number },
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const from = tie.from.trim().toUpperCase();
+  const to = tie.to.trim().toUpperCase();
+  if (!/^BAS\d+$/.test(from) || !/^BAS\d+$/.test(to) || from === to) {
+    return { progress, notice: 'From and To are two different base points, e.g. BAS01 and BAS03.', changed: false };
+  }
+  const nums = [tie.eastM, tie.northM, tie.diagonalM];
+  if (nums.every((v) => v == null) || nums.some((v) => v != null && !Number.isFinite(v)) || (tie.diagonalM != null && !(tie.diagonalM > 0))) {
+    return { progress, notice: 'Type the East and North offsets in metres (minus for west / south), and the diagonal.', changed: false };
+  }
+  const old = pair.run.baseTies ?? [];
+  const placed = new Set(['BAS01', ...old.flatMap((t) => [t.from, t.to])]);
+  if (!placed.has(from) && !placed.has(to)) return { progress, notice: `Start from a point already placed (${[...placed].join(', ')}).`, changed: false };
+  const isNew = !placed.has(from) || !placed.has(to);
+  if (isNew && (tie.eastM == null || tie.northM == null)) {
+    return { progress, notice: 'A new base point needs its East and North offsets (and the diagonal as the check).', changed: false };
+  }
+  const saved: BaseTie = { id: `tie-${old.length + 1}-${now}`, from, to, eastM: tie.eastM, northM: tie.northM, diagonalM: tie.diagonalM, savedAt: now };
+  const ties = [...old, saved];
+  const summary = baseNetworkSummary(ties);
+  const steps: Record<string, StepState> = { ...pair.run.steps };
+  const result = steps['circle-result'];
+  if (result && isSettled(result)) steps['circle-result'] = mirrorLegacy({ ...result, status: 'needs_recheck' });
+  const log = [...(pair.run.runLog ?? []), { at: now, type: 'base-tie.saved' as const, tie: saved, summary: summary.text }];
+  const run: WorkflowRun = { ...pair.run, steps, baseTies: ties, runLog: log, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), notice: `Tie ${from}→${to} saved. ${summary.text}`, changed: true };
+}
+
+/** Remove a tie (e.g. a failed diagonal you will re-tape). Logged; the network re-adjusts. */
+export function removeBaseTieWorkflow(progress: WorkflowProgress, tieId: string, now = new Date().toISOString()): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const tie = (pair.run.baseTies ?? []).find((t) => t.id === tieId);
+  if (!tie) return { progress, changed: false };
+  const ties = (pair.run.baseTies ?? []).filter((t) => t.id !== tieId);
+  const steps: Record<string, StepState> = { ...pair.run.steps };
+  const result = steps['circle-result'];
+  if (result && isSettled(result)) steps['circle-result'] = mirrorLegacy({ ...result, status: 'needs_recheck' });
+  const log = [...(pair.run.runLog ?? []), { at: now, type: 'base-tie.removed' as const, tie }];
+  const run: WorkflowRun = { ...pair.run, steps, baseTies: ties, runLog: log, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), notice: `Tie ${tie.from}→${tie.to} removed. ${baseNetworkSummary(ties).text}`, changed: true };
+}
+
 /** Save the three diameter tapes and the edge; ticks 'Tape the diameter'. The circle result re-checks. */
 export function saveCircleTapeWorkflow(
   progress: WorkflowProgress,
@@ -1206,6 +1277,43 @@ export function retakeStepPhotosInDoc(doc: GardenDocument, stepId: string, now =
   const photos = doc.photos.map((p) => (ids.has(p.id) ? { ...p, supersededAt: now } : p));
   const nextProgress = patchRun(move.progress, pair.def.id, nextRun);
   return { doc: { ...doc, photos, workflowProgress: nextProgress }, changed: true, superseded: [...ids] };
+}
+
+/**
+ * Retake ONE photo from the step's Photos viewer (edge photos: one photo per edge point).
+ * Only that photo is superseded and archived; the others keep counting. The step waits for
+ * the replacement, which takes the same edge point (edgePhotoAssignments).
+ */
+export function retakeOnePhotoInDoc(doc: GardenDocument, stepId: string, photoId: string, now = new Date().toISOString()): { doc: GardenDocument; changed: boolean; superseded: string[] } {
+  const progress = readProgress(doc);
+  const pair = activePair(progress);
+  if (!pair) return { doc, changed: false, superseded: [] };
+  const id = canonicalStepId(stepId);
+  const step = pair.def.steps.find((item) => item.id === id);
+  const photo = doc.photos.find((p) => p.id === photoId && !p.supersededAt);
+  if (!step || !photo || !('on' in step.complete) || step.complete.on !== 'photo.uploaded') return { doc, changed: false, superseded: [] };
+  const state = pair.run.steps[id] ?? initialStepState(step);
+  const steps: Record<string, StepState> = {
+    ...pair.run.steps,
+    [id]: mirrorLegacy({
+      ...state,
+      status: 'waiting_for_app',
+      completedBy: null,
+      completedAt: undefined,
+      consumedPhotoIds: (state.consumedPhotoIds ?? []).filter((x) => x !== photoId),
+    }),
+  };
+  for (const dep of RETAKE_DEPENDS_ON[id] ?? []) {
+    const depState = steps[dep];
+    if (depState && isSettled(depState)) steps[dep] = mirrorLegacy({ ...depState, status: 'needs_recheck' });
+  }
+  const prior = pair.run.photoArchive ?? { pending: [], log: [] };
+  const job = photo.originalFile?.fileName
+    ? [{ photoId, fileName: photo.originalFile.fileName, stepId: id, runStartedAt: pair.run.startedAt, supersededAt: now, reason: 'retake' as const }]
+    : [];
+  const run: WorkflowRun = { ...pair.run, steps, photoArchive: { pending: [...prior.pending.filter((j) => j.photoId !== photoId), ...job], log: prior.log }, updatedAt: now };
+  const photos = doc.photos.map((p) => (p.id === photoId ? { ...p, supersededAt: now } : p));
+  return { doc: { ...doc, photos, workflowProgress: patchRun(progress, pair.def.id, run) }, changed: true, superseded: [photoId] };
 }
 
 /** Apply a finished archive drain to the document: pending jobs left, log entries added, archived paths on the photos. */

@@ -7,5 +7,17 @@
   "circleDiameterCapBaselineMm": 60,
   "circleDiameterCapPlantableMm": 100,
   "sleeveBitMarginFraction": 0.25,
-  "photoArchiveMaxAgeDays": 90
+  "photoArchiveMaxAgeDays": 90,
+  "controlSleeveSigmaMm": 3,
+  "controlImageSigmaPx": 1,
+  "controlFxPriorRel": 0.003,
+  "controlCalibrateFirstFxRel": 0.005,
+  "controlBlunderW": 3.29,
+  "controlFamilyAlpha": 0.05,
+  "controlMdbNonCentrality": 4.13,
+  "controlShiftGreenMm": 40,
+  "controlShiftAmberMm": 60,
+  "controlUncheckedR": 0.01,
+  "controlDangerCondMax": 200,
+  "controlMinBasePoints": 4
 }

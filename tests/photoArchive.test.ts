@@ -213,8 +213,8 @@ describe('retakeStepPhotosInDoc', () => {
     let p = confirmSetupWorkflow(startWorkflow(emptyProgress(), 'circle-field-test', NOW).progress, undefined, NOW).progress;
     const run = p.runs['circle-field-test']!;
     run.steps['camera-calibration'] = { ...run.steps['camera-calibration']!, status: 'ticked_by_app', completedBy: 'auto', consumedPhotoIds: ['cal-1'] };
-    run.steps['camera-1'] = { ...run.steps['camera-1']!, status: 'ticked_by_app', completedBy: 'auto' };
-    run.currentStepId = 'camera-2';
+    run.steps['circle-result'] = { ...run.steps['circle-result']!, status: 'ticked_by_app', completedBy: 'auto' };
+    run.currentStepId = 'edge-photos';
     const d = emptyDocument('Circle');
     d.objects = [{ id: 'obj-cal', layerId: 'survey', name: 'Calibration', geometryType: 'point', measuredPointIds: ['P-CAL'], selectedPointIds: [] }];
     d.points = [{ id: 'P-CAL', kind: 'OCC', label: 'Calibration 1', objectId: 'obj-cal', photoIds: ['cal-1'] }];
@@ -230,7 +230,7 @@ describe('retakeStepPhotosInDoc', () => {
     expect(pendingArchiveJobs(r.doc)).toEqual([expect.objectContaining({ photoId: 'cal-1', fileName: 'cal-1.jpg', reason: 'retake', stepId: 'camera-calibration' })]);
     const run = r.doc.workflowProgress!.runs['circle-field-test']!;
     expect(run.steps['camera-calibration']).toMatchObject({ status: 'waiting_for_app', retakeAfter: AT });
-    expect(run.steps['camera-1']?.status).toBe('needs_recheck');
+    expect(run.steps['circle-result']?.status).toBe('needs_recheck');
     const step = circleFieldTest.steps.find((s) => s.id === 'camera-calibration')!;
     expect(deriveActionState(r.doc, run, step).place).not.toBe('done');
 

@@ -1,43 +1,187 @@
-/** Circle result step: solve the garden, fit the circle in the adjust, grade against the tape (docs/garden-circle.md). */
+/**
+ * Circle result step (rev 6): base-point network from the run's N/E ties, one photo per edge
+ * point, session adjustment and per-point gates, then the circle fit and the comparison with the
+ * taped diameter (docs/garden-circle.md). All on the phone.
+ */
 
-import type { GardenDocument } from '../../model';
-import { circleCheckFromSolve, circleVerdict, type CircleVerdict } from '../../solver/circleCheck';
-import { solveGardenDocument } from '../../solver/document';
+import type { GardenDocument, Photo } from '../../model';
+import type { CircleVerdict } from '../../solver/circleCheck';
+import {
+  adjustGridNetwork,
+  controlCircleVerdict,
+  sightingsFromPhoto,
+  subCovariance,
+  type EdgeGate,
+  type EdgePhoto,
+  type GridNetworkResult,
+} from '../../solver/controlCluster';
+import { linkedPhotosForStep } from './engine';
 import { migrateFieldTestSetup } from './fieldTestMeta';
 import { edgePointsFor } from './markerSet';
-import type { WorkflowRun } from './types';
+import { sleeveHeightPx } from './photoTaps';
+import type { BaseTie, WorkflowRun } from './types';
 
 export const TAPE_DIAMETER_STEP_ID = 'tape-diameter';
 export const CIRCLE_RESULT_STEP_ID = 'circle-result';
+export const EDGE_PHOTOS_STEP_ID = 'edge-photos';
+export const EDGE_PHOTOS_STATION = 'Edge points';
+export const CALIBRATION_STATION = 'Calibration';
 
-/** Solver point ids of this garden's edge points (by id or by label EDG01…). */
-export function edgePointIdsIn(doc: GardenDocument, names: string[]): string[] {
-  const out: string[] = [];
-  for (const name of names) {
-    const p = doc.points.find((q) => q.id === name) ?? doc.points.find((q) => q.label === name);
-    if (p) out.push(p.id);
+/** Pixel σ of the calibration code length: auto-detected edges vs hand taps (per edge, full-res px). */
+const CAL_EDGE_SIGMA_AUTO_PX = 0.5;
+const CAL_EDGE_SIGMA_MANUAL_PX = 2;
+/** Taped calibration distance σ, m. */
+const CAL_DISTANCE_SIGMA_M = 0.005;
+
+function ms(v?: string): number | undefined {
+  if (!v) return undefined;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : undefined;
+}
+
+/**
+ * Which edge point each photo stands on. Photos are taken round the circle in order; each new
+ * photo takes the lowest-numbered edge point with no current photo, so a per-photo Retake (which
+ * frees that photo's point) is replaced in place. Returns photoId → EDGnn for current photos.
+ */
+export function edgePhotoAssignments(photos: Photo[], names: string[]): Map<string, string> {
+  type Ev = { t: number; k: 0 | 1; i: number; id: string };
+  const evs: Ev[] = [];
+  photos.forEach((p, i) => {
+    const t = ms(p.originalFile?.capturedAt) ?? ms(p.exifDateTimeOriginal) ?? ms(p.originalFile?.receivedAt) ?? Number.MAX_SAFE_INTEGER;
+    evs.push({ t, k: 1, i, id: p.id });
+    const s = ms(p.supersededAt);
+    if (s !== undefined) evs.push({ t: s, k: 0, i, id: p.id });
+  });
+  // Supersede before an arrival at the same instant; ties keep document order.
+  evs.sort((a, b) => a.t - b.t || a.k - b.k || a.i - b.i);
+  const slot = new Map<string, number>();
+  const used = new Set<number>();
+  for (const e of evs) {
+    if (e.k === 0) {
+      const n = slot.get(e.id);
+      if (n !== undefined) used.delete(n);
+      slot.delete(e.id);
+    } else {
+      let n = 0;
+      while (used.has(n)) n += 1;
+      if (n >= names.length) continue;
+      used.add(n);
+      slot.set(e.id, n);
+    }
   }
+  const out = new Map<string, string>();
+  for (const [id, n] of slot) out.set(id, names[n]);
   return out;
 }
 
-export function circleResultForRun(doc: GardenDocument | null | undefined, run: WorkflowRun): CircleVerdict {
+export function edgeAssignmentsFor(doc: GardenDocument | null | undefined, run: WorkflowRun): Map<string, string> {
+  if (!doc) return new Map();
   const values = migrateFieldTestSetup(run.setup?.values);
-  const needs = (headline: string, guidance: string[]): CircleVerdict => ({ state: 'needs-data', headline, guidance } as CircleVerdict);
-  if (!doc) return needs('No garden open.', []);
-  const names = edgePointsFor(doc, values.edge_points);
-  let result;
+  return edgePhotoAssignments(linkedPhotosForStep(doc, EDGE_PHOTOS_STATION, run, EDGE_PHOTOS_STEP_ID), edgePointsFor(doc, values.edge_points));
+}
+
+/** Focal length from the step-8 calibration photo, full-resolution px, and its relative σ. */
+export function calibrationFx(doc: GardenDocument, run: WorkflowRun): { fx: number; sigmaRel: number; method: 'auto' | 'manual' } | undefined {
+  const values = migrateFieldTestSetup(run.setup?.values);
+  const photo = linkedPhotosForStep(doc, CALIBRATION_STATION, run, 'camera-calibration').filter((p) => !p.supersededAt && p.measureTaps?.length).at(-1);
+  if (!photo) return undefined;
+  const h = sleeveHeightPx(photo.measureTaps!, photo.originalFile?.previewScaleY, photo.measureDetection);
+  if (!h?.fullPx) return undefined;
+  const d = values.calibration_distance_m;
+  const fx = (h.fullPx * d) / (h.mm / 1000);
+  const method = photo.measureDetection?.method === 'auto' ? 'auto' : 'manual';
+  const edge = method === 'auto' ? CAL_EDGE_SIGMA_AUTO_PX : CAL_EDGE_SIGMA_MANUAL_PX;
+  const sigmaRel = Math.hypot((Math.SQRT2 * edge) / h.fullPx, CAL_DISTANCE_SIGMA_M / d);
+  return { fx, sigmaRel, method };
+}
+
+export function baseNetworkForRun(run: WorkflowRun): GridNetworkResult | undefined {
+  const ties: BaseTie[] = run.baseTies ?? [];
+  if (!ties.length) return undefined;
   try {
-    result = solveGardenDocument(doc);
-  } catch (err) {
-    return needs(`The survey does not solve yet: ${(err as Error).message}`, ['Save the baseline (step: Tape the baseline) and take the camera-position photos.']);
+    return adjustGridNetwork('BAS01', ties);
+  } catch {
+    return undefined;
   }
-  const input = circleCheckFromSolve(result, edgePointIdsIn(doc, names), {
-    tapes: run.circleTape ? { diametersM: run.circleTape.diametersM, edge: run.circleTape.edge } : undefined,
-    capM: values.tolerances_mm.circle_diameter_baseline / 1000,
-    plantableCapM: values.tolerances_mm.circle_diameter_plantable / 1000,
-    plannedPoints: values.edge_points,
-    cameraClassM: values.tolerances_mm.camera_position / 1000,
-    baselineM: values.baseline_length_m,
-  });
-  return circleVerdict(input);
+}
+
+export interface CircleResultDetail {
+  verdict: CircleVerdict;
+  gates: EdgeGate[];
+  network?: GridNetworkResult;
+  fx?: { fx: number; sigmaRel: number; method: 'auto' | 'manual' };
+  /** Photos not levelled because they carry no gravity sidecar. */
+  unlevelled: number;
+}
+
+export function circleResultDetailForRun(doc: GardenDocument | null | undefined, run: WorkflowRun): CircleResultDetail {
+  const values = migrateFieldTestSetup(run.setup?.values);
+  const needs = (headline: string, guidance: string[]): CircleResultDetail => ({ verdict: { state: 'needs-data', headline, guidance }, gates: [], unlevelled: 0 });
+  if (!doc) return needs('No garden open.', []);
+  const network = baseNetworkForRun(run);
+  if (!network) return needs('No base points yet.', ['Add base points: East, North and the diagonal from BAS01 (step: Add base points).']);
+  const red = network.diagonals.filter((o) => o.flag === 'red');
+  const fx = calibrationFx(doc, run);
+  if (!fx) return { ...needs('No focal length yet.', ['Take and mark the calibration photo (step: Calibration photo).']), network };
+  const ids = [...network.order];
+  const control = [{ id: 'BAS01', x: 0, y: 0 }, ...ids.map((id) => ({ id, ...network.points[id] }))];
+  const sub = subCovariance(network, ids);
+  // BAS01 is the datum: a tiny σ keeps the prior block positive definite.
+  const n = 2 * control.length;
+  const cov = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i < 2 || j < 2 ? (i === j ? 1e-8 : 0) : sub[i - 2][j - 2])));
+  const known = new Set(control.map((c) => c.id));
+  const assign = edgeAssignmentsFor(doc, run);
+  const stepPhotos = linkedPhotosForStep(doc, EDGE_PHOTOS_STATION, run, EDGE_PHOTOS_STEP_ID).filter((p) => !p.supersededAt && assign.has(p.id));
+  const tapped = new Set([...known, ...stepPhotos.flatMap((p) => p.clicks.map((c) => c.pointId)).filter((id) => /^BAS\d+$/.test(id))]);
+  let unlevelled = 0;
+  const photos: EdgePhoto[] = stepPhotos
+    .map((p) => {
+      const s = sightingsFromPhoto(p, tapped, fx.fx);
+      if (!s.levelled) unlevelled += 1;
+      return { pointId: assign.get(p.id)!, sightings: s.sightings };
+    })
+    .sort((a, b) => a.pointId.localeCompare(b.pointId));
+  const usable = photos.filter((p) => p.sightings.filter((x) => known.has(x.id)).length >= 3);
+  if (usable.length < 3) {
+    return { ...needs(`${usable.length} edge photo${usable.length === 1 ? '' : 's'} with 3 or more base points tapped. The circle needs at least 8.`, ['Take one photo from each edge point and tap the base points in it.']), network, fx, unlevelled };
+  }
+  const centre = control.reduce((s, c) => ({ x: s.x + c.x / control.length, y: s.y + c.y / control.length }), { x: 0, y: 0 });
+  try {
+    const out = controlCircleVerdict(
+      {
+        control,
+        controlCovariance: cov,
+        photos: usable,
+        fx0: fx.fx,
+        calibrationSigmaRel: fx.sigmaRel,
+        searchCentre: centre,
+        searchRadiusM: values.circle_diameter_m + 6,
+      },
+      {
+        tapes: run.circleTape ? { diametersM: run.circleTape.diametersM, edge: run.circleTape.edge } : undefined,
+        capM: values.tolerances_mm.circle_diameter_baseline / 1000,
+        plantableCapM: values.tolerances_mm.circle_diameter_plantable / 1000,
+        plannedPoints: values.edge_points,
+      },
+    );
+    const verdict = { ...out.verdict };
+    const extra: string[] = [];
+    if (red.length) extra.push(`Base-point diagonal check fails on ${red.map((d) => `${d.from}→${d.to}`).join(', ')}: re-tape before trusting this.`);
+    const skipped = photos.length - usable.length;
+    if (skipped) extra.push(`${skipped} edge photo${skipped === 1 ? '' : 's'} left out: fewer than 3 tied base points tapped.`);
+    if (out.gates.some((g) => g.calibrateFirst)) {
+      extra.push(`Calibrate first: the focal length is known to ±${(fx.sigmaRel * 100).toFixed(2)} % (needs 0.5 %). Retake the calibration photo; let the app find the sleeve edges.`);
+      if (verdict.state === 'green') verdict.state = 'amber';
+    }
+    if (red.length && verdict.state === 'green') verdict.state = 'amber';
+    verdict.guidance = [...extra, ...verdict.guidance];
+    return { verdict, gates: out.gates, network, fx, unlevelled };
+  } catch (err) {
+    return { ...needs(`The edge photos do not solve yet: ${(err as Error).message}`, ['Check each edge photo has 4 or more base points tapped.']), network, fx, unlevelled };
+  }
+}
+
+export function circleResultForRun(doc: GardenDocument | null | undefined, run: WorkflowRun): CircleVerdict {
+  return circleResultDetailForRun(doc, run).verdict;
 }

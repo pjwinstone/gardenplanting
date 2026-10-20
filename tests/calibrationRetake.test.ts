@@ -29,8 +29,8 @@ function doneRun(): WorkflowProgress {
   let p = confirmSetupWorkflow(startWorkflow(emptyProgress(), 'circle-field-test', NOW).progress, undefined, NOW).progress;
   const run = p.runs['circle-field-test']!;
   run.steps['camera-calibration'] = { ...run.steps['camera-calibration']!, status: 'ticked_by_app', completedBy: 'auto', consumedPhotoIds: ['cal-1'] };
-  run.steps['camera-1'] = { ...run.steps['camera-1']!, status: 'ticked_by_app', completedBy: 'auto' };
-  run.currentStepId = 'camera-2';
+  run.steps['circle-result'] = { ...run.steps['circle-result']!, status: 'ticked_by_app', completedBy: 'auto' };
+  run.currentStepId = 'edge-photos';
   return p;
 }
 
@@ -52,7 +52,7 @@ describe('calibration photo can always be retaken', () => {
     expect(move.changed).toBe(true);
     const run = move.progress.runs['circle-field-test']!;
     expect(run.steps['camera-calibration']).toMatchObject({ status: 'waiting_for_app', retakeAfter: RETAKE_AT, consumedPhotoIds: [] });
-    expect(run.steps['camera-1']?.status).toBe('needs_recheck');
+    expect(run.steps['circle-result']?.status).toBe('needs_recheck');
     expect(countUploadedPhotosForStep(doc([old]), 'Calibration', run, 'camera-calibration').count).toBe(0);
     expect(deriveActionState(doc([old]), run, step).place).not.toBe('done');
     const fresh = calPhoto('cal-2', '2026-06-01T12:11:00.000Z');

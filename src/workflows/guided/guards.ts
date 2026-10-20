@@ -91,11 +91,7 @@ export function setupValid(values: FieldTestSetupValues): boolean {
   if (!(values.circle_diameter_m > 0) || !(values.baseline_length_m >= values.circle_diameter_m / 2 - 1e-9)) return false;
   if (!Number.isInteger(values.edge_points) || values.edge_points < 8) return false;
   if (!Number.isInteger(values.photo_archive_age_days) || values.photo_archive_age_days < 1) return false;
-  if (!Number.isInteger(values.camera_position_count) || values.camera_position_count < 3 || values.camera_position_count > 4) return false;
-  // The solver places a camera from two tapes to BAS01/BAS02: at least two positions are taped.
-  const positions = Object.values(values.camera_positions);
-  if (positions.some((p) => p.to_bas01 < 0 || p.to_bas02 < 0)) return false;
-  if (positions.filter((p) => p.to_bas01 > 0 && p.to_bas02 > 0).length < 2) return false;
+  // Rev 6: camera positions are gone (one photo per edge point); their legacy values are not checked.
   const tol = Object.values(values.tolerances_mm);
   return tol.every((v) => v > 0);
 }
@@ -119,13 +115,8 @@ export function changedKeys(oldValues: FieldTestSetupValues, nextValues: FieldTe
     'baseline_length_m',
     'circle_diameter_m',
     'edge_points',
-    'camera_position_count',
     'photo_archive_age_days',
     'calibration_distance_m',
-    'camera_positions.position_1',
-    'camera_positions.position_2',
-    'camera_positions.position_3',
-    'camera_positions.position_4',
     'tolerances_mm.baseline',
     'tolerances_mm.railway',
     'tolerances_mm.flower_bed',

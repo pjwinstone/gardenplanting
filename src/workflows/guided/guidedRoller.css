@@ -251,3 +251,12 @@
     opacity: 1 !important;
   }
 }
+
+/* Rev 6: base-point ties and measurement strength (circle result). */
+.base-tie-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.measurement-strength summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+.strength-point { border-left: 4px solid #9e9e9e; padding-left: 0.5rem; margin: 0.25rem 0; }
+.strength-point--green { border-left-color: #2e7d32; }
+.strength-point--amber { border-left-color: #f9a825; }
+.strength-point--red { border-left-color: #c62828; }
+.roller-hint--small { font-size: 0.8em; opacity: 0.85; }

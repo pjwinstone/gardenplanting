@@ -28,10 +28,17 @@ export function markerIdsFor(doc?: Pick<GardenDocument, 'markerSet'> | null): st
   return Object.values(markerMap(doc));
 }
 
-/** Edge points of the garden circle, in order (EDG01…). */
-export function edgePointsFor(doc?: Pick<GardenDocument, 'markerSet'> | null, count?: number): string[] {
-  const edges = markerSetFor(doc).map((m) => m.point).filter((p) => /^EDG\d+$/.test(p));
-  return count === undefined ? edges : edges.slice(0, Math.max(0, count));
+/**
+ * Edge points of the garden circle, in order (EDG01…). Since rev 6 an edge point carries no
+ * sleeve (you stand on it for one photo), so the names are generated, not read from the marker set.
+ */
+export function edgePointsFor(_doc?: Pick<GardenDocument, 'markerSet'> | null, count = 12): string[] {
+  return Array.from({ length: Math.max(0, count) }, (_, i) => `EDG${String(i + 1).padStart(2, '0')}`);
+}
+
+/** Base points BAS01, BAS02, BAS03… in the marker set: the growing control network. */
+export function basePointsFor(doc?: Pick<GardenDocument, 'markerSet'> | null): string[] {
+  return markerSetFor(doc).map((m) => m.point).filter((p) => /^BAS\d+$/.test(p));
 }
 
 /** Point name for a sleeve ID, if it is one of ours. */

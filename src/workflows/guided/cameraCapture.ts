@@ -89,6 +89,9 @@ export function cameraPositionHint(doc: GardenDocument, cameraPositionId: string
     const d = values.calibration_distance_m.toFixed(1);
     return `Calibration: landscape, 1×. Phone ${d} m (taped) from the calibration cane. Cane in the middle, whole sleeve in view. Tap the sleeve, then the shutter.`;
   }
+  if (nameMatchesStation('Edge points', cameraPositionId)) {
+    return 'Edge point: stand on the peg, face the base points, landscape, 1×. One photo per edge point, every base point you can see in the frame.';
+  }
   const key = cameraPositionId.trim().toLowerCase().replace(/\s+/g, '_') as keyof typeof values.camera_positions;
   const pos = values.camera_positions[key];
   const where = pos ? ` ${pos.to_bas01.toFixed(2)} m to BAS01, ${pos.to_bas02.toFixed(2)} m to BAS02.` : '';
