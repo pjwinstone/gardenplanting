@@ -8,6 +8,7 @@ import {
   canonicalStepId,
   defaultFieldTestSetup,
   type FieldTestSetupValues,
+  migrateFieldTestSetup,
   SETUP_DEPENDS_ON,
   SETUP_STEP_ID,
 } from './fieldTestMeta';
@@ -87,9 +88,13 @@ export function isSkippable(step: WorkflowStep): boolean {
 }
 
 export function setupValid(values: FieldTestSetupValues): boolean {
-  if (values.baseline_length_m <= 0 || values.circle_diameter_m <= 0) return false;
+  if (!(values.circle_diameter_m > 0) || !(values.baseline_length_m >= values.circle_diameter_m / 2 - 1e-9)) return false;
+  if (!Number.isInteger(values.edge_points) || values.edge_points < 8) return false;
+  if (!Number.isInteger(values.camera_position_count) || values.camera_position_count < 3 || values.camera_position_count > 4) return false;
+  // The solver places a camera from two tapes to BAS01/BAS02: at least two positions are taped.
   const positions = Object.values(values.camera_positions);
-  if (!positions.every((p) => p.to_bas01 > 0 && p.to_bas02 > 0)) return false;
+  if (positions.some((p) => p.to_bas01 < 0 || p.to_bas02 < 0)) return false;
+  if (positions.filter((p) => p.to_bas01 > 0 && p.to_bas02 > 0).length < 2) return false;
   const tol = Object.values(values.tolerances_mm);
   return tol.every((v) => v > 0);
 }
@@ -111,17 +116,21 @@ function dotGet(obj: unknown, path: string): unknown {
 export function changedKeys(oldValues: FieldTestSetupValues, nextValues: FieldTestSetupValues): string[] {
   const keys = new Set<string>([
     'baseline_length_m',
-    'bas02_from_peg_m',
     'circle_diameter_m',
+    'edge_points',
+    'camera_position_count',
     'calibration_distance_m',
-    'camera_positions.left',
-    'camera_positions.right_near',
-    'camera_positions.right_far',
+    'camera_positions.position_1',
+    'camera_positions.position_2',
+    'camera_positions.position_3',
+    'camera_positions.position_4',
     'tolerances_mm.baseline',
     'tolerances_mm.railway',
     'tolerances_mm.flower_bed',
     'tolerances_mm.tree',
     'tolerances_mm.camera_position',
+    'tolerances_mm.circle_diameter_baseline',
+    'tolerances_mm.circle_diameter_plantable',
   ]);
   const changed: string[] = [];
   for (const key of keys) {
@@ -279,10 +288,8 @@ export function firstUnsettledStepId(def: WorkflowDefinition, run: WorkflowRun):
 }
 
 export function ensureRunSetup(run: WorkflowRun): WorkflowRunSetup {
-  return run.setup ?? {
-    status: 'unconfirmed',
-    values: defaultFieldTestSetup(),
-  };
+  if (!run.setup) return { status: 'unconfirmed', values: defaultFieldTestSetup() };
+  return { ...run.setup, values: migrateFieldTestSetup(run.setup.values) };
 }
 
 export function hasStoredEvidence(

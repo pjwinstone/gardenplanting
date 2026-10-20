@@ -7,7 +7,8 @@
 
 id: review-field-test
 title: Circle field test (guided checklist)
-revision: 4   # rev 4: hierarchical — each step instantiates workflow/action.net.yaml for its row pill.
+revision: 5   # rev 5: Paul's own garden circle (~12 m, docs/garden-circle.md): edge points EDG01…, tape-diameter, circle-result; calibration Retake always on.
+# rev 4: hierarchical — each step instantiates workflow/action.net.yaml for its row pill.
 # rev 3: Step 0 Set-up (run config) + header cog; config changes mark dependants 'needs re-check'.
 # rev 2: rev 2: Back = roller scroll; Retake and Details (?) are row actions; ONE button row (Tick + Next/Later/Done);
                # Pause, Skip with a note, Tick by hand and Untick live in the Details sheet
@@ -47,56 +48,68 @@ setup:
   id: setup
   n: 0
   title: Set-up
-  counted: false          # not part of 'n of 12 ticked'; must be confirmed before Done
+  counted: false          # not part of 'n of 13 ticked'; must be confirmed before Done
   states: [unconfirmed, confirmed, changed_mid_run]
-  values:                 # defaults for the Circle field test; units in the label
-    baseline_length_m: 8.000            # BAS01–BAS02
-    bas02_from_peg_m: 4.30
-    circle_diameter_m: 8.000            # radius 4.000 from the peg
+  values:                 # defaults for the Circle field test; units in the label; all editable
+    circle_diameter_m: 12.0             # Paul's existing garden circle
+    edge_points: 12                     # EDG01…; at least 8
+    camera_position_count: 4            # 3 or 4; Position 4 is skipped with a note when 3
+    baseline_length_m: 6.000            # BAS01–BAS02, tangential, at least D/2
     calibration_distance_m: 4.0
-    camera_positions:                   # distances to BAS01 / BAS02, m
-      left:       {to_bas01: 8.00,  to_bas02: 8.00}
-      right_near: {to_bas01: 6.50,  to_bas02: 9.00}
-      right_far:  {to_bas01: 10.50, to_bas02: 10.50}
+    camera_positions:                   # distances to BAS01 / BAS02, m; 0 = not taped; at least 2 taped
+      position_1: {to_bas01: 14.60, to_bas02: 8.60}
+      position_2: {to_bas01: 0,     to_bas02: 0}
+      position_3: {to_bas01: 0,     to_bas02: 0}
+      position_4: {to_bas01: 7.50,  to_bas02: 13.10}
     tolerances_mm:                      # from workflow/tolerances.json (shared app configuration)
       baseline: 30
       railway: 30
       flower_bed: 100
       tree: 150
       camera_position: 200
+      circle_diameter_baseline: 60      # circleDiameterCapBaselineMm: the grade's cap
+      circle_diameter_plantable: 100    # circleDiameterCapPlantableMm: reported as plantable pass
   depends_on:             # config key -> steps that must be re-checked when it changes
-    baseline_length_m:     [place-baseline-points, tape-baseline, laser-check-baseline, camera-left, camera-right-near, camera-right-far]
-    bas02_from_peg_m:      [place-baseline-points]
-    circle_diameter_m:     [set-out-circle, tape-diameters]
+    circle_diameter_m:     [place-baseline-points, tape-diameter, circle-result]
+    edge_points:           [mark-edge-points, circle-result]
+    camera_position_count: [camera-3, camera-4, circle-result]
+    baseline_length_m:     [place-baseline-points, tape-baseline, laser-check-baseline, camera-1, camera-2, camera-3, camera-4]
     calibration_distance_m: [camera-calibration]
-    camera_positions.left:       [camera-left]
-    camera_positions.right_near: [camera-right-near]
-    camera_positions.right_far:  [camera-right-far]
+    camera_positions.position_1: [camera-1]
+    camera_positions.position_2: [camera-2]
+    camera_positions.position_3: [camera-3]
+    camera_positions.position_4: [camera-4]
     tolerances_mm.baseline:        [tape-baseline, laser-check-baseline]
-    tolerances_mm.camera_position: [camera-left, camera-right-near, camera-right-far]
+    tolerances_mm.camera_position: [camera-1, camera-2, camera-3, camera-4]
+    tolerances_mm.circle_diameter_baseline:  [circle-result]
+    tolerances_mm.circle_diameter_plantable: [circle-result]
     # railway / flower_bed / tree tolerances: no step in this workflow depends on them
 
 steps:
   - {n: 1,  id: gather-kit,            title: Gather the kit,                         kind: user, evidence: none}
-  - {n: 2,  id: set-out-circle,        title: Set out the circle,                     kind: user, evidence: none}
-  - {n: 3,  id: tape-diameters,        title: Tape the two diameters,                 kind: user, evidence: none,
-     note: "Tape measurements CRC01–CRC04 and CRC02–CRC05, both 8.000 m."}
-  - {n: 4,  id: place-baseline-points, title: Place the baseline points,              kind: user, evidence: none,
-     note: "Baseline points BAS02 (4.30 m from the peg) and BAS01 (8.000 m from BAS02)."}
-  - {n: 5,  id: tape-baseline,         title: Tape the baseline both ways,            kind: user+app,
+  - {n: 2,  id: place-baseline-points, title: Place the baseline points,              kind: user, evidence: none,
+     note: "BAS01, BAS02 outside the circle, tangential, at least D/2 apart."}
+  - {n: 3,  id: tape-baseline,         title: Tape the baseline both ways,            kind: user+app,
      evidence: "baseline.saved BAS01–BAS02, tape measurement, offsets 0", note: "You tick when taped; the app ticks when the baseline is saved. Both needed."}
-  - {n: 6,  id: laser-check-baseline,  title: Laser check of the baseline,            kind: user, evidence: none,
+  - {n: 4,  id: laser-check-baseline,  title: Laser check of the baseline,            kind: user, evidence: none,
      note: "Was 'Laser CHK-BASE'. Write the laser reading in the note; do not enter it as a tape measurement."}
-  - {n: 7,  id: plumb-canes,           title: Plumb the canes and note heights,       kind: user, evidence: none}
-  - {n: 8,  id: camera-calibration,    title: Calibration photo (focal length),       kind: app,
+  - {n: 5,  id: tape-diameter,         title: Tape the diameter,                      kind: user, evidence: "circle tape form (3 diameters ~60° apart, inside/outside edge)",
+     note: "Save diameters stores run.circleTape and ticks the step; a settled circle-result goes to re-check."}
+  - {n: 6,  id: mark-edge-points,      title: Mark the edge points,                   kind: user, evidence: none,
+     note: "EDG01… on the taped edge, gaps <= 60°, all the way round; IDs from the document marker set (doc.markerSet)."}
+  - {n: 7,  id: camera-calibration,    title: Calibration photo (focal length),       kind: app,
      evidence: "1 photo at camera position 'Calibration' (legacy CAL)"}
-  - {n: 9,  id: camera-left,           title: Camera position Left (8.00 / 8.00),     kind: app,
-     evidence: "2 photos at camera position 'Left' (legacy STN01)"}
-  - {n: 10, id: camera-right-near,     title: Camera position Right near (6.50 / 9.00), kind: app,
-     evidence: "2 photos at camera position 'Right near' (legacy STN02)"}
-  - {n: 11, id: camera-right-far,      title: Camera position Right far (10.50 / 10.50), kind: app,
-     evidence: "2 photos at camera position 'Right far' (legacy STN03)"}
-  - {n: 12, id: save-to-onedrive,      title: Save to OneDrive,                       kind: app,
+  - {n: 8,  id: camera-1,              title: Camera position 1 (BAS02 end),          kind: app,
+     evidence: "2 photos at camera position 'Position 1'; taped to BAS01 and BAS02"}
+  - {n: 9,  id: camera-2,              title: Camera position 2 (far side, beyond BAS02), kind: app,
+     evidence: "2 photos at camera position 'Position 2'"}
+  - {n: 10, id: camera-3,              title: Camera position 3 (far side, beyond BAS01), kind: app,
+     evidence: "2 photos at camera position 'Position 3'"}
+  - {n: 11, id: camera-4,              title: Camera position 4 (BAS01 end),          kind: app,
+     evidence: "2 photos at camera position 'Position 4'; taped to BAS01 and BAS02"}
+  - {n: 12, id: circle-result,         title: Circle result,                          kind: user+app, evidence: none,
+     note: "Shows circleVerdict: green / amber / red / not a circle / inconclusive / weak, with plain guidance. You tick after reading."}
+  - {n: 13, id: save-to-onedrive,      title: Save to OneDrive,                       kind: app,
      evidence: "cloud.saved while this step is current"}
 
 
@@ -109,17 +122,20 @@ subnets:
   action: workflow/action.net.yaml
   instances:
     - {step: gather-kit,            net: action, evidence: manual}
-    - {step: set-out-circle,        net: action, evidence: manual}
-    - {step: tape-diameters,        net: action, evidence: manual}
     - {step: place-baseline-points, net: action, evidence: manual}
     - {step: tape-baseline,         net: action, evidence: baseline.saved}
     - {step: laser-check-baseline,  net: action, evidence: manual}
-    - {step: plumb-canes,           net: action, evidence: manual}
-    - {step: camera-calibration,    net: action, evidence: photo.uploaded, min_photos: 1, guard: photoUploadVerified}
-    - {step: camera-left,           net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified}
-    - {step: camera-right-near,     net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified}
-    - {step: camera-right-far,      net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified}
+    - {step: tape-diameter,         net: action, evidence: manual}
+    - {step: mark-edge-points,      net: action, evidence: manual}
+    - {step: camera-calibration,    net: action, evidence: photo.uploaded, min_photos: 1, guard: photoUploadVerified, retake: always}
+    - {step: camera-1,              net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified, retake: always}
+    - {step: camera-2,              net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified, retake: always}
+    - {step: camera-3,              net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified, retake: always}
+    - {step: camera-4,              net: action, evidence: photo.uploaded, min_photos: 2, guard: photoUploadVerified, retake: always}
+    - {step: circle-result,         net: action, evidence: manual}
     - {step: save-to-onedrive,      net: action, evidence: cloud.saved}
+  retake_depends_on:   # retaking a step's photos sends these, if settled, to needs_recheck (RETAKE_DEPENDS_ON)
+    camera-calibration: [camera-1, camera-2, camera-3, camera-4, circle-result]
   composition: >
     step settled (top net) <=> its action instance is in `done`. Done (finish_run) needs
     allActionsDone(doc, run); otherwise done_go_to_first_open lands on the first step whose
@@ -127,25 +143,31 @@ subnets:
 
 rename_map:   # old id -> new id (old ids kept as aliases in reconcileRun so saved runs migrate)
   kit: gather-kit
-  set-out: set-out-circle
-  diameters: tape-diameters
   place-baseline: place-baseline-points
   tape-baseline: tape-baseline
   laser-check: laser-check-baseline
-  plumb: plumb-canes
+  diameters: tape-diameter
+  tape-diameters: tape-diameter
+  set-out: mark-edge-points
+  set-out-circle: mark-edge-points
+  plumb: mark-edge-points
+  plumb-canes: mark-edge-points
   cal: camera-calibration
-  stn01: camera-left
-  stn02: camera-right-near
-  stn03: camera-right-far
+  stn01: camera-1
+  stn02: camera-2
+  stn03: camera-3
+  camera-left: camera-1
+  camera-right-near: camera-2
+  camera-right-far: camera-3
   save-send: save-to-onedrive
 
 # ---------------------------------------------------------------------------
 # Places
 # ---------------------------------------------------------------------------
 colours:
-  step: [gather-kit, set-out-circle, tape-diameters, place-baseline-points, tape-baseline,
-         laser-check-baseline, plumb-canes, camera-calibration, camera-left, camera-right-near,
-         camera-right-far, save-to-onedrive]
+  step: [gather-kit, place-baseline-points, tape-baseline, laser-check-baseline, tape-diameter,
+         mark-edge-points, camera-calibration, camera-1, camera-2, camera-3, camera-4,
+         circle-result, save-to-onedrive]
 
 places:
   - {id: setup_config,  label: Set-up values (step 0), note: "Token: the current config version. Read by every check guard."}
@@ -400,7 +422,7 @@ counts:   # header text, all from step states (never from the cursor position)
   header:   "'{ticked} of {total} ticked · {warnings} warnings · {errors} error · {open} open' — zero terms left out; each count is tappable and scrolls the roller to the next step of that kind"
   position: "Shown separately as 'Step {n} of {total}', never next to the word 'ticked'."
 
-setup_in_counts: "Step 0 is not counted in 'of 12'. If unconfirmed, the header shows 'Set-up not confirmed' (tappable)."
+setup_in_counts: "Step 0 is not counted in 'of 13'. If unconfirmed, the header shows 'Set-up not confirmed' (tappable)."
 
 bug_this_fixes: >
   Build 0.7.25: Next silently passed the five evidence steps (tape-baseline, cal, stn01-03), the bar showed

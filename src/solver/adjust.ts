@@ -1276,8 +1276,46 @@ function orientedYaw(
     if (b.photo.id !== photo.id || b.pointId === photo.stationId) continue;
     if (xyOf(b.pointId)) placed++;
   }
-  if (placed < 1) return null;
+  if (placed < 1) return chainedYaw(photo, bearings, xyOf, input, new Set([photo.id]));
   return initialYaw(photo.stationId, bearings, xyOf, input, photo.id);
+}
+
+/**
+ * Seed only: a photo with no placed target, taken from the same camera position as an
+ * oriented photo it shares a target with (a turn on the spot), takes its yaw through that
+ * shared ray: yaw_B = yaw_A + bearing_A(t) − bearing_B(t). The adjustment still estimates
+ * every yaw freely; this only lets an edge-only photo enter the seed.
+ */
+function chainedYaw(
+  photo: SolverPhotoInput,
+  bearings: BearingPrep[],
+  xyOf: (id: string) => Xy | null,
+  input: SolveInput,
+  visited: Set<string>,
+): number | null {
+  const mine = bearings.filter((b) => b.photo.id === photo.id);
+  const sameStation = bearings.filter((b) => b.photo.stationId === photo.stationId && !visited.has(b.photo.id));
+  for (const other of [...new Set(sameStation.map((b) => b.photo))]) {
+    const shared = mine.map((b) => [b, sameStation.find((o) => o.photo.id === other.id && o.pointId === b.pointId)] as const)
+      .filter((pair): pair is readonly [BearingPrep, BearingPrep] => !!pair[1]);
+    if (!shared.length) continue;
+    visited.add(other.id);
+    let yawOther: number | null = null;
+    if (other.yawHeldRad != null) yawOther = other.yawHeldRad;
+    else if (bearings.some((b) => b.photo.id === other.id && b.pointId !== other.stationId && xyOf(b.pointId))) {
+      yawOther = initialYaw(other.stationId, bearings, xyOf, input, other.id);
+    } else yawOther = chainedYaw(other, bearings, xyOf, input, visited);
+    if (yawOther == null) continue;
+    let x = 0;
+    let y = 0;
+    for (const [b, o] of shared) {
+      const yaw = wrap(yawOther + o.bearing - b.bearing);
+      x += Math.cos(yaw);
+      y += Math.sin(yaw);
+    }
+    return Math.atan2(y, x);
+  }
+  return null;
 }
 
 /**

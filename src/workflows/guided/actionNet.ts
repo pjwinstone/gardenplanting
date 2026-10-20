@@ -26,6 +26,7 @@ export type ActionEvent =
   | 'photo_refused'
   | 'upload_failed'
   | 'retake'
+  | 'retake_done'
   | 'retry'
   | 'settled_by_hand'
   | 'recheck';
@@ -66,6 +67,7 @@ export const ACTION_TRANSITIONS: ActionTransition[] = [
   { id: 'photo_refused', from: ['in_progress', 'uploading'], to: 'error', recovery: 'retake' },
   { id: 'upload_failed', from: ['uploading'], to: 'error', recovery: 'retry' },
   { id: 'retake', from: ['error'], to: 'in_progress', guard: 'recoveryIsRetake' },
+  { id: 'retake_done', from: ['done', 'error'], to: 'in_progress', guard: 'isPhotoStep' },
   { id: 'retry', from: ['error'], to: 'uploading', guard: 'recoveryIsRetry' },
   { id: 'settled_by_hand', from: ['idle', 'in_progress', 'uploading', 'error'], to: 'done' },
   { id: 'recheck', from: ['done'], to: 'idle' },
@@ -78,6 +80,8 @@ export const ACTION_GUARDS = {
   photoUploadVerified: (s: ActionState) => (s.need ?? 1) <= (s.have ?? 0) + 1,
   morePhotosNeeded: (s: ActionState) => (s.need ?? 1) > (s.have ?? 0) + 1,
   recoveryIsRetake: (s: ActionState) => s.recovery === 'retake',
+  /** Done photo steps keep a Retake: a later step may show the photo was poor. */
+  isPhotoStep: (s: ActionState) => s.need !== undefined,
   recoveryIsRetry: (s: ActionState) => s.recovery === 'retry',
 } satisfies Record<string, (s: ActionState) => boolean>;
 
@@ -91,7 +95,7 @@ export function enabledActions(state: ActionState): ActionTransition[] {
 export function fireAction(state: ActionState, event: ActionEvent, reason?: string): ActionState {
   const t = enabledActions(state).find((item) => item.id === event);
   if (!t) return state;
-  const have = event === 'upload_verified' ? (state.have ?? 0) + 1 : state.have;
+  const have = event === 'upload_verified' ? (state.have ?? 0) + 1 : event === 'retake_done' ? 0 : state.have;
   const base: ActionState = { place: t.to, need: state.need, have: t.to === 'idle' ? 0 : t.to === 'done' ? state.need : have };
   if (t.to === 'error') return { ...base, recovery: t.recovery, reason: reason ?? (t.recovery === 'retry' ? 'Upload failed.' : 'Photo refused.') };
   return base;
@@ -212,6 +216,12 @@ export function actionPillLabel(step: WorkflowStep, state: ActionState): string 
     case 'error':
       return state.recovery === 'retry' ? 'Retry upload' : 'Retake';
   }
+}
+
+/** A second, always-on Retake next to the pill: on done photo steps, and on an upload error. */
+export function actionRetakeAvailable(step: WorkflowStep, state: ActionState): boolean {
+  if (!photoNeed(step)) return false;
+  return state.place === 'done' || (state.place === 'error' && state.recovery === 'retry');
 }
 
 /** data-cmd for the pill. */

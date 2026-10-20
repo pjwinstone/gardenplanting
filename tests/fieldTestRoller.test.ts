@@ -29,13 +29,13 @@ describe('circle field test step roller', () => {
     progress = advanceWorkflow(progress, NOW).progress;
     const later = advanceWorkflow(progress, NOW);
     expect(later.changed).toBe(true);
-    expect(later.progress.runs['circle-field-test']?.currentStepId).toBe('set-out-circle');
+    expect(later.progress.runs['circle-field-test']?.currentStepId).toBe('place-baseline-points');
     expect(later.progress.runs['circle-field-test']?.steps['gather-kit']?.status).toBe('open');
 
     progress = later.progress;
-    const skipped = skipWithNoteWorkflow(progress, 'set-out-circle', 'Rain stopped play', NOW);
+    const skipped = skipWithNoteWorkflow(progress, 'place-baseline-points', 'Rain stopped play', NOW);
     expect(skipped.changed).toBe(true);
-    expect(skipped.progress.runs['circle-field-test']?.steps['set-out-circle']?.status).toBe('skipped_with_note');
+    expect(skipped.progress.runs['circle-field-test']?.steps['place-baseline-points']?.status).toBe('skipped_with_note');
   });
 
   it('bad evidence then Retake', () => {
@@ -73,11 +73,11 @@ describe('circle field test step roller', () => {
     progress = advanceWorkflow(progress, NOW).progress;
     progress = tickWorkflow(progress, 'gather-kit', undefined, NOW).progress;
     progress = advanceWorkflow(progress, NOW).progress;
-    progress = tickWorkflow(progress, 'set-out-circle', undefined, NOW).progress;
+    progress = tickWorkflow(progress, 'place-baseline-points', undefined, NOW).progress;
     const values = defaultFieldTestSetup();
     values.circle_diameter_m = 7.99;
     const edited = confirmSetupWorkflow(progress, values, NOW);
-    expect(edited.progress.runs['circle-field-test']?.steps['set-out-circle']?.status).toBe('needs_recheck');
+    expect(edited.progress.runs['circle-field-test']?.steps['place-baseline-points']?.status).toBe('needs_recheck');
     expect(edited.progress.runs['circle-field-test']?.runLog?.some((entry) => entry.type === 'config.changed')).toBe(true);
   });
 
@@ -112,6 +112,6 @@ describe('circle field test step roller', () => {
     const migrated = reconcileRun(circleFieldTest, run);
     expect(migrated.steps['gather-kit']?.status).toBe('ticked_by_you');
     expect(migrated.steps.stn01?.status).toBe('waiting_for_app');
-    expect(migrated.steps['camera-left']?.status).toBe('waiting_for_app');
+    expect(migrated.steps['camera-1']?.status).toBe('waiting_for_app');
   });
 });
