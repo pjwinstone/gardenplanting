@@ -9,7 +9,7 @@
 import type { AutoSleeveRecord, GardenDocument, MeasureDetection, Photo, PhotoClick } from '../../model';
 import { MIN_CONFIDENCE, type SleeveDetection } from './sleeveDetect';
 import { workflowById } from './definitions';
-import { pointForMarkerId } from './markerSet';
+import { pointForMarkerId, postTopFor } from './markerSet';
 import type { ScannedSleeve } from './sleeveScan';
 import { nameMatchesStation, readProgress } from './engine';
 import type { PhotoTapTarget, StepPhotoTaps, WorkflowDefinition, WorkflowStep } from './types';
@@ -26,6 +26,8 @@ export interface PhotoTapPlan {
   targets: PhotoTapTarget[];
   /** sleeve-height: manual edge taps, added to `targets` only when detection is unsure. */
   fallback?: PhotoTapTarget[];
+  /** bearings: scan-only targets (two-sleeve post bottoms), never prompted for. */
+  scanOnly?: PhotoTapTarget[];
 }
 
 /** Sleeve edge detection on the draft (calibration photo). Edge points are in preview pixels. */
@@ -141,11 +143,12 @@ export function photoTapPlan(doc: GardenDocument, photoId: string): PhotoTapPlan
     photoCount: Math.max(photoCount, 1),
     targets: list.map((target) => ({ ...target })),
     fallback: taps.fallback?.map((target) => ({ ...target })),
+    scanOnly: taps.scanOnly?.map((target) => ({ ...target })),
   };
 }
 
 export function startTapDraft(plan: PhotoTapPlan, existing: PhotoClick[] = [], saved?: MeasureDetection): PhotoTapDraft {
-  const ids = new Set([...plan.targets, ...(plan.fallback ?? [])].map((target) => target.id));
+  const ids = new Set([...plan.targets, ...(plan.fallback ?? []), ...(plan.scanOnly ?? [])].map((target) => target.id));
   const taps = existing.filter((tap) => ids.has(tap.pointId)).map((tap) => ({ ...tap }));
   const draft: PhotoTapDraft = { plan, taps, skipped: [] };
   if (plan.use !== 'sleeve-height') return draft;
@@ -243,7 +246,7 @@ export function applyAutoSleeves(
   if (result.unavailable || !(result.scaleX > 0 && result.scaleY > 0)) {
     return { ...draft, auto: { state: 'unavailable', pins: [], duplicates: [], note: result.unavailable } };
   }
-  const targets = new Set(draft.plan.targets.map((t) => t.id));
+  const targets = new Set([...draft.plan.targets, ...(draft.plan.scanOnly ?? [])].map((t) => t.id));
   const pins: AutoPin[] = [];
   for (const s of result.sleeves ?? []) {
     const point = pointForMarkerId(s.id, doc);
@@ -262,8 +265,20 @@ export function applyAutoSleeves(
     };
     pins.push({ targetId: point, code: s.id, label: `${point} · ${s.id}`, px: s.axisX / result.scaleX, py: s.midY / result.scaleY, moved: false, record });
   }
+  // Two-sleeve posts: a bottom sleeve (BASnnB) counts only under its own top sleeve, vertically
+  // aligned (axis x within 5 % of their separation + 3 bands) and lower in the photo.
+  const kept = pins.filter((pin) => {
+    const top = postTopFor(pin.targetId);
+    if (!top) return true;
+    const t = pins.find((q) => q.targetId === top);
+    if (!t) return false;
+    const dy = pin.record.midYFullPx - t.record.midYFullPx;
+    const dx = Math.abs(pin.record.axisXFullPx - t.record.axisXFullPx);
+    return dy > 0 && dx <= 0.05 * dy + 3 * Math.max(pin.record.bandPx ?? 0, t.record.bandPx ?? 0, 4);
+  });
+  pins.splice(0, pins.length, ...kept);
   // Taps and pins follow the target order, so saved clicks keep the step's order.
-  const order = draft.plan.targets.map((t) => t.id);
+  const order = [...draft.plan.targets, ...(draft.plan.scanOnly ?? [])].map((t) => t.id);
   pins.sort((a, b) => order.indexOf(a.targetId) - order.indexOf(b.targetId));
   const taps = [...draft.taps, ...pins.map((p) => ({ pointId: p.targetId, px: p.px, py: p.py }))]
     .sort((a, b) => order.indexOf(a.pointId) - order.indexOf(b.pointId));

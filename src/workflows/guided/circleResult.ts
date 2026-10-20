@@ -120,12 +120,13 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
   const needs = (headline: string, guidance: string[]): CircleResultDetail => ({ verdict: { state: 'needs-data', headline, guidance }, gates: [], unlevelled: 0 });
   if (!doc) return needs('No garden open.', []);
   const network = baseNetworkForRun(run);
-  if (!network) return needs('No base points yet.', ['Add base points: East, North and the diagonal from BAS01 (step: Add base points).']);
+  if (!network) return needs('No base points yet.', ['Add base points to the base grid: East, North and the diagonal from BAS01 (step: Grow the base grid).']);
   const red = network.diagonals.filter((o) => o.flag === 'red');
   const fx = calibrationFx(doc, run);
   if (!fx) return { ...needs('No focal length yet.', ['Take and mark the calibration photo (step: Calibration photo).']), network };
   const ids = [...network.order];
-  const control = [{ id: 'BAS01', x: 0, y: 0 }, ...ids.map((id) => ({ id, ...network.points[id] }))];
+  const postSep = (id: string) => run.basePostSeparationM?.[id] ?? values.post_separation_m;
+  const control = [{ id: 'BAS01', x: 0, y: 0 }, ...ids.map((id) => ({ id, ...network.points[id] }))].map((c) => ({ ...c, postSeparationM: postSep(c.id) }));
   const sub = subCovariance(network, ids);
   // BAS01 is the datum: a tiny σ keeps the prior block positive definite.
   const n = 2 * control.length;
@@ -135,16 +136,22 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
   const stepPhotos = linkedPhotosForStep(doc, EDGE_PHOTOS_STATION, run, EDGE_PHOTOS_STEP_ID).filter((p) => !p.supersededAt && assign.has(p.id));
   const tapped = new Set([...known, ...stepPhotos.flatMap((p) => p.clicks.map((c) => c.pointId)).filter((id) => /^BAS\d+$/.test(id))]);
   let unlevelled = 0;
+  const misaligned: string[] = [];
   const photos: EdgePhoto[] = stepPhotos
     .map((p) => {
       const s = sightingsFromPhoto(p, tapped, fx.fx);
       if (!s.levelled) unlevelled += 1;
+      for (const id of s.misaligned) misaligned.push(`${assign.get(p.id)} ${id}`);
       return { pointId: assign.get(p.id)!, sightings: s.sightings };
     })
     .sort((a, b) => a.pointId.localeCompare(b.pointId));
-  const usable = photos.filter((p) => p.sightings.filter((x) => known.has(x.id)).length >= 3);
+  // 3+ tied base points, or exactly 2 that are both two-sleeve posts (the 2-point fix).
+  const usable = photos.filter((p) => {
+    const tied = p.sightings.filter((x) => known.has(x.id));
+    return tied.length >= 3 || (tied.length === 2 && tied.every((x) => x.dyPx != null));
+  });
   if (usable.length < 3) {
-    return { ...needs(`${usable.length} edge photo${usable.length === 1 ? '' : 's'} with 3 or more base points tapped. The circle needs at least 8.`, ['Take one photo from each edge point and tap the base points in it.']), network, fx, unlevelled };
+    return { ...needs(`${usable.length} edge photo${usable.length === 1 ? '' : 's'} with 3 or more base points tapped (or 2 two-sleeve posts). The circle needs at least 8.`, ['Take one photo from each edge point and tap the base points in it.']), network, fx, unlevelled };
   }
   const centre = control.reduce((s, c) => ({ x: s.x + c.x / control.length, y: s.y + c.y / control.length }), { x: 0, y: 0 });
   try {
@@ -169,7 +176,10 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
     const extra: string[] = [];
     if (red.length) extra.push(`Base-point diagonal check fails on ${red.map((d) => `${d.from}→${d.to}`).join(', ')}: re-tape before trusting this.`);
     const skipped = photos.length - usable.length;
-    if (skipped) extra.push(`${skipped} edge photo${skipped === 1 ? '' : 's'} left out: fewer than 3 tied base points tapped.`);
+    if (skipped) extra.push(`${skipped} edge photo${skipped === 1 ? '' : 's'} left out: fewer than 3 tied base points tapped (and not 2 two-sleeve posts).`);
+    if (misaligned.length) extra.push(`Two-sleeve post not used (top and bottom sleeve not one above the other): ${misaligned.join(', ')}. Check the taps, or plumb the post.`);
+    const twoPoint = out.gates.filter((g) => g.twoPointFix).map((g) => g.pointId);
+    if (twoPoint.length) extra.push(`2-point fix (unchecked) on ${twoPoint.join(', ')}: only 2 two-sleeve posts in view; amber at best.`);
     if (out.gates.some((g) => g.calibrateFirst)) {
       extra.push(`Calibrate first: the focal length is known to ±${(fx.sigmaRel * 100).toFixed(2)} % (needs 0.5 %). Retake the calibration photo; let the app find the sleeve edges.`);
       if (verdict.state === 'green') verdict.state = 'amber';

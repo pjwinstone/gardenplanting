@@ -10,6 +10,11 @@
  * 2. Session adjustment (`adjustSession`): per photo x, y, yaw; one shared fx with the step-8
  *    prior; control coordinates as weighted priors. Observation: image x of each sleeve axis
  *    (tilt-corrected), u = fx · tan(bearing − yaw).
+ *    Two-sleeve posts (rev 7): a base point may carry a top and a bottom sleeve a known vertical
+ *    distance s apart. The levelled image separation Δy of the two sleeve centres is a range
+ *    observation, Δy = fx · s / d (d the horizontal distance), with its own r, w and MDB.
+ *    With only 2 base points in a photo, both on two-sleeve posts, the photo is a "2-point fix":
+ *    2 ranges plus the subtended angle, side resolved by the left/right image order.
  * 3. Per-edge-point gates (`gateEdgePoints`), signed off by the Geometry & Maths Advisor:
  *    red |w| > 3.29; amber max|w| in (k, 3.29], k = z(1 − 0.025/n); reliability shift
  *    ∇x_i = (AᵀPA)⁻¹AᵀP e_i · MDB_i, MDB_i = 4.13 σ_i / √r_i: green ≤ 40 mm, amber ≤ 60 mm;
@@ -21,7 +26,7 @@
 import tolerances from '../../workflow/tolerances.json';
 import { cholesky } from './linalg';
 import { circleVerdict, type DiameterTapes } from './circleCheck';
-import { levelledBearing } from './bearing';
+import { levelledBearing, levelRay } from './bearing';
 
 export interface Xy { x: number; y: number }
 
@@ -42,6 +47,19 @@ export const UNCHECKED_R = tolerances.controlUncheckedR;
 export const DANGER_COND_MAX = tolerances.controlDangerCondMax;
 /** Fewest base points a photo must hold to be checked (4 = one spare over x, y, yaw). */
 export const MIN_BASE_POINTS = tolerances.controlMinBasePoints;
+/** Default vertical distance between the top and bottom sleeve of a two-sleeve post, m (Set-up). */
+export const POST_SEPARATION_DEFAULT_M = tolerances.postSeparationDefaultM;
+/** σ of the taped top-to-bottom sleeve distance on a post, m. */
+export const POST_SEPARATION_SIGMA_M = tolerances.postSeparationSigmaMm / 1000;
+/** Relative σ of Δy from the residual tilt correction (pitch/roll after levelling). */
+export const RANGE_TILT_SIGMA_REL = tolerances.postRangeTiltSigmaRel;
+/** Top and bottom sleeve must line up: |Δx| ≤ this fraction of Δy plus POST_ALIGN_PX. */
+export const POST_ALIGN_FRACTION = 0.05;
+export const POST_ALIGN_PX = 10;
+/** Label for a photo fixed from 2 base points on two-sleeve posts (no redundancy). */
+export const TWO_POINT_LABEL = '2-point fix (unchecked)';
+/** χ²(2, 0.95), for the 95 % ellipse semi-major. */
+const CHI2_2_95 = 5.991;
 
 /** Sleeve width for the occlusion model, m (dowel + sleeve). */
 export const SLEEVE_WIDTH_M = 0.08;
@@ -387,6 +405,11 @@ export interface SleeveSighting {
   id: string;
   /** Image x of the sleeve axis, px from the principal point, after tilt correction. */
   u: number;
+  /**
+   * Two-sleeve post only: levelled vertical image separation, top sleeve centre to bottom sleeve
+   * centre, px (fx·(tan e_top − tan e_bottom)). Positive. Needs `postSeparationM` on the control point.
+   */
+  dyPx?: number;
 }
 
 export interface EdgePhoto {
@@ -397,8 +420,16 @@ export interface EdgePhoto {
   seed?: { x: number; y: number; yaw: number };
 }
 
+export interface ControlPoint {
+  id: string;
+  x: number;
+  y: number;
+  /** Two-sleeve post: vertical distance between the top and bottom sleeve centres, m. */
+  postSeparationM?: number;
+}
+
 export interface SessionInput {
-  control: { id: string; x: number; y: number }[];
+  control: ControlPoint[];
   /** Covariance of the control coordinates (2 rows per sleeve, `control` order), m². */
   controlCovariance: number[][];
   photos: EdgePhoto[];
@@ -413,9 +444,13 @@ export interface SessionInput {
   searchRadiusM?: number;
 }
 
+export type ImageRowKind = 'bearing' | 'range';
+
 export interface ImageRow {
   photo: number;
   sleeve: string;
+  /** 'bearing': image x of the sleeve axis (u). 'range': two-sleeve post Δy (u holds Δy, px). */
+  kind: ImageRowKind;
   u: number;
   residualPx: number;
   r: number;
@@ -467,8 +502,104 @@ export function projectU(cam: { x: number; y: number; yaw: number }, s: Xy, fx: 
   return bearingModel(cam, s, fx).u;
 }
 
-function seedPhoto(photo: EdgePhoto, ctl: Map<string, Xy>, fx: number, centre: Xy, radius: number) {
+/** Two-sleeve post range model: Δy = fx · s / d, d the horizontal distance camera → post. */
+function rangeModel(cam: Xy, s: Xy, fx: number, sep: number) {
+  const dx = s.x - cam.x;
+  const dy = s.y - cam.y;
+  const d = Math.hypot(dx, dy);
+  const k = (fx * sep) / (d * d * d);
+  return {
+    v: (fx * sep) / d,
+    // ∂Δy/∂cam = fx·s·(s − cam)/d³; ∂Δy/∂sleeve is its negative.
+    dx: k * dx,
+    dy: k * dy,
+    dfx: sep / d,
+    dsx: -k * dx,
+    dsy: -k * dy,
+  };
+}
+
+/** Δy of a two-sleeve post seen from a camera (for simulation). */
+export function projectDy(cam: Xy, s: Xy, fx: number, sepM: number): number {
+  return rangeModel(cam, s, fx, sepM).v;
+}
+
+/** Range from a post's Δy: r = fx · s / Δy. */
+export function rangeFromDy(dyPx: number, fx: number, sepM: number): number {
+  return (fx * sepM) / dyPx;
+}
+
+/** σ of a Δy row, px: 1 px per sleeve centre, the taped separation, and the tilt correction. fx σ enters through the shared fx unknown. */
+export function dySigmaPx(dyPx: number, sepM: number, sigmaPx = IMAGE_SIGMA_PX): number {
+  return Math.hypot(Math.SQRT2 * sigmaPx, (dyPx * POST_SEPARATION_SIGMA_M) / sepM, dyPx * RANGE_TILT_SIGMA_REL);
+}
+
+export interface TwoPointFix {
+  x: number;
+  y: number;
+  yaw: number;
+  /** The other circle intersection (same two ranges), rejected by the image order. */
+  mirror: Xy;
+  /** True when the left/right image order picked one side (false only when the two coincide). */
+  sideResolved: boolean;
+  /** The two ranges did not meet; the closest point on the line between the posts was used. */
+  rangesDisagree: boolean;
+}
+
+/**
+ * Position from 2 base points with ranges (two-sleeve posts) and their image x. The two range
+ * circles meet in two points, mirror images across the line between the posts; the one whose
+ * predicted left/right order of the two sleeves matches the photo is kept.
+ */
+export function twoPointFix(a: Xy, b: Xy, ra: number, rb: number, ua: number, ub: number, fx: number): TwoPointFix {
+  const ex = b.x - a.x;
+  const ey = b.y - a.y;
+  const d = Math.hypot(ex, ey);
+  const along = (ra * ra - rb * rb + d * d) / (2 * d);
+  const h2 = ra * ra - along * along;
+  const rangesDisagree = !(h2 > 0);
+  const h = rangesDisagree ? 0 : Math.sqrt(h2);
+  const mx = a.x + (along * ex) / d;
+  const my = a.y + (along * ey) / d;
+  const c1 = { x: mx - (h * ey) / d, y: my + (h * ex) / d };
+  const c2 = { x: mx + (h * ey) / d, y: my - (h * ex) / d };
+  // u grows to the right; a point further counter-clockwise is further left (smaller u).
+  const order = (c: Xy) => Math.sign(wrap(Math.atan2(a.y - c.y, a.x - c.x) - Math.atan2(b.y - c.y, b.x - c.x)));
+  const want = Math.sign(ub - ua);
+  const pick = order(c1) === want ? c1 : c2;
+  const other = pick === c1 ? c2 : c1;
+  const sideResolved = !rangesDisagree && order(c1) !== order(c2) && (order(c1) === want || order(c2) === want);
+  const yawFrom = (c: Xy) => {
+    let cs = 0;
+    let sn = 0;
+    for (const [p, u] of [[a, ua], [b, ub]] as const) {
+      const t = Math.atan2(p.y - c.y, p.x - c.x) + Math.atan(u / fx);
+      cs += Math.cos(t);
+      sn += Math.sin(t);
+    }
+    return Math.atan2(sn, cs);
+  };
+  return { x: pick.x, y: pick.y, yaw: yawFrom(pick), mirror: other, sideResolved, rangesDisagree };
+}
+
+/** Sightings that make a 2-point fix: exactly 2 tied base points, both with a post range. */
+export function twoPointSightings(photo: EdgePhoto, ctl: Map<string, ControlPoint>): SleeveSighting[] | null {
+  const known = photo.sightings.filter((s) => ctl.has(s.id));
+  if (known.length !== 2) return null;
+  if (!known.every((s) => s.dyPx != null && s.dyPx > 0 && (ctl.get(s.id)!.postSeparationM ?? 0) > 0)) return null;
+  return known;
+}
+
+function seedPhoto(photo: EdgePhoto, ctl: Map<string, ControlPoint>, fx: number, centre: Xy, radius: number) {
   if (photo.seed) return photo.seed;
+  const two = twoPointSightings(photo, ctl);
+  if (two) {
+    const [sa, sb] = two;
+    const pa = ctl.get(sa.id)!;
+    const pb = ctl.get(sb.id)!;
+    const f = twoPointFix(pa, pb, rangeFromDy(sa.dyPx!, fx, pa.postSeparationM!), rangeFromDy(sb.dyPx!, fx, pb.postSeparationM!), sa.u, sb.u, fx);
+    return { x: f.x, y: f.y, yaw: f.yaw };
+  }
   const sights = photo.sightings.filter((s) => ctl.has(s.id));
   let best = { x: centre.x, y: centre.y, yaw: 0, cost: Infinity };
   const step = 0.5;
@@ -504,12 +635,18 @@ export function adjustSession(input: SessionInput): SessionResult {
   const fxRel = input.fxPriorRel ?? FX_PRIOR_REL;
   const nS = input.control.length;
   const sIdx = new Map(input.control.map((c, i) => [c.id, i]));
-  const ctl = new Map(input.control.map((c) => [c.id, { x: c.x, y: c.y }]));
+  const ctl = new Map(input.control.map((c) => [c.id, c]));
   const P = input.photos.length;
-  const obs: { photo: number; sleeve: number; u: number }[] = [];
+  const obs: { photo: number; sleeve: number; u: number; kind: ImageRowKind; sigma: number }[] = [];
   input.photos.forEach((ph, p) => ph.sightings.forEach((s) => {
     const j = sIdx.get(s.id);
-    if (j != null) obs.push({ photo: p, sleeve: j, u: s.u });
+    if (j != null) obs.push({ photo: p, sleeve: j, u: s.u, kind: 'bearing', sigma: sp });
+  }));
+  // Range rows (two-sleeve posts) after all bearing rows, so bearing row order is unchanged.
+  input.photos.forEach((ph, p) => ph.sightings.forEach((s) => {
+    const j = sIdx.get(s.id);
+    const sep = j != null ? input.control[j].postSeparationM : undefined;
+    if (j != null && sep != null && sep > 0 && s.dyPx != null && s.dyPx > 0) obs.push({ photo: p, sleeve: j, u: s.dyPx, kind: 'range', sigma: dySigmaPx(s.dyPx, sep, sp) });
   }));
   const fxCol = 3 * P;
   const sCol = fxCol + 1;
@@ -542,8 +679,20 @@ export function adjustSession(input: SessionInput): SessionResult {
     for (const o of obs) {
       const cam = { x: par[3 * o.photo], y: par[3 * o.photo + 1], yaw: par[3 * o.photo + 2] };
       const s = { x: par[sCol + 2 * o.sleeve], y: par[sCol + 2 * o.sleeve + 1] };
-      const b = bearingModel(cam, s, par[fxCol]);
       const row = Array<number>(m).fill(0);
+      if (o.kind === 'range') {
+        const g = rangeModel(cam, s, par[fxCol], input.control[o.sleeve].postSeparationM!);
+        row[3 * o.photo] = g.dx;
+        row[3 * o.photo + 1] = g.dy;
+        row[fxCol] = g.dfx;
+        row[sCol + 2 * o.sleeve] = g.dsx;
+        row[sCol + 2 * o.sleeve + 1] = g.dsy;
+        A.push(row);
+        l.push(o.u - g.v);
+        sigma.push(o.sigma);
+        continue;
+      }
+      const b = bearingModel(cam, s, par[fxCol]);
       row[3 * o.photo] = b.dx;
       row[3 * o.photo + 1] = b.dy;
       row[3 * o.photo + 2] = b.dyaw;
@@ -552,7 +701,7 @@ export function adjustSession(input: SessionInput): SessionResult {
       row[sCol + 2 * o.sleeve + 1] = b.dsy;
       A.push(row);
       l.push(o.u - b.u);
-      sigma.push(sp);
+      sigma.push(o.sigma);
     }
     input.control.forEach((c, j) => {
       for (const k of [0, 1]) {
@@ -608,7 +757,7 @@ export function adjustSession(input: SessionInput): SessionResult {
     const cx = Ni![3 * o.photo].reduce((s, q, k) => s + q * a[k], 0) / s2;
     const cy = Ni![3 * o.photo + 1].reduce((s, q, k) => s + q * a[k], 0) / s2;
     const shift = Number.isFinite(mdb) ? Math.hypot(cx, cy) * mdb : (Math.hypot(cx, cy) > 0 ? Infinity : 0);
-    return { photo: o.photo, sleeve: input.control[o.sleeve].id, u: o.u, residualPx: v[i], r, w, mdbPx: mdb, shiftM: shift };
+    return { photo: o.photo, sleeve: input.control[o.sleeve].id, kind: o.kind, u: o.u, residualPx: v[i], r, w, mdbPx: mdb, shiftM: shift };
   });
 
   // Control prior w (diagonal of the block's Qvv, a session-level blunder test).
@@ -626,6 +775,7 @@ export function adjustSession(input: SessionInput): SessionResult {
   for (const c of control) for (const w of c.w) if (!suspect || Math.abs(w) > Math.abs(suspect.w)) suspect = { sleeve: c.id, w, kind: 'control' };
 
   const photoCond = input.photos.map((_, p) => {
+    // Bearing and range rows together: a 2-point fix is only well conditioned with its ranges.
     const ii = rows.map((r, i) => (r.photo === p ? i : -1)).filter((i) => i >= 0);
     return normalisedCond(ii.map((i) => [lsq.A[i][3 * p], lsq.A[i][3 * p + 1], lsq.A[i][3 * p + 2]]));
   });
@@ -711,7 +861,14 @@ export interface EdgeGate {
   reliabilityShiftM: number;
   minR: number;
   /** Rows for the measurement-strength display. */
-  rows: { sleeve: string; r: number; mdbPx: number; w: number; shiftMm: number }[];
+  rows: { sleeve: string; kind: ImageRowKind; r: number; mdbPx: number; w: number; shiftMm: number }[];
+  /** Base points (bearing rows) and two-sleeve post ranges in this photo. */
+  basePointCount: number;
+  rangeCount: number;
+  /** Photo fixed from 2 base points on two-sleeve posts: amber at best, never green. */
+  twoPointFix: boolean;
+  /** 95 % error ellipse semi-major of the edge point, m. */
+  ellipse95M: number;
   calibrateFirst: boolean;
   /** Non-empty when the photo holds fewer than MIN_BASE_POINTS base points. */
   missing: string[];
@@ -723,9 +880,20 @@ export function gateEdgePoints(input: SessionInput, res: SessionResult): EdgeGat
   return input.photos.map((ph, p) => {
     const rows = res.rows.filter((r) => r.photo === p);
     const known = new Set(input.control.map((c) => c.id));
+    const ctl = new Map(input.control.map((c) => [c.id, c]));
     const untied = ph.sightings.map((x) => x.id).filter((id) => !known.has(id));
-    const missing = rows.length < MIN_BASE_POINTS ? [`${MIN_BASE_POINTS - rows.length} more`] : [];
+    const nBase = rows.filter((r) => r.kind === 'bearing').length;
+    const nRange = rows.length - nBase;
+    const two = nBase === 2 && twoPointSightings(ph, ctl) != null;
+    // Checked needs one spare reading over x, y, yaw: 4 base points, or 3 plus a post range.
+    // Fewer than 3 base points is never checked (2 on two-sleeve posts is the unchecked 2-point fix).
+    const short = !two && (nBase < 3 || rows.length < MIN_BASE_POINTS);
+    const missing = short ? [`${Math.max(MIN_BASE_POINTS - rows.length, 3 - nBase, 1)} more`] : [];
     const n = rows.length;
+    const c = res.photos[p].cov;
+    const tr = c[0][0] + c[1][1];
+    const det = c[0][0] * c[1][1] - c[0][1] * c[1][0];
+    const ellipse95M = Math.sqrt(CHI2_2_95 * Math.max(tr / 2 + Math.sqrt(Math.max((tr * tr) / 4 - det, 0)), 0));
     const k = familyCriticalW(n);
     const maxAbsW = rows.reduce((s, r) => Math.max(s, Math.abs(r.w)), 0);
     // A row "moves the point" if its influence on x, y is not negligible.
@@ -735,9 +903,23 @@ export function gateEdgePoints(input: SessionInput, res: SessionResult): EdgeGat
     const cond = res.photoCond[p];
     const reasons: string[] = [];
     let cls: EdgeClass;
-    if (missing.length) {
+    if (two) {
+      // No redundancy: 2 ranges + 1 angle for x, y, yaw. Amber at best, never green, and only
+      // when the step-8 focal length passes (the ranges scale with fx).
+      const worst = rows.reduce((a, b) => (Math.abs(b.w) > Math.abs(a.w) ? b : a));
+      if (calibrateFirst) {
+        cls = 'grey';
+        reasons.push(`${TWO_POINT_LABEL}: calibrate first. The two post ranges scale with the focal length, known only to ±${((input.calibrationSigmaRel ?? 0) * 100).toFixed(2)} % (needs ≤ 0.5 %).`);
+      } else if (maxAbsW > BLUNDER_W) {
+        cls = 'red';
+        reasons.push(`${TWO_POINT_LABEL}: a reading disagrees (${worst.sleeve}, w ${worst.w.toFixed(1)}). Check both posts, then retake.`);
+      } else {
+        cls = 'amber';
+        reasons.push(`${TWO_POINT_LABEL}: from 2 two-sleeve posts, ±${(ellipse95M * 1000).toFixed(0)} mm (95 %). Nothing checks it; add a third base point in view to check it.`);
+      }
+    } else if (missing.length) {
       cls = 'grey';
-      reasons.push(`Only ${rows.length} base point${rows.length === 1 ? '' : 's'} in this photo; it needs at least ${MIN_BASE_POINTS}. Retake with more in view, or add a base point that this spot can see.`);
+      reasons.push(`Only ${nBase} base point${nBase === 1 ? '' : 's'} in this photo${nRange ? ` (${nRange} on two-sleeve posts)` : ''}; it needs at least ${MIN_BASE_POINTS}, or 3 with a two-sleeve post, or 2 two-sleeve posts for an unchecked 2-point fix. Retake with more in view, or add a base point that this spot can see.`);
     } else if (!(cond <= DANGER_COND_MAX)) {
       cls = 'grey';
       reasons.push('Weak geometry: this spot is near a circle through the sleeves it sees (danger circle).');
@@ -763,7 +945,7 @@ export function gateEdgePoints(input: SessionInput, res: SessionResult): EdgeGat
       cls = 'grey';
       reasons.push(`Not checked well enough: an undetected error could move this point ${(shift * 1000).toFixed(0)} mm (limit ${tolerances.controlShiftAmberMm} mm).`);
     }
-    if (calibrateFirst) {
+    if (calibrateFirst && !two) {
       if (cls === 'green') cls = 'amber';
       reasons.push(`Calibrate first: the step-8 focal length is only known to ±${((input.calibrationSigmaRel ?? 0) * 100).toFixed(2)} % (needs ≤ 0.5 %).`);
     }
@@ -777,10 +959,14 @@ export function gateEdgePoints(input: SessionInput, res: SessionResult): EdgeGat
       maxAbsW,
       reliabilityShiftM: shift,
       minR: Number.isFinite(minR) ? minR : 0,
-      rows: rows.map((r) => ({ sleeve: r.sleeve, r: r.r, mdbPx: r.mdbPx, w: r.w, shiftMm: r.shiftM * 1000 })),
+      rows: rows.map((r) => ({ sleeve: r.sleeve, kind: r.kind, r: r.r, mdbPx: r.mdbPx, w: r.w, shiftMm: r.shiftM * 1000 })),
       calibrateFirst,
       missing,
       cond,
+      basePointCount: nBase,
+      rangeCount: nRange,
+      twoPointFix: two,
+      ellipse95M,
     };
   });
 }
@@ -789,8 +975,8 @@ export function gateEdgePoints(input: SessionInput, res: SessionResult): EdgeGat
 export function strengthLines(g: EdgeGate): string[] {
   return [
     `${g.pointId}: ${g.cls}. ${g.reasons[0] ?? ''}`.trim(),
-    `Reliability shift ${(g.reliabilityShiftM * 1000).toFixed(0)} mm · max |w| ${g.maxAbsW.toFixed(2)} (green ≤ ${g.k.toFixed(2)}) · ${g.rowCount} sleeves`,
-    ...g.rows.map((r) => `${r.sleeve}: r ${r.r.toFixed(2)} · MDB ${Number.isFinite(r.mdbPx) ? r.mdbPx.toFixed(1) : '∞'} px · w ${r.w.toFixed(2)} · ∇x ${Number.isFinite(r.shiftMm) ? r.shiftMm.toFixed(0) : '∞'} mm`),
+    `Reliability shift ${(g.reliabilityShiftM * 1000).toFixed(0)} mm · max |w| ${g.maxAbsW.toFixed(2)} (green ≤ ${g.k.toFixed(2)}) · ${g.basePointCount} base points${g.rangeCount ? `, ${g.rangeCount} post range${g.rangeCount === 1 ? '' : 's'}` : ''}${g.twoPointFix ? ` · ${TWO_POINT_LABEL}` : ''}`,
+    ...g.rows.map((r) => `${r.sleeve}${r.kind === 'range' ? ' range' : ''}: r ${r.r.toFixed(2)} · MDB ${Number.isFinite(r.mdbPx) ? r.mdbPx.toFixed(1) : '∞'} px · w ${r.w.toFixed(2)} · ∇x ${Number.isFinite(r.shiftMm) ? r.shiftMm.toFixed(0) : '∞'} mm`),
   ];
 }
 
@@ -832,26 +1018,57 @@ export interface PhotoLike {
   };
 }
 
+/** Point name of the bottom sleeve on a two-sleeve post: BAS03 → BAS03B. */
+export function bottomSleevePoint(id: string): string {
+  return `${id}B`;
+}
+
 /**
  * Image x of each tapped base point on one edge photo, in full-resolution px from the image
  * centre, levelled with the gravity sidecar when there is one (pitch and roll, the same
  * levelling the main solver uses: u = −fx·tan β, β = levelledBearing). Without gravity the
  * phone is taken as level.
+ *
+ * Two-sleeve posts: when the photo also has the bottom sleeve (BASnnB) tapped or scanned, the
+ * levelled vertical separation Δy = fx·(tan e_top − tan e_bottom) is returned on the sighting.
+ * The two must line up (same levelled bearing within 5 % of Δy + 10 px) with the top above the
+ * bottom; otherwise no range is used and the post is listed in `misaligned`.
  */
-export function sightingsFromPhoto(photo: PhotoLike, basePointIds: Set<string>, fxFull: number): { sightings: SleeveSighting[]; levelled: boolean } {
+export function sightingsFromPhoto(
+  photo: PhotoLike,
+  basePointIds: Set<string>,
+  fxFull: number,
+): { sightings: SleeveSighting[]; levelled: boolean; misaligned: string[] } {
   const of = photo.originalFile;
   const sx = of?.previewScaleX && of.previewScaleX > 0 ? of.previewScaleX : 1;
   const sy = of?.previewScaleY && of.previewScaleY > 0 ? of.previewScaleY : 1;
   const W = of?.fullWidth ?? photo.width / sx;
   const H = of?.fullHeight ?? photo.height / sy;
   const gravity = of?.nativeCapture?.gravity ?? null;
-  const sightings = photo.clicks.filter((c) => basePointIds.has(c.pointId)).map((c) => {
+  const ray = (c: { px: number; py: number }) => {
     const px = c.px / sx;
     const py = c.py / sy;
+    const r0 = { x: (px - W / 2) / fxFull, y: (py - H / 2) / fxFull, z: 1 };
+    const r = gravity ? levelRay(r0, gravity) : r0;
     const beta = levelledBearing({ px, py, cx: W / 2, cy: H / 2, fx: fxFull, fy: fxFull, gravity });
-    return { id: c.pointId, u: -fxFull * Math.tan(beta) };
+    // y is down: tan of the elevation above level.
+    return { beta, tanE: -r.y / Math.hypot(r.x, r.z) };
+  };
+  const misaligned: string[] = [];
+  const sightings = photo.clicks.filter((c) => basePointIds.has(c.pointId)).map((c) => {
+    const top = ray(c);
+    const out: SleeveSighting = { id: c.pointId, u: -fxFull * Math.tan(top.beta) };
+    const b = photo.clicks.find((k) => k.pointId === bottomSleevePoint(c.pointId));
+    if (b) {
+      const bot = ray(b);
+      const dy = fxFull * (top.tanE - bot.tanE);
+      const dx = fxFull * Math.abs(Math.tan(top.beta) - Math.tan(bot.beta));
+      if (dy > 0 && dx <= POST_ALIGN_FRACTION * dy + POST_ALIGN_PX) out.dyPx = dy;
+      else misaligned.push(c.pointId);
+    }
+    return out;
   });
-  return { sightings, levelled: gravity != null };
+  return { sightings, levelled: gravity != null, misaligned };
 }
 
 export interface ControlCircleOptions {

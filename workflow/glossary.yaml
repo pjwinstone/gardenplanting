@@ -54,7 +54,7 @@ reviewed_by:
 terms:
 - id: baseline
   term: Baseline
-  short: A taped control edge on the baseline layer that helps pin the garden frame.
+  short: A taped control edge on the baseline layer that helps pin the garden frame. In the circle field test, see base grid.
   long: A baseline is two baseline points with a taped length. The default baseline pins the frame (point
     1 at the origin, point 2 with Y = 0). A garden may store many baselines; extras reinforce the baseline
     layer as soft observations — there is no baseline loop and no Closure on this layer. If the default
@@ -1832,3 +1832,87 @@ terms:
   - flower-beds
   - trees
   - camera-position
+- id: base-grid
+  term: Base grid
+  short: The garden's grid of base points (BAS01, BAS02, BAS03…), any number of them, placed wherever suits the garden.
+  long: 'The base grid is a growing network of base points around the house and garden. BAS01 is the origin
+    of a North/East grid and BAS02 the first point taped from it (step "Start the base grid (BAS01, BAS02)").
+    Every further point is tied to a point already placed by a taped East offset, a taped North offset and
+    a taped diagonal as the check; the app re-adjusts the whole grid after each tie. In the circle field
+    test this replaces the word baseline: the step, Set-up and run ids still say baseline (place-baseline-points,
+    tape-baseline, baseline_length_m) so saved runs keep loading.'
+  category: survey
+  aliases:
+  - baseline points
+  - baseline (field test)
+  - base points
+  - control network
+  code_names:
+  - place-baseline-points
+  - tape-baseline
+  - laser-check-baseline
+  - add-base-points
+  - baseline_length_m
+  - baseTies
+  - adjustGridNetwork
+  related:
+  - base-point
+  - two-sleeve-post
+  - baseline
+- id: base-point
+  term: Base point
+  short: One point of the base grid, BAS01, BAS02 …, marked by a sleeve on a plumbed post.
+  long: A base point carries one coded sleeve (BASnn) on a post, or two on a two-sleeve post. Its position
+    comes from the North/East/diagonal ties of the base grid. Each edge photo is fixed from the base points
+    it can see; 4 or more at good angles gives a checked point.
+  category: survey
+  aliases:
+  - BAS point
+  - control sleeve
+  code_names:
+  - BAS01
+  - basePointsFor
+  related:
+  - base-grid
+  - two-sleeve-post
+- id: two-sleeve-post
+  term: Two-sleeve post
+  short: A base point with a top sleeve (BASnn) and a bottom sleeve (BASnnB) a known distance apart, which gives a range.
+  long: 'For tricky spots where bushes and trees leave only 2 base points in view. The two sleeves sit one
+    above the other on the same post, by default 1.2 m apart centre to centre (Set-up; editable per point
+    with Save post). In a photo their vertical separation Δy gives the range r = fx · s / Δy. With 3 or
+    more base points in view the range is an extra checked reading; with only 2, both on two-sleeve posts,
+    the photo is a 2-point fix.'
+  category: survey
+  aliases:
+  - two sleeves
+  - top and bottom sleeve
+  - post range
+  code_names:
+  - post_separation_m
+  - basePostSeparationM
+  - postSeparationM
+  - dyPx
+  - BAS01B
+  related:
+  - base-point
+  - two-point-fix
+  units: m
+- id: two-point-fix
+  term: 2-point fix (unchecked)
+  short: An edge point fixed from only 2 base points, both on two-sleeve posts. Amber at best, never green.
+  long: 'Two ranges and the angle between the posts fix the spot; the left/right order of the two posts
+    in the photo picks the right side of the line between them. Nothing is left over to check it, so it
+    is shown amber with its 95 % ellipse, and grey (calibrate first) unless the step-8 focal length is
+    known to 0.5 %. In the S7a simulation (posts 10 m apart, 12 m circle) the ellipse was about 0.3 m
+    typical and 0.75 m worst: good enough to find a point, not to pass the circle test on its own.'
+  category: quality-check
+  aliases:
+  - two-point fix
+  - 2-point fix
+  code_names:
+  - twoPointFix
+  - TWO_POINT_LABEL
+  related:
+  - two-sleeve-post
+  - reliability-shift

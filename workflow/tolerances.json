@@ -19,5 +19,8 @@
   "controlShiftAmberMm": 60,
   "controlUncheckedR": 0.01,
   "controlDangerCondMax": 200,
-  "controlMinBasePoints": 4
+  "controlMinBasePoints": 4,
+  "postSeparationDefaultM": 1.2,
+  "postSeparationSigmaMm": 2,
+  "postRangeTiltSigmaRel": 0.002
 }

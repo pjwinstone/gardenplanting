@@ -50,8 +50,10 @@ export interface FieldTestSetupValues {
   edge_points: number;
   /** Legacy (rev 5 camera positions). Kept so older saves load; not shown. */
   camera_position_count: number;
-  /** BAS01–BAS02, tangential to the circle, at least D/2. */
+  /** BAS01–BAS02, the first two base points of the base grid: tangential to the circle, at least D/2. (Stored id kept from 'baseline'.) */
   baseline_length_m: number;
+  /** Two-sleeve posts: default vertical distance between the top and bottom sleeve centres, m. Editable per base point. */
+  post_separation_m: number;
   calibration_distance_m: number;
   /** Clean out archive: archived photos older than this many days are offered for deletion. */
   photo_archive_age_days: number;
@@ -76,6 +78,7 @@ export function defaultFieldTestSetup(): FieldTestSetupValues {
     edge_points: 12,
     camera_position_count: 4,
     baseline_length_m: 6,
+    post_separation_m: tolerances.postSeparationDefaultM,
     calibration_distance_m: 4,
     photo_archive_age_days: tolerances.photoArchiveMaxAgeDays,
     camera_positions: {
@@ -105,6 +108,7 @@ export function migrateFieldTestSetup(values: Partial<FieldTestSetupValues> | un
   return {
     ...d,
     ...v,
+    post_separation_m: v.post_separation_m ?? d.post_separation_m,
     camera_positions: Object.fromEntries(CAMERA_POSITION_KEYS.map((k) => [k, cp[k] ?? d.camera_positions[k]])) as FieldTestSetupValues['camera_positions'],
     tolerances_mm: { ...d.tolerances_mm, ...(v.tolerances_mm ?? {}) },
   };
@@ -116,6 +120,7 @@ export const SETUP_DEPENDS_ON: Record<string, string[]> = {
   edge_points: ['mark-edge-points', 'edge-photos', 'circle-result'],
   baseline_length_m: ['place-baseline-points', 'tape-baseline', 'laser-check-baseline'],
   calibration_distance_m: ['camera-calibration', 'circle-result'],
+  post_separation_m: ['circle-result'],
   'tolerances_mm.baseline': ['tape-baseline', 'laser-check-baseline'],
   'tolerances_mm.circle_diameter_baseline': ['circle-result'],
   'tolerances_mm.circle_diameter_plantable': ['circle-result'],

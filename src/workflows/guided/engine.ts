@@ -1224,6 +1224,30 @@ export function removeBaseTieWorkflow(progress: WorkflowProgress, tieId: string,
   return { progress: patchRun(progress, pair.def.id, run), notice: `Tie ${tie.from}→${tie.to} removed. ${baseNetworkSummary(ties).text}`, changed: true };
 }
 
+/**
+ * Two-sleeve post: set the top-to-bottom sleeve distance (centre to centre, m) for one base point,
+ * or clear it (null) to use the Set-up default. Logged; the circle result re-checks.
+ */
+export function saveBasePostWorkflow(progress: WorkflowProgress, point: string, separationM: number | null, now = new Date().toISOString()): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const id = point.trim().toUpperCase();
+  if (!/^BAS\d+$/.test(id)) return { progress, notice: 'Type the base point in To, e.g. BAS03.', changed: false };
+  if (separationM != null && !(Number.isFinite(separationM) && separationM > 0.2 && separationM < 5)) {
+    return { progress, notice: 'Post sleeves apart: metres between the two sleeve centres, e.g. 1.2.', changed: false };
+  }
+  const map = { ...(pair.run.basePostSeparationM ?? {}) };
+  if (separationM == null) delete map[id];
+  else map[id] = separationM;
+  const steps: Record<string, StepState> = { ...pair.run.steps };
+  const result = steps['circle-result'];
+  if (result && isSettled(result)) steps['circle-result'] = mirrorLegacy({ ...result, status: 'needs_recheck' });
+  const log = [...(pair.run.runLog ?? []), { at: now, type: 'base-post.saved' as const, point: id, separationM }];
+  const run: WorkflowRun = { ...pair.run, steps, basePostSeparationM: map, runLog: log, updatedAt: now };
+  const notice = separationM == null ? `${id}: post sleeves use the Set-up default.` : `${id}: post sleeves ${separationM.toFixed(3)} m apart.`;
+  return { progress: patchRun(progress, pair.def.id, run), notice, changed: true };
+}
+
 /** Save the three diameter tapes and the edge; ticks 'Tape the diameter'. The circle result re-checks. */
 export function saveCircleTapeWorkflow(
   progress: WorkflowProgress,

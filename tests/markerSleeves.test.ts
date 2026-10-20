@@ -442,3 +442,26 @@ function blackRunNear(page: { width: number; height: number; rgb: Buffer }, yFro
   while (end < page.width && isBlack(page, end, y)) end += 1;
   return end - start;
 }
+
+describe('two-sleeve post bottoms', () => {
+  it('BAS01B–BAS14B: issued words, not used by a top sleeve, no 4-band burst pair among all 28', async () => {
+    const { POST_BOTTOM_SLEEVES, ALL_SLEEVES } = await import('../scripts/markerSleeve');
+    expect(POST_BOTTOM_SLEEVES.map((s) => s.point)).toEqual(Array.from({ length: 14 }, (_, i) => `BAS${String(i + 1).padStart(2, '0')}B`));
+    const issued = issuedWords();
+    const words = ALL_SLEEVES.map((s) => Number.parseInt(s.id, 16));
+    expect(new Set(words).size).toBe(28);
+    for (const w of words) expect(issued).toContain(w);
+    for (let i = 0; i < words.length; i++) {
+      for (let j = i + 1; j < words.length; j++) {
+        expect(hamming(words[i], words[j])).toBeGreaterThanOrEqual(4);
+        expect(differsOnlyInFourBandBurst(words[i], words[j])).toBe(false);
+      }
+    }
+  });
+
+  it('the checked-in post-bottom PDFs match the generator', async () => {
+    const { POST_BOTTOM_SLEEVES, renderPostBottomSleevesPdf } = await import('../scripts/markerSleeve');
+    expect(readFileSync(join(markersDir, 'post-bottom-sleeves.pdf')).equals(renderPostBottomSleevesPdf())).toBe(true);
+    for (const s of POST_BOTTOM_SLEEVES) expect(readFileSync(join(markersDir, `${s.point}.pdf`)).equals(renderSleevePdf(s))).toBe(true);
+  });
+});

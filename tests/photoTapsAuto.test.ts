@@ -96,3 +96,39 @@ describe('auto-filled taps', () => {
     expect(saved.message).toBe('2 canes marked on Camera position Left. 1 found automatically.');
   });
 });
+
+describe('two-sleeve posts in the scan', () => {
+  const postPlan: PhotoTapPlan = {
+    ...plan,
+    scanOnly: [
+      { id: 'BAS01B', label: 'BAS01 bottom sleeve', optional: true },
+      { id: 'BAS02B', label: 'BAS02 bottom sleeve', optional: true },
+      { id: 'BAS03B', label: 'BAS03 bottom sleeve', optional: true },
+    ],
+  };
+
+  it('a bottom sleeve vertically under its own top sleeve becomes the BASnnB tap', () => {
+    let d = beginAutoScan(startTapDraft(postPlan));
+    // BAS01 315 top, BAS01B 222 bottom 320 px lower; BAS02 36E with BAS02B 24B 400 px to the side (not aligned).
+    d = applyAutoSleeves(d, {
+      sleeves: [sleeve('315', 1000, 1200), sleeve('222', 1004, 1520), sleeve('36E', 2000, 1200), sleeve('24B', 2400, 1520), sleeve('271', 3000, 1500)],
+      duplicates: [],
+      scaleX: 4,
+      scaleY: 4,
+    });
+    // 271 (BAS03B) has no BAS03 top in the photo: dropped. 24B is not under BAS02: dropped.
+    expect(d.taps.map((t) => t.pointId)).toEqual(['BAS01', 'BAS02', 'BAS01B']);
+    expect(d.auto!.pins.map((p) => p.label)).toContain('BAS01B · 222');
+  });
+
+  it('a bottom sleeve above its top sleeve is not used', () => {
+    let d = beginAutoScan(startTapDraft(postPlan));
+    d = applyAutoSleeves(d, { sleeves: [sleeve('315', 1000, 1200), sleeve('222', 1000, 900)], duplicates: [], scaleX: 4, scaleY: 4 });
+    expect(d.taps.map((t) => t.pointId)).toEqual(['BAS01']);
+  });
+
+  it('the tap bar never asks for a bottom sleeve', () => {
+    const d = startTapDraft(postPlan);
+    expect(tapBarView(d).prompt).toContain('of 4');
+  });
+});

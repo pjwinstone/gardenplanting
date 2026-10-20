@@ -52,6 +52,33 @@ export const CIRCLE_SLEEVES = [
   { point: 'BAS14', id: 'DB7' },
 ];
 
+/**
+ * Bottom sleeves for two-sleeve posts (rev 7): BASnnB sits a known distance (Set-up, 1.2 m)
+ * below BASnn on the same post, so the pair gives a range. Picked greedily from the codebook
+ * words not used above: no pair among all 28 differs only inside a 4-band burst (the codebook
+ * itself keeps every pair at distance 4 or more). 637, next in greedy order, is skipped: the
+ * whole-photo scan does not read it upright in the 28-code set (tests/sleeveScan.test.ts).
+ */
+export const POST_BOTTOM_SLEEVES = [
+  { point: 'BAS01B', id: '222' },
+  { point: 'BAS02B', id: '24B' },
+  { point: 'BAS03B', id: '271' },
+  { point: 'BAS04B', id: '293' },
+  { point: 'BAS05B', id: '2DD' },
+  { point: 'BAS06B', id: '2E7' },
+  { point: 'BAS07B', id: '46A' },
+  { point: 'BAS08B', id: '48B' },
+  { point: 'BAS09B', id: '4A6' },
+  { point: 'BAS10B', id: '4CC' },
+  { point: 'BAS11B', id: '525' },
+  { point: 'BAS12B', id: '74D' },
+  { point: 'BAS13B', id: '6E9' },
+  { point: 'BAS14B', id: '72B' },
+];
+
+/** Every printed sleeve: tops (BAS01–BAS14), then the post bottoms (BAS01B–BAS14B). */
+export const ALL_SLEEVES = [...CIRCLE_SLEEVES, ...POST_BOTTOM_SLEEVES];
+
 const SYNC = '11110';
 const STOP = '01';
 
@@ -374,4 +401,9 @@ export function renderSleevePdf(sleeve: { point: string; id: string }) {
 
 export function renderAllSleevesPdf() {
   return buildPdf(CIRCLE_SLEEVES.map(sleeveContent));
+}
+
+/** The bottom sleeves of the two-sleeve posts, one page each. */
+export function renderPostBottomSleevesPdf() {
+  return buildPdf(POST_BOTTOM_SLEEVES.map(sleeveContent));
 }

@@ -24,7 +24,8 @@ describe('workflow markdown', () => {
     expect(generated).not.toContain('Camera.app');
     expect(generated).not.toContain('exactly on the dashed line');
     expect(generated).toContain('photo.uploaded Edge points');
-    expect(generated).toContain('Add base points');
+    expect(generated).toContain('Grow the base grid');
+    expect(generated).toContain('Start the base grid (BAS01, BAS02)');
     expect(generated).toContain('STN01');
     expect(generated).toContain('Tape the diameter');
     expect(generated).toContain('Circle result');
