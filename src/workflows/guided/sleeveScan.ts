@@ -27,6 +27,8 @@ export const MIN_SCAN_BAND_PX = 4;
 export const DEFAULT_BUDGET_MS = 2000;
 /** Least even code fill across the silhouette (see codeCoverage). */
 const MIN_CODE_COVERAGE = 0.3;
+/** Two reads of one ID are one sleeve only when their axes are this many widths apart or less. */
+const SAME_SLEEVE_WIDTHS = 0.5;
 /** Largest spread of the axis between evenly filled silhouette reads, px. */
 const MAX_AXIS_SPREAD_PX = 0.5;
 
@@ -284,7 +286,11 @@ function periodicity(
     prof[i] = c ? s / c : 0;
   }
   const g = new Float32Array(n);
-  for (let i = 1; i < n - 1; i += 1) g[i] = Math.abs(prof[i + 1] - prof[i - 1]);
+  const g0 = new Float32Array(n);
+  for (let i = 1; i < n - 1; i += 1) g0[i] = Math.abs(prof[i + 1] - prof[i - 1]);
+  // Smooth [1 2 1]: on an upright sleeve the band edges are one-row impulses at a fractional
+  // pitch, and the autocorrelation at a fractional lag would miss them.
+  for (let i = 1; i < n - 1; i += 1) g[i] = 0.25 * g0[i - 1] + 0.5 * g0[i] + 0.25 * g0[i + 1];
   const win = Math.max(8, Math.round(20 * p0));
   const step = Math.max(1, Math.round(p0));
   const lagLo = p0 * (1 - STAGE_A_TOL);
@@ -592,13 +598,13 @@ export function scanSleeves(img: GreyImage, opts: ScanOptions): ScanResult {
   const retry: StageACandidate[] = [];
   const consider = (r: { sleeve?: ScannedSleeve }) => {
     if (!r.sleeve) return false;
-    // Same sleeve found twice from two tracks: keep one.
-    // Same sleeve read from two tracks (one pulled sideways by the background): the same code
-    // rows. Keep the read whose silhouette the code fills best.
+    // Same sleeve read from two tracks: the same code rows and axes within half a sleeve width.
+    // Keep the read whose silhouette the code fills best. The same ID any further apart is a
+    // second sleeve (or a read we cannot trust): both go to manual as a duplicate.
     const n = r.sleeve;
     const same = found.findIndex((f) => f.id === n.id
       && Math.abs(f.codeTopY - n.codeTopY) < 2 * f.bandPx && Math.abs(f.codeBottomY - n.codeBottomY) < 2 * f.bandPx
-      && Math.abs(f.axisX - n.axisX) < 3 * f.widthPx);
+      && Math.abs(f.axisX - n.axisX) < SAME_SLEEVE_WIDTHS * Math.max(f.widthPx, n.widthPx));
     if (same >= 0) {
       const f = found[same];
       if (n.codeCoverage > f.codeCoverage + 0.02 || (Math.abs(n.codeCoverage - f.codeCoverage) <= 0.02 && n.confidence > f.confidence)) found[same] = n;

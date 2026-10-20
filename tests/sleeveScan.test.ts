@@ -135,6 +135,25 @@ describe('rules', { timeout: 120_000 }, () => {
     expect(res.duplicates).toContain('315');
   });
 
+  it('two 315 sleeves 0.15 m apart at 6 m are a duplicate, not one pin (review case)', () => {
+    // From the reviewer's sim (adv.ts): 0.15 m at 6 m ≈ 72 px, under 3 sleeve widths.
+    const sc = renderScene({ width: 1600, height: 1500, sigma: 1.2, noise: 2, seed: 7, background: 'plain', sleeves: [
+      { id: '315', distM: 6, x: 700, y: 750 }, { id: '315', distM: 6, x: 772, y: 750 }, { id: '459', distM: 6, x: 1200, y: 750 },
+    ] });
+    const res = scanSleeves(sc.img, { markerIds: SET, budgetMs: 1e9 });
+    expect(res.sleeves.filter((s) => s.id === '315')).toEqual([]);
+    expect(res.duplicates).toContain('315');
+    expect(res.sleeves.map((s) => s.id)).toEqual(['459']);
+  });
+
+  it('upright sleeves (no tilt) of every ID in the set are found', () => {
+    for (const id of SET) {
+      const sc = scene('plain', [{ id, distM: 6, x: 400, y: 450 }]);
+      const res = scanSleeves(sc.img, { markerIds: SET, budgetMs: 1e9 });
+      expect(res.sleeves.map((s) => s.id), id).toEqual([id]);
+    }
+  });
+
   it('the time cap returns partial results', () => {
     const sc = scene('fence', [{ id: '315', distM: 4, x: 400.4, y: 450, tiltDeg: 6 }]);
     let t = 0;
