@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { scanSleeves } from '../src/workflows/guided/sleeveScan';
+import { MIN_SCAN_BAND_PX, scanSleeves } from '../src/workflows/guided/sleeveScan';
 import { GARDEN_MARKER_IDS } from '../src/workflows/guided/markerSet';
 
 const DIR = join(__dirname, 'fixtures', 'real');
@@ -57,12 +57,12 @@ describe.skipIf(files.length === 0)('real iPhone fixtures', () => {
       let fileFound = 0; let fileN = 0;
       for (const t of fx.sleeves) {
         const s = res.sleeves.find((q) => q.id === t.id);
-        // Recall counts sleeves with bands ≥ 4 px (the label's bandPx, else the scan's own when found).
+        // Recall counts sleeves with bands ≥ MIN_SCAN_BAND_PX (the label's bandPx, else the scan's own when found).
         const band = t.bandPx ?? s?.bandPx;
         if (s) {
           found += 1; n += 1; fileFound += 1; fileN += 1;
           if (s.bandPx >= 7) worst7 = Math.max(worst7, Math.abs(s.axisX - t.axisX));
-        } else if (band === undefined || band >= 4) { n += 1; fileN += 1; }
+        } else if (band === undefined || band >= MIN_SCAN_BAND_PX) { n += 1; fileN += 1; }
       }
       lines.push(`${f}: ${fileFound}/${fileN} found, ${res.sleeves.length} reported, ${res.ms.toFixed(0)} ms${res.partial ? ' (partial)' : ''}${fx.note ? ` · ${fx.note}` : ''}`);
     }

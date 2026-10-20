@@ -1,0 +1,8 @@
+{
+  "image": "cam-right-far-a.pgm",
+  "sleeves": [
+    { "id": "315", "axisX": 895.8, "midY": 201.6, "bandPx": 2.8 },
+    { "id": "36E", "axisX": 2404.3, "midY": 323.1, "bandPx": 3.84 }
+  ],
+  "note": "Paul's CAM-RIGHT-FAR run, 2026-10-20, iPhone 16 Pro Max 24 mm, overcast; baseline sleeves on the house wall at ~10-12 m (315 beside a drainpipe, 36E on brick). Rows 1300-1759 of the 4032 x 3024 original, full width."
+}

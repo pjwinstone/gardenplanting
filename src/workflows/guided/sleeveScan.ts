@@ -22,11 +22,18 @@ export const WIDTH_PER_PITCH = 4.65;
 export const STAGE_A_TOL = 0.25;
 /** Stage B tolerance on width / pitch. */
 export const STAGE_B_TOL = 0.2;
-/** Smallest band, px, to detect and read the ID (ray use). Height / fx keeps MIN_BAND_PX (7). */
-export const MIN_SCAN_BAND_PX = 4;
+/**
+ * Smallest band, px, to detect and read the ID (ray use). Height / fx keeps MIN_BAND_PX (7).
+ * 2.5 px is a sleeve about 14 m from an iPhone 24 mm main camera (real baseline photos at
+ * ~8–12 m read 2.8–3.8 px bands). Exact codeword, sync/stop, grid RMS, bit margin and width / pitch
+ * still gate every read.
+ */
+export const MIN_SCAN_BAND_PX = 2.5;
 export const DEFAULT_BUDGET_MS = 2000;
 /** Least even code fill across the silhouette (see codeCoverage). */
-const MIN_CODE_COVERAGE = 0.3;
+const MIN_CODE_COVERAGE = 0.5;
+/** Stage A pitch × this must reach MIN_SCAN_BAND_PX for Stage B to try the candidate. */
+const MIN_PITCH_SLACK = 1.5;
 /** Two reads of one ID are one sleeve only when their axes are this many widths apart or less. */
 const SAME_SLEEVE_WIDTHS = 0.5;
 /** Largest spread of the axis between evenly filled silhouette reads, px. */
@@ -445,7 +452,9 @@ function bearing(
     const xr = R.a + R.b * midY;
     // Loose on the first passes; on the last, a width off by more than 5 % means one edge is
     // on the background, so the axis cannot be trusted to a fraction of a pixel.
-    if (Math.abs((xr - xl) / (2 * halfW) - 1) > (tol < 0.1 ? 0.05 : 0.15)) return undefined;
+    // On a small sleeve one pixel of blur is already over 5 %, so allow at least 1 px.
+    const wTol = tol < 0.1 ? Math.max(0.05, 1 / (2 * halfW)) : 0.15;
+    if (Math.abs((xr - xl) / (2 * halfW) - 1) > wTol) return undefined;
     line = { a: (L.a + R.a) / 2, b: (L.b + R.b) / 2 };
     out = { axisX: (xl + xr) / 2, midY, slope: line.b, widthPx: xr - xl, n: Math.min(L.n, R.n) };
   }
@@ -611,7 +620,12 @@ export function scanSleeves(img: GreyImage, opts: ScanOptions): ScanResult {
     } else found.push(r.sleeve);
     return true;
   };
-  for (const c of a.cands) {
+  // A track whose pitch is well under the band gate cannot pass Stage B: skip it (on brick or
+  // lawn these are most of the candidates). Stage A's pitch is coarse (a 3.2 px band showed as
+  // 2.26), so the margin is generous.
+  const cands = a.cands.filter((c) => c.pitch * MIN_PITCH_SLACK >= MIN_SCAN_BAND_PX);
+  rejected += a.cands.length - cands.length;
+  for (const c of cands) {
     if (now() > deadline) { partial = true; break; }
     if (!consider(refine(img, c, set, false))) retry.push(c);
   }
