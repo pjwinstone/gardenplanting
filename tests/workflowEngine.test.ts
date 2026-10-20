@@ -86,9 +86,9 @@ describe('guided workflow engine', () => {
   });
 
   it('ports the circle sheet and the marker sheet, and leaves the other two for later', () => {
-    expect(circleFieldTest.steps).toHaveLength(12);
+    expect(circleFieldTest.steps).toHaveLength(13);
     expect(printFitMarkers.steps).toHaveLength(7);
-    expect(new Set(circleFieldTest.steps.map((step) => step.id)).size).toBe(12);
+    expect(new Set(circleFieldTest.steps.map((step) => step.id)).size).toBe(13);
     const later = startWorkflow(emptyProgress(), 'house-traverse', NOW);
     expect(later.changed).toBe(false);
     expect(later.notice).toMatch(/coming soon/i);
@@ -189,7 +189,7 @@ describe('guided workflow engine', () => {
   it('archives sleeve and CHK-BASE notes when a finished run starts over', () => {
     let progress = started();
     progress = noteWorkflow(progress, 'laser-check-baseline', 'CHK-BASE 8.001', NOW).progress;
-    progress = noteWorkflow(progress, 'plumb-canes', 'sleeve R 30.2 mm, height 0.5 m', NOW).progress;
+    progress = noteWorkflow(progress, 'mark-edge-points', 'sleeve R 30.2 mm, height 0.5 m', NOW).progress;
     for (const step of circleFieldTest.steps) {
       progress = tickWorkflow(progress, step.id, undefined, NOW).progress;
     }
@@ -197,7 +197,7 @@ describe('guided workflow engine', () => {
     const again = restartWorkflow(progress, 'circle-field-test', '2026-06-01T12:10:00.000Z');
     expect(again.progress.pastRuns?.[0]?.notes).toEqual([
       { stepId: 'laser-check-baseline', note: 'CHK-BASE 8.001' },
-      { stepId: 'plumb-canes', note: 'sleeve R 30.2 mm, height 0.5 m' },
+      { stepId: 'mark-edge-points', note: 'sleeve R 30.2 mm, height 0.5 m' },
     ]);
     const when = new Date(LATER).toLocaleString('en-GB', {
       dateStyle: 'medium',
@@ -205,7 +205,7 @@ describe('guided workflow engine', () => {
     });
     const line = formatPastRunLine(again.progress.pastRuns?.[0] as WorkflowPastRun);
     expect(line).toBe(
-      `Circle field test · ${when} · Laser check of the baseline: CHK-BASE 8.001 · Plumb the canes and note heights: sleeve R 30.2 mm, height 0.5 m`,
+      `Circle field test · ${when} · Laser check of the baseline: CHK-BASE 8.001 · Mark the edge points: sleeve R 30.2 mm, height 0.5 m`,
     );
     expect(line).not.toContain('circle-field-test');
     expect(line).not.toContain('laser-check');
@@ -219,7 +219,7 @@ describe('guided workflow engine', () => {
       }),
     ).toBe('Print & fit markers · Note: kept');
     expect(again.progress.runs['circle-field-test']?.steps['laser-check-baseline']?.note).toBeUndefined();
-    expect(again.progress.runs['circle-field-test']?.steps['plumb-canes']?.status).toBe('open');
+    expect(again.progress.runs['circle-field-test']?.steps['mark-edge-points']?.status).toBe('open');
 
     const doc = emptyDocument('Noted');
     doc.workflowProgress = progress;
@@ -330,7 +330,7 @@ describe('guided workflow engine', () => {
     const resumed = resumeWorkflow(readProgress(loaded), 'circle-field-test', LATER).progress;
     const run = resumed.runs['circle-field-test'];
     expect(run?.steps['gather-kit']?.status).toBe('ticked_by_you');
-    expect(run?.currentStepId).toBe('set-out-circle');
+    expect(run?.currentStepId).toBe('place-baseline-points');
     expect(resumed.activeId).toBe('circle-field-test');
 
     const stale: WorkflowRun = {

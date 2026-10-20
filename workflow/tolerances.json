@@ -3,5 +3,7 @@
   "railwayMm": 30,
   "flowerBedMm": 100,
   "treeMm": 150,
-  "cameraPositionMm": 200
+  "cameraPositionMm": 200,
+  "circleDiameterCapBaselineMm": 60,
+  "circleDiameterCapPlantableMm": 100
 }

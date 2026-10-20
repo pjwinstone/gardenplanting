@@ -403,6 +403,16 @@ export interface GardenDocument {
    * Rides the same OneDrive save as the rest of the document.
    */
   workflowProgress?: import('./workflows/guided/types').WorkflowProgress;
+  /**
+   * This garden's sleeves: survey point ↔ printed sleeve ID. Optional; when absent the
+   * default set (CIRCLE_SLEEVES) is used. The whole-photo scan only accepts these IDs.
+   */
+  markerSet?: MarkerAssignment[];
+}
+
+export interface MarkerAssignment {
+  point: string;
+  id: string;
 }
 
 export const SIGMA = {

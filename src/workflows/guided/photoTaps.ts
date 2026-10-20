@@ -237,6 +237,7 @@ export function beginAutoScan(draft: PhotoTapDraft): PhotoTapDraft {
 export function applyAutoSleeves(
   draft: PhotoTapDraft,
   result: { sleeves?: ScannedSleeve[]; duplicates?: string[]; scaleX: number; scaleY: number; unavailable?: string },
+  doc?: Pick<GardenDocument, 'markerSet'> | null,
 ): PhotoTapDraft {
   if (draft.auto?.state !== 'finding') return draft;
   if (result.unavailable || !(result.scaleX > 0 && result.scaleY > 0)) {
@@ -245,7 +246,7 @@ export function applyAutoSleeves(
   const targets = new Set(draft.plan.targets.map((t) => t.id));
   const pins: AutoPin[] = [];
   for (const s of result.sleeves ?? []) {
-    const point = pointForMarkerId(s.id);
+    const point = pointForMarkerId(s.id, doc);
     if (!point || !targets.has(point) || pins.some((p) => p.targetId === point)) continue;
     if (draft.taps.some((t) => t.pointId === point)) continue;
     const record: AutoSleeveRecord = {
@@ -267,7 +268,7 @@ export function applyAutoSleeves(
   const taps = [...draft.taps, ...pins.map((p) => ({ pointId: p.targetId, px: p.px, py: p.py }))]
     .sort((a, b) => order.indexOf(a.pointId) - order.indexOf(b.pointId));
   const duplicates = (result.duplicates ?? []).filter((id) => {
-    const point = pointForMarkerId(id);
+    const point = pointForMarkerId(id, doc);
     return point && targets.has(point);
   });
   return { ...draft, taps, auto: { state: 'done', pins, duplicates } };
@@ -359,7 +360,10 @@ export function canSaveTaps(draft: PhotoTapDraft): boolean {
     if (!draft.detection || draft.detection.state === 'finding') return false;
     return draft.taps.some((tap) => tap.pointId === 'SLEEVE-TOP') && draft.taps.some((tap) => tap.pointId === 'SLEEVE-BOTTOM');
   }
-  return draft.plan.targets.every((target) => target.optional || draft.taps.some((tap) => tap.pointId === target.id));
+  const tapped = (id: string) => draft.taps.some((tap) => tap.pointId === id);
+  if (!draft.plan.targets.every((target) => target.optional || tapped(target.id))) return false;
+  // Every target optional (camera positions): at least one tap, so the photo carries a ray.
+  return draft.plan.targets.some((t) => !t.optional) || draft.taps.length > 0;
 }
 
 /** Text and buttons for the one compact bar at the bottom of the tap screen. */

@@ -44,7 +44,7 @@ const T0 = '2026-06-01T12:00:00.000Z';
 let clock = Date.parse(T0);
 const tick = () => new Date((clock += 1000)).toISOString();
 
-const EVENTS: ActionEvent[] = ['start', 'photo_taken', 'upload_verified', 'photo_refused', 'upload_failed', 'retake', 'retry', 'settled_by_hand', 'recheck'];
+const EVENTS: ActionEvent[] = ['start', 'photo_taken', 'upload_verified', 'photo_refused', 'upload_failed', 'retake', 'retake_done', 'retry', 'settled_by_hand', 'recheck'];
 
 // ---------------------------------------------------------------------------
 // 1. The sub-net on its own, walked exhaustively.
@@ -129,7 +129,7 @@ describe('action sub-net (workflow/action.net.yaml)', () => {
   });
 
   it('pill colour, text and command come only from the place', () => {
-    const step = circleFieldTest.steps.find((s) => s.id === 'camera-left')!;
+    const step = circleFieldTest.steps.find((s) => s.id === 'camera-1')!;
     const cases: Array<[ActionState, string, string, string]> = [
       [{ place: 'idle', need: 2, have: 0 }, 'act-idle', 'Take photos', 'workflow-go'],
       [{ place: 'in_progress', need: 2, have: 1 }, 'act-in_progress', 'Take photo 2 of 2', 'workflow-go'],
@@ -247,11 +247,11 @@ describe('field test with every step\'s action sub-net composed', () => {
   });
 
   it('a two-photo step after one photo reads "Take photo 2 of 2" (blue), not red', () => {
-    let doc = moveTo(fresh(), 'camera-left');
-    doc = photoThrough(doc, 'camera-left', false);
-    const a = action(doc, 'camera-left');
+    let doc = moveTo(fresh(), 'camera-1');
+    doc = photoThrough(doc, 'camera-1', false);
+    const a = action(doc, 'camera-1');
     expect(a).toMatchObject({ place: 'in_progress', have: 1, need: 2 });
-    expect(actionPillLabel(step('camera-left'), a)).toBe('Take photo 2 of 2');
+    expect(actionPillLabel(step('camera-1'), a)).toBe('Take photo 2 of 2');
   });
 
   it('upload failed → red + Retry upload with the reason; a later verify turns it green', () => {
@@ -269,15 +269,15 @@ describe('field test with every step\'s action sub-net composed', () => {
   });
 
   it('refused at the shutter (portrait) → red + Retake; Retake → grey; good photo → green', () => {
-    let doc = moveTo(fresh(), 'camera-right-near');
-    doc = commitWorkflow(doc, rejectEvidenceWorkflow(readProgress(doc), 'camera-right-near', 'Turn the phone sideways.', tick()).progress);
-    expect(action(doc, 'camera-right-near')).toMatchObject({ place: 'error', recovery: 'retake', reason: 'Turn the phone sideways.' });
-    const retake = handleWorkflowCommand('workflow-retake', doc, { getAttribute: (n) => (n === 'data-step' ? 'camera-right-near' : null) });
-    expect(retake.link).toMatchObject({ to: 'camera', cameraPositionId: 'Right near' });
-    doc = commitWorkflow(doc, retakeEvidenceWorkflow(readProgress(doc), 'camera-right-near', tick()).progress);
-    expect(action(doc, 'camera-right-near').place).toBe('idle');
-    doc = photoThrough(doc, 'camera-right-near', false);
-    doc = photoThrough(doc, 'camera-right-near', true);
+    let doc = moveTo(fresh(), 'camera-2');
+    doc = commitWorkflow(doc, rejectEvidenceWorkflow(readProgress(doc), 'camera-2', 'Turn the phone sideways.', tick()).progress);
+    expect(action(doc, 'camera-2')).toMatchObject({ place: 'error', recovery: 'retake', reason: 'Turn the phone sideways.' });
+    const retake = handleWorkflowCommand('workflow-retake', doc, { getAttribute: (n) => (n === 'data-step' ? 'camera-2' : null) });
+    expect(retake.link).toMatchObject({ to: 'camera', cameraPositionId: 'Position 2' });
+    doc = commitWorkflow(doc, retakeEvidenceWorkflow(readProgress(doc), 'camera-2', tick()).progress);
+    expect(action(doc, 'camera-2').place).toBe('idle');
+    doc = photoThrough(doc, 'camera-2', false);
+    doc = photoThrough(doc, 'camera-2', true);
   });
 
   it('verified but not usable → red + Retake with the reason; a good retake supersedes it', () => {
@@ -310,7 +310,7 @@ describe('field test with every step\'s action sub-net composed', () => {
     doc = moveTo(doc, 'camera-calibration');
     const shot = shoot(doc, 'camera-calibration');
     doc = setStatus(shot.doc, shot.photoId, 'failed', { uploadError: 'Size mismatch (local 4591996, OneDrive 0)' });
-    for (const id of ['camera-left', 'camera-right-near', 'camera-right-far']) {
+    for (const id of ['camera-1', 'camera-2', 'camera-3', 'camera-4']) {
       doc = moveTo(doc, id);
       doc = photoThrough(doc, id, false);
       doc = photoThrough(doc, id, true);
@@ -319,12 +319,12 @@ describe('field test with every step\'s action sub-net composed', () => {
     doc = withWorkflowEvent(doc, { type: 'cloud.saved' }, tick());
     const result = handleWorkflowCommand('workflow-done', doc, { getAttribute: () => null });
     const after = readProgress(result.doc ?? doc);
-    expect(workflowShowsNotice()).toBe('Not finished. Step 8 Calibration photo (focal length): Upload failed: Size mismatch (local 4591996, OneDrive 0)');
+    expect(workflowShowsNotice()).toBe('Not finished. Step 7 Calibration photo (focal length): Upload failed: Size mismatch (local 4591996, OneDrive 0)');
     expect(after.runs[ID]?.finishedAt).toBeFalsy();
     expect(after.runs[ID]?.currentStepId).toBe('camera-calibration');
     const b = doneBlocker(doc, circleFieldTest.steps, run(doc))!;
     expect(b.stepId).toBe('camera-calibration');
-    expect(doneBlockerNotice(b)).toBe('Not finished. Step 8 Calibration photo (focal length): Upload failed: Size mismatch (local 4591996, OneDrive 0)');
+    expect(doneBlockerNotice(b)).toBe('Not finished. Step 7 Calibration photo (focal length): Upload failed: Size mismatch (local 4591996, OneDrive 0)');
   });
 
   it('Done lands on each possible blocker in turn, and a skip with a note unblocks it', () => {
@@ -364,27 +364,27 @@ describe('field test with every step\'s action sub-net composed', () => {
   });
 
   it('Paul: step 10 after photo 1 says Take photo 2 of 2; photo 2 taken but not marked says Mark photo 2 of 2', () => {
-    let doc = walkToEnd(fresh(), { stopAt: 'camera-right-near' });
-    doc = moveTo(doc, 'camera-right-near');
-    doc = photoThrough(doc, 'camera-right-near', false);
-    let a = action(doc, 'camera-right-near');
+    let doc = walkToEnd(fresh(), { stopAt: 'camera-2' });
+    doc = moveTo(doc, 'camera-2');
+    doc = photoThrough(doc, 'camera-2', false);
+    let a = action(doc, 'camera-2');
     expect(a).toMatchObject({ place: 'in_progress', have: 1, need: 2 });
-    expect(actionPillLabel(step('camera-right-near'), a)).toBe('Take photo 2 of 2');
+    expect(actionPillLabel(step('camera-2'), a)).toBe('Take photo 2 of 2');
     expect(actionPillCommand(a)).toBe('workflow-go');
     // Photo 2 taken, tap screen closed without Save.
-    const shot = shoot(doc, 'camera-right-near');
+    const shot = shoot(doc, 'camera-2');
     doc = shot.unmarked;
-    a = action(doc, 'camera-right-near');
+    a = action(doc, 'camera-2');
     expect(a).toMatchObject({ place: 'in_progress', markPhotoId: shot.photoId, markNumber: 2 });
-    expect(actionPillLabel(step('camera-right-near'), a)).toBe('Mark photo 2 of 2');
+    expect(actionPillLabel(step('camera-2'), a)).toBe('Mark photo 2 of 2');
     expect(actionPillCommand(a)).toBe('open-photo-mark');
     // Saved (even with every cane Not in view), then verified: green. Linkage was never the problem.
     doc = markTaps(doc, shot.photoId);
     doc = setStatus(doc, shot.photoId, 'uploading');
-    expect(action(doc, 'camera-right-near').place).toBe('uploading');
+    expect(action(doc, 'camera-2').place).toBe('uploading');
     doc = setStatus(doc, shot.photoId, 'verified');
-    expect(action(doc, 'camera-right-near').place).toBe('done');
-    expect(run(doc).steps['camera-right-near']?.status).toBe('ticked_by_app');
+    expect(action(doc, 'camera-2').place).toBe('done');
+    expect(run(doc).steps['camera-2']?.status).toBe('ticked_by_app');
   });
 
   it('every enabled pill label starts with a verb (design rule)', () => {

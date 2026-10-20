@@ -8,11 +8,13 @@ import {
   actionPillClass,
   actionPillCommand,
   actionPillLabel,
+  actionRetakeAvailable,
   actionReasonLine,
   deriveActionState,
   doneBlocker,
   doneBlockerNotice,
 } from './actionNet';
+import { CIRCLE_RESULT_STEP_ID, circleResultForRun, TAPE_DIAMETER_STEP_ID } from './circleResult';
 import { GUIDED_WORKFLOWS, workflowById } from './definitions';
 import { diagramSvg } from './diagrams';
 import {
@@ -30,6 +32,7 @@ import {
   restartWorkflow,
   resumeWorkflow,
   retakeEvidenceWorkflow,
+  saveCircleTapeWorkflow,
   scrollWorkflowToStep,
   skipWithNoteWorkflow,
   reviewWorkflow,
@@ -54,10 +57,10 @@ import {
   wheelHeightPx,
 } from './guidedRoller';
 import { cameraCaptureContext, cameraLink } from './cameraCapture';
-import { SETUP_STEP_ID } from './fieldTestMeta';
+import { CAMERA_POSITION_KEYS, SETUP_STEP_ID } from './fieldTestMeta';
 import { firstUnsettledStepId, isSettled, normalizeStatus } from './guards';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
-import type { FieldTestSetupValues, WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
+import type { CircleTape, CircleTapeEdge, FieldTestSetupValues, WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
 
 const SUN_KEY = 'garden-survey:workflow-sunlight';
 
@@ -247,6 +250,21 @@ export function handleWorkflowCommand(
     const live = document.querySelector<HTMLTextAreaElement>(`textarea[data-step="${CSS.escape(id)}"]`)?.value ?? '';
     move = tickWithReasonWorkflow(progress, id, live);
   }
+  else if (cmd === 'workflow-circle-tape-edge') {
+    const edge = source.getAttribute("data-edge");
+    if (edge === 'inside' || edge === 'outside') circleTapeDraft = { ...circleTapeDraft, edge };
+    return {};
+  }
+  else if (cmd === 'workflow-circle-tape') {
+    const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
+    const tape = circleTapeFromDraft(circleTapeDraft, active?.circleTape);
+    if (!tape) {
+      notice = 'Type three diameters in metres, above 0.';
+      return {};
+    }
+    move = saveCircleTapeWorkflow(progress, tape.diametersM, tape.edge);
+    if (move.changed) circleTapeDraft = { d: ['', '', ''] };
+  }
   else if (cmd === 'workflow-retake') {
     move = retakeEvidenceWorkflow(progress, stepId);
     const def = progress.activeId ? workflowById(progress.activeId) : undefined;
@@ -403,8 +421,18 @@ function renderRollerPanel(
         if (photoId) node.dataset.photoId = photoId;
         if (action.place === 'uploading' || action.place === 'done') node.disabled = true;
         row.append(node);
+        if (step && actionRetakeAvailable(step, action)) {
+          row.append(button('Retake', 'workflow-retake', { className: 'roller-retake', step: stepId, testid: 'roller-retake' }));
+        }
       }
       row.append(button('?', 'workflow-expand', { className: 'roller-q', step: stepId }));
+    } else {
+      // A done photo step (e.g. calibration) keeps its Retake after the roller has moved on.
+      const step = def.steps.find((item) => item.id === stepId);
+      const action = step ? deriveActionState(chromeDoc, run, step) : undefined;
+      if (step && action && actionRetakeAvailable(step, action)) {
+        row.append(button('Retake', 'workflow-retake', { className: 'roller-retake', step: stepId, testid: 'roller-retake' }));
+      }
     }
     list.append(row);
   }
@@ -415,6 +443,8 @@ function renderRollerPanel(
   if (currentId === SETUP_STEP_ID) {
     panel.append(renderSetupForm(def, run));
   } else if (currentStep) {
+    if (currentStep.id === TAPE_DIAMETER_STEP_ID) panel.append(renderCircleTapeForm(run));
+    if (currentStep.id === CIRCLE_RESULT_STEP_ID) panel.append(renderCircleResult(chromeDoc, run));
     panel.append(renderButtonRow(def, run, currentStep));
   }
   if (notice) panel.append(el('p', 'workflow-notice', notice));
@@ -451,12 +481,20 @@ function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElemen
   const values = run.setup?.values;
   if (!values) return form;
   const grid = el('div', 'roller-form-grid');
-  grid.append(formTile('Baseline BAS01–BAS02 (m)', 'baseline_length_m', values.baseline_length_m.toFixed(3)));
-  grid.append(formTile('Circle diameter (m)', 'circle_diameter_m', values.circle_diameter_m.toFixed(3)));
-  grid.append(formTile('BAS02 from peg (m)', 'bas02_from_peg_m', values.bas02_from_peg_m.toFixed(2)));
+  grid.append(formTile('Circle diameter (m)', 'circle_diameter_m', values.circle_diameter_m.toFixed(2)));
+  grid.append(formTile('Edge points (at least 8)', 'edge_points', String(values.edge_points)));
+  grid.append(formTile('Camera positions (3 or 4)', 'camera_position_count', String(values.camera_position_count)));
+  grid.append(formTile('Baseline BAS01–BAS02 (m, at least D/2)', 'baseline_length_m', values.baseline_length_m.toFixed(3)));
   grid.append(formTile('Calibration distance (m)', 'calibration_distance_m', values.calibration_distance_m.toFixed(1)));
+  for (const [i, key] of CAMERA_POSITION_KEYS.entries()) {
+    const pos = values.camera_positions[key];
+    grid.append(formTile(`Position ${i + 1} to BAS01 (m, 0 = not taped)`, `camera_positions.${key}.to_bas01`, pos.to_bas01.toFixed(2)));
+    grid.append(formTile(`Position ${i + 1} to BAS02 (m, 0 = not taped)`, `camera_positions.${key}.to_bas02`, pos.to_bas02.toFixed(2)));
+  }
   grid.append(formTile('Tolerance baseline (mm)', 'tolerances_mm.baseline', String(values.tolerances_mm.baseline)));
   grid.append(formTile('Tolerance camera position (mm)', 'tolerances_mm.camera_position', String(values.tolerances_mm.camera_position)));
+  grid.append(formTile('Circle diameter limit, baseline class (mm)', 'tolerances_mm.circle_diameter_baseline', String(values.tolerances_mm.circle_diameter_baseline)));
+  grid.append(formTile('Circle diameter limit, plantable (mm)', 'tolerances_mm.circle_diameter_plantable', String(values.tolerances_mm.circle_diameter_plantable)));
   form.append(grid);
   const act = el('div', 'roller-form-act');
   const dirty = Object.keys(setupDraft).length > 0;
@@ -464,6 +502,62 @@ function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElemen
   act.append(button('Confirm', 'workflow-confirm-setup', { primary: true, testid: 'workflow-confirm-setup' }));
   form.append(act);
   return form;
+}
+
+let circleTapeDraft: { d: string[]; edge?: CircleTapeEdge } = { d: ['', '', ''] };
+
+/** 'Tape the diameter': three readings about 60° apart, and which edge the tape was on. */
+function renderCircleTapeForm(run: WorkflowRun): HTMLElement {
+  const form = el('div', 'roller-setup-form');
+  const saved = run.circleTape;
+  const grid = el('div', 'roller-form-grid');
+  for (let i = 0; i < 3; i += 1) {
+    const tile = el('label', 'roller-form-tile');
+    tile.append(el('small', '', `Diameter ${i + 1} (m)${i ? `, turned about ${60 * i}°` : ''}`));
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.inputMode = 'decimal';
+    input.className = 'roller-form-input';
+    input.dataset.testid = `circle-tape-${i + 1}`;
+    input.value = circleTapeDraft.d[i] || (saved?.diametersM[i] !== undefined ? saved.diametersM[i]!.toFixed(3) : '');
+    input.addEventListener('input', () => { circleTapeDraft.d[i] = input.value; });
+    tile.append(input);
+    grid.append(tile);
+  }
+  form.append(grid);
+  const edge = circleTapeDraft.edge ?? saved?.edge ?? 'inside';
+  const act = el('div', 'roller-form-act');
+  act.append(el('div', 'roller-hint', 'Taped on the inside or the outside of the edge? Put the canes on that same edge.'));
+  for (const side of ['inside', 'outside'] as const) {
+    const b = button(side === 'inside' ? 'Inside edge' : 'Outside edge', 'workflow-circle-tape-edge', { testid: `circle-tape-${side}` });
+    b.dataset.edge = side;
+    if (side === edge) b.classList.add('roller-pill--on');
+    act.append(b);
+  }
+  act.append(button('Save diameters', 'workflow-circle-tape', { primary: true, testid: 'workflow-circle-tape' }));
+  form.append(act);
+  return form;
+}
+
+/** Plain readings for the 'Tape the diameter' save. null when not three numbers above 0. */
+export function circleTapeFromDraft(draft: { d: string[]; edge?: CircleTapeEdge } = circleTapeDraft, fallback?: CircleTape): { diametersM: number[]; edge: CircleTapeEdge } | null {
+  const diametersM = [0, 1, 2].map((i) => {
+    const text = draft.d[i] || (fallback?.diametersM[i] !== undefined ? String(fallback.diametersM[i]) : '');
+    return Number(text.replace(',', '.').trim());
+  });
+  if (!diametersM.every((d) => Number.isFinite(d) && d > 0)) return null;
+  return { diametersM, edge: draft.edge ?? fallback?.edge ?? 'inside' };
+}
+
+function renderCircleResult(doc: GardenDocument | null, run: WorkflowRun): HTMLElement {
+  const box = el('div', 'roller-setup-form');
+  const verdict = circleResultForRun(doc, run);
+  box.dataset.state = verdict.state;
+  box.dataset.testid = 'circle-result';
+  box.append(el('p', `circle-verdict circle-verdict--${verdict.state}`, verdict.headline));
+  for (const line of verdict.guidance) box.append(el('p', 'roller-hint', line));
+  for (const line of verdict.warnings ?? []) box.append(el('p', 'roller-hint roller-hint--warn', line));
+  return box;
 }
 
 function readDotted(values: FieldTestSetupValues, key: string): unknown {
@@ -475,7 +569,9 @@ export function setupValuesWithDraft(values: FieldTestSetupValues, draft: Record
   const next = JSON.parse(JSON.stringify(values)) as FieldTestSetupValues;
   for (const [key, text] of Object.entries(draft)) {
     const num = Number(text.replace(',', '.').trim());
-    if (!Number.isFinite(num) || num <= 0) return null;
+    // A camera position distance may be 0 (not taped); everything else is above 0.
+    const zeroOk = key.startsWith('camera_positions.');
+    if (!Number.isFinite(num) || num < 0 || (num === 0 && !zeroOk)) return null;
     if (typeof readDotted(next, key) !== 'number') continue;
     const parts = key.split('.');
     const last = parts.pop()!;

@@ -180,28 +180,14 @@ export interface StepState {
   consumedPhotoIds?: string[];
   /** Plain-language reason when evidence_failed or ticked_with_reason. */
   reason?: string;
+  /** Set by Retake: photos received at or before this time no longer count for the step. */
+  retakeAfter?: string;
 }
 
 export type SetupStatus = 'unconfirmed' | 'confirmed' | 'changed_mid_run';
 
-export interface FieldTestSetupValues {
-  baseline_length_m: number;
-  bas02_from_peg_m: number;
-  circle_diameter_m: number;
-  calibration_distance_m: number;
-  camera_positions: {
-    left: { to_bas01: number; to_bas02: number };
-    right_near: { to_bas01: number; to_bas02: number };
-    right_far: { to_bas01: number; to_bas02: number };
-  };
-  tolerances_mm: {
-    baseline: number;
-    railway: number;
-    flower_bed: number;
-    tree: number;
-    camera_position: number;
-  };
-}
+import type { FieldTestSetupValues } from './fieldTestMeta';
+export type { FieldTestSetupValues };
 
 export interface WorkflowRunSetup {
   status: SetupStatus;
@@ -213,12 +199,23 @@ export type RunLogEntry =
   | { at: string; type: 'config.confirmed' }
   | { at: string; type: 'config.changed'; changes: { key: string; from: unknown; to: unknown }[] };
 
+export type CircleTapeEdge = 'inside' | 'outside';
+
+/** 'Tape the diameter': three tapes across the circle, about 60° apart, and the edge used. */
+export interface CircleTape {
+  diametersM: number[];
+  edge: CircleTapeEdge;
+  savedAt: string;
+}
+
 export interface WorkflowRun {
   workflowId: WorkflowId;
   revision: number;
   currentStepId: string;
   /** When this run began. Photos captured or received earlier do not tick a station step. */
   startedAt: string;
+  /** Circle field test: the diameter tapes (docs/garden-circle.md). */
+  circleTape?: CircleTape;
   updatedAt: string;
   finishedAt?: string;
   paused?: boolean;

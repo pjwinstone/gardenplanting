@@ -11,6 +11,7 @@ import {
   canonicalStepId,
   defaultFieldTestSetup,
   FIELD_TEST_STEP_ALIASES,
+  RETAKE_DEPENDS_ON,
   SETUP_STEP_ID,
 } from './fieldTestMeta';
 import {
@@ -869,11 +870,15 @@ export function countUploadedPhotosForStep(
     if (canonicalStepId(id) === canonicalStep) continue;
     for (const photoId of state.consumedPhotoIds ?? []) taken.add(photoId);
   }
+  // After Retake only photos received later count; one with no record yet is the new one in flight.
+  const retakeAfter = photoTimeMs(run.steps[canonicalStep]?.retakeAfter);
   const photoIds = doc.photos.filter((photo) => {
     if (taken.has(photo.id)) return false;
     if (!photoOnStation(doc, photo, stationId)) return false;
     if (photo.originalFile?.uploadStatus !== 'verified') return false;
     if ((photo.originalFile.usabilityNote ?? '').includes('Not usable')) return false;
+    const got = photoTimeMs(photo.originalFile.receivedAt);
+    if (retakeAfter !== undefined && got !== undefined && got <= retakeAfter) return false;
     const captured = photoTimeMs(photo.originalFile?.capturedAt) ?? photoTimeMs(photo.exifDateTimeOriginal);
     const received = photoTimeMs(photo.originalFile?.receivedAt);
     if (captured === undefined || received === undefined) return false;
@@ -901,12 +906,14 @@ export function linkedPhotosForStep(
     if (canonicalStepId(id) === canonicalStep) continue;
     for (const photoId of state.consumedPhotoIds ?? []) taken.add(photoId);
   }
+  const retakeAfter = photoTimeMs(run.steps[canonicalStep]?.retakeAfter);
   return doc.photos.filter((photo) => {
     if (taken.has(photo.id)) return false;
     if (!photoOnStation(doc, photo, stationId)) return false;
     const received = photoTimeMs(photo.originalFile?.receivedAt);
     // Photos from before the run are not this run's; a photo with no record yet is in flight.
     if (start !== undefined && received !== undefined && received < start) return false;
+    if (retakeAfter !== undefined && received !== undefined && received <= retakeAfter) return false;
     return true;
   });
 }
@@ -1114,18 +1121,58 @@ export function retakeEvidenceWorkflow(
   if (!pair) return { progress, changed: false };
   const id = canonicalStepId(stepId);
   const step = pair.def.steps.find((item) => item.id === id);
-  const state = pair.run.steps[id];
-  if (!step || !state || normalizeStatus(state.status) !== 'evidence_failed') return { progress, changed: false };
-  const steps = {
+  if (!step) return { progress, changed: false };
+  const state = pair.run.steps[id] ?? initialStepState(step);
+  const status = normalizeStatus(state.status);
+  // A photo step can always be retaken: refused (evidence_failed or a refused newest photo,
+  // which leaves the status waiting), or done (by the app or by hand).
+  const photoStep = 'on' in step.complete && step.complete.on === 'photo.uploaded';
+  if (status !== 'evidence_failed' && !photoStep) return { progress, changed: false };
+  const steps: Record<string, StepState> = {
     ...pair.run.steps,
     [id]: mirrorLegacy({
       ...state,
       status: 'waiting_for_app',
       reason: undefined,
+      note: undefined,
+      seen: [],
+      consumedPhotoIds: [],
       completedBy: null,
+      completedAt: undefined,
+      retakeAfter: now,
     }),
   };
+  // Results that rest on the old photos are no longer trusted.
+  for (const dep of RETAKE_DEPENDS_ON[id] ?? []) {
+    const depState = steps[dep];
+    if (depState && isSettled(depState)) steps[dep] = mirrorLegacy({ ...depState, status: 'needs_recheck' });
+  }
   const run: WorkflowRun = { ...pair.run, steps, updatedAt: now };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+/** Save the three diameter tapes and the edge; ticks 'Tape the diameter'. The circle result re-checks. */
+export function saveCircleTapeWorkflow(
+  progress: WorkflowProgress,
+  diametersM: number[],
+  edge: 'inside' | 'outside',
+  now = new Date().toISOString(),
+): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const step = pair.def.steps.find((item) => item.id === 'tape-diameter');
+  if (!step) return { progress, changed: false };
+  if (diametersM.length < 3 || !diametersM.every((d) => Number.isFinite(d) && d > 0)) {
+    return { progress, notice: 'Type three diameters in metres, above 0.', changed: false };
+  }
+  const note = `Diameters ${diametersM.map((d) => d.toFixed(3)).join(', ')} m, ${edge} edge`;
+  const steps: Record<string, StepState> = {
+    ...pair.run.steps,
+    [step.id]: mirrorLegacy({ ...(pair.run.steps[step.id] ?? initialStepState(step)), status: 'ticked_by_you', note, completedBy: 'manual', completedAt: now }),
+  };
+  const result = steps['circle-result'];
+  if (result && isSettled(result)) steps['circle-result'] = mirrorLegacy({ ...result, status: 'needs_recheck' });
+  const run: WorkflowRun = { ...pair.run, steps, circleTape: { diametersM: diametersM.slice(0, 3), edge, savedAt: now }, updatedAt: now };
   return { progress: patchRun(progress, pair.def.id, run), changed: true };
 }
 

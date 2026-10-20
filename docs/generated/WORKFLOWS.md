@@ -5,64 +5,39 @@ Refresh with `npm run check:workflows -- --write`.
 
 ## Circle field test
 
-Ready. 12 steps.
+Ready. 13 steps.
 
-One phone, about an hour. Look from BAS01 toward BAS02. Left is left.
+Your own garden circle (about 12 m). One phone, about an hour. Look from BAS01 toward BAS02.
 
 ### 1. Gather the kit
 
 Phone, tapes, canes, sleeves, level, and the pole.
 
 - One iPhone. Rear camera, zoom 1×, held landscape. Same phone for every photo, including the calibration.
-- A tape that reaches 8 m clear. A laser, or a tape that reaches 10.5 m. A non-stretch line marked at 4.000 m.
-- A centre peg. Six canes for the circle. Two canes for the baseline. One cane for the calibration if you do not reuse a circle cane.
-- Sleeves from Print & fit markers, on a 60 mm dowel. Matte. Each sleeve’s own R. A spirit level and the phone pole, about 1 m.
+- A tape that reaches across the circle (about 12 m) clear. A laser, or a tape that reaches 15 m, for the camera positions.
+- One cane per edge point (Set-up, 12 by default). Two canes for the baseline. One cane for the calibration if you do not reuse an edge cane.
+- Sleeves from Print & fit markers (BAS01, BAS02, EDG01…), on a 60 mm dowel. Matte. Each sleeve’s own R. A spirit level and the phone pole, about 1 m.
 - Camera location off. Leave Offset A (mm) and Offset B (mm) at 0.
 
 Completes when: Tick by hand.
 
 Opens: —.
 
-### 2. Set out the circle
+### 2. Place the baseline points
 
-4.000 m from the peg, and 4.000 m from the cane before.
+Outside the circle, along it (tangential). At least half the diameter long.
 
-- Peg in the lawn. Line on the peg, 4.000 m to the stick axis. Plant CRC01 nearest the baseline.
-- Each next cane is 4.000 m from the peg and 4.000 m from the one before: CRC02, CRC03, CRC04, CRC05, CRC06.
-- Closing chord CRC06–CRC01 within 30 mm of 4.000 m, or walk them again.
-
-Completes when: Tick by hand.
-
-Opens: —.
-
-Diagram: circle-plan.
-
-### 3. Tape the two diameters
-
-CRC01–CRC04 and CRC02–CRC05 are 8.000 m.
-
-- Tape level, axis to axis, 8.000 m. Both diameters within 20 mm.
-- Then write radius σ 3 mm. Outside those limits, walk the sticks again. Do not write a larger σ.
+- Put BAS01 and BAS02 just outside the circle, side by side along its edge, about 2 m clear of it. The line BAS01–BAS02 runs along the circle, not towards its middle.
+- Length: the Set-up baseline (at least half the circle diameter: 6 m for a 12 m circle). Looking from BAS01 toward BAS02, the circle is on your left.
+- Plumb both canes (bubble, about 1°) and write each sleeve’s R and height.
 
 Completes when: Tick by hand.
 
 Opens: —.
 
-### 4. Place the baseline points
+Note: Baseline sleeve R, heights.
 
-BAS02 is 4.30 m from the peg. BAS01 is 8.000 m from BAS02.
-
-- From the peg through CRC01, 4.30 m is BAS02, about 0.30 m past CRC01. Write the distance you taped.
-- Baseline square to that line. From BAS02 back toward the peg mark 3.00 m. From that mark swing 5.00 m, and from BAS02 swing 4.00 m.
-- Through that side point, BAS01 is 8.000 m from BAS02.
-
-Completes when: Tick by hand.
-
-Opens: —.
-
-Note: Peg to BAS02 (aim 4.30 m).
-
-### 5. Tape the baseline both ways
+### 3. Tape the baseline both ways
 
 Sleeve to sleeve, level, then add R. Type the mean.
 
@@ -76,7 +51,7 @@ Opens: Menu → baseline.
 
 Note: Both pulls, level then +R.
 
-### 6. Laser check of the baseline
+### 4. Laser check of the baseline
 
 Same baseline, sleeve to sleeve. Do not type the laser.
 
@@ -89,13 +64,25 @@ Opens: —.
 
 Note: CHK-BASE laser.
 
-### 7. Plumb the canes and note heights
+### 5. Tape the diameter
 
-Bubble every cane. Write the height you measure.
+Three tapes across the circle, about 60° apart. Type them below.
 
-- Bubble CRC01–CRC06, BAS01, BAS02, and CAL. Middle of the bubble, about 1°. A 2° lean at 0.5 m sleeve height is 17 mm.
-- Write height to the middle of the paper. 0.5 m is a good target. Tick plumb only when the bubble passed.
-- The app has no box for sleeve R, height, or plumb. They stay in this note. Offsets stay 0.
+- Tape straight across the circle through the middle: the longest reading you can get each time. Then turn about 60° round the circle and tape again, and once more: three readings.
+- Keep to one edge of the border every time, inside or outside, and say which below. The edge canes go on that same edge.
+- Type the three readings in metres and tap Save diameters. They differ a little on a real circle; the app uses their mean and spread.
+
+Completes when: Tick by hand.
+
+Opens: —.
+
+### 6. Mark the edge points
+
+One sleeved cane per edge point, on the edge you taped, evenly round.
+
+- Plant EDG01, EDG02, … (Set-up, 12 by default) round the circle on the edge you taped, about evenly spaced: never more than 60° between neighbours, and all the way round.
+- Each cane carries its own sleeve from the garden marker set; the app finds them in the photos by their code.
+- Plumb every cane (bubble, about 1°). Write heights and sleeve R in the note.
 
 Completes when: Tick by hand.
 
@@ -103,12 +90,12 @@ Opens: —.
 
 Note: Heights, sleeve R, plumb.
 
-### 8. Calibration photo (focal length)
+### 7. Calibration photo (focal length)
 
 Measures the lens. Landscape, 1×, phone 4.0 m from the cane, sleeve in the middle.
 
 - What it is for: the app needs the lens’s real focal length in pixels. A sleeve of known size at a taped distance gives it.
-- 1. Plumb one sleeved cane (a circle cane will do). Stand with the front of the phone 4.0 m from the paper (the Set-up distance). Tape it level and write the reading.
+- 1. Plumb one sleeved cane (an edge cane will do). Stand with the front of the phone 4.0 m from the paper (the Set-up distance). Tape it level and write the reading.
 - 2. Hold the phone sideways (landscape) at 1×, at sleeve height, level. Cane in the middle of the frame, whole sleeve in view, seam turned away.
 - 3. Tap the sleeve to lock focus, then the shutter. One photo, in the in-app camera (the Take photos pill opens it).
 - After the shutter the photo fills the screen. Tap once anywhere on the sleeve. The app finds its top and bottom edge from the bands and draws two lines. If they sit on the paper ends, tap Save. If the app is unsure it asks you to tap the top edge, then the bottom edge.
@@ -125,64 +112,101 @@ Tap after the photo (sleeve height, not bearings):
 
 Note: Tape reading, phone front to paper (m).
 
-### 9. Camera position Left (8.00 / 8.00)
+### 8. Camera position 1 (BAS02 end)
 
-Landscape, 1×. Both ends, and CRC01 to CRC05.
+Outside the circle, about 6 m past the edge. Turn on the spot; each photo shares a cane with the one before.
 
-- Left, looking from BAS01 toward BAS02. 8.00 m / 8.00 m. Tape from the pole to the sleeve, level, and add R once.
-- Photo 1: both baseline ends, and CRC01, CRC02, CRC03, CRC04, CRC05. CRC06 does not fit.
-- Photo 2: turn, keep BAS02, add CRC06. Do not step. 1×, landscape, lens over the middle of the pole, then the bubble.
+- Stand outside the circle on the BAS02 end. Positions go round the circle so the cameras are on at least 3 sides.
+- Tape this position to BAS01 and to BAS02 (Set-up distances), level, pole to sleeve, add R once. The app places the camera from these two tapes.
+- Photo 1 and photo 2: landscape, 1×. Turn on the spot, do not step. Photo 2 keeps at least one cane from photo 1 in view (that is how the app points it). A baseline end in view helps but is not needed.
+- Taped positions stand on the circle side of the BAS01–BAS02 line, not behind it: two tapes from behind can be read on either side.
+- Each edge cane needs photos from two positions at least 30° apart. The Circle result step says which cane needs another photo.
 
-Completes when: photo.uploaded Left, 2 photos.
+Completes when: photo.uploaded Position 1, 2 photos.
 
-Opens: Camera at Left.
-
-Tap after the photo (bearings):
-- Photo 1: BAS01, BAS02, CRC01 (or Not in view), CRC02 (or Not in view), CRC03 (or Not in view), CRC04 (or Not in view), CRC05 (or Not in view).
-- Photo 2: BAS02, CRC06 (or Not in view).
-
-Diagram: stn01.
-
-Note: STN01 to BAS01 / BAS02.
-
-### 10. Camera position Right near (6.50 / 9.00)
-
-Outside the circle. Do not take CRC05. Do not photograph CRC04.
-
-- Right. 6.50 m from BAS01, 9.00 m from BAS02, outside the circle.
-- Photo 1: both baseline ends. No circle stick between them.
-- Photo 2: turn, keep BAS02. Take CRC02, CRC01, CRC06, CRC03. Do not take CRC05. It sits behind CRC03.
-- Do not photograph CRC04 from here.
-
-Completes when: photo.uploaded Right near, 2 photos.
-
-Opens: Camera at Right near.
+Opens: Camera at Position 1.
 
 Tap after the photo (bearings):
-- Photo 1: BAS01, BAS02.
-- Photo 2: BAS02, CRC02 (or Not in view), CRC01 (or Not in view), CRC06 (or Not in view), CRC03 (or Not in view).
+- Photo 1: BAS01 (or Not in view), BAS02 (or Not in view), EDG01 (or Not in view), EDG02 (or Not in view), EDG03 (or Not in view), EDG04 (or Not in view), EDG05 (or Not in view), EDG06 (or Not in view), EDG07 (or Not in view), EDG08 (or Not in view), EDG09 (or Not in view), EDG10 (or Not in view), EDG11 (or Not in view), EDG12 (or Not in view).
+- Photo 2: BAS01 (or Not in view), BAS02 (or Not in view), EDG01 (or Not in view), EDG02 (or Not in view), EDG03 (or Not in view), EDG04 (or Not in view), EDG05 (or Not in view), EDG06 (or Not in view), EDG07 (or Not in view), EDG08 (or Not in view), EDG09 (or Not in view), EDG10 (or Not in view), EDG11 (or Not in view), EDG12 (or Not in view).
 
-Note: STN02 to BAS01 / BAS02.
+Note: Position 1 to BAS01 / BAS02.
 
-### 11. Camera position Right far (10.50 / 10.50)
+### 9. Camera position 2 (far side, beyond BAS02)
 
-Required. Two stations are not a finished test.
+Outside the circle, about 6 m past the edge. Turn on the spot; each photo shares a cane with the one before.
 
-- Right. 10.50 m / 10.50 m. This station is required.
-- Photo 1: both baseline ends, and CRC01, CRC02, CRC03.
-- Photo 2: turn, keep BAS02. Add CRC06, CRC05, CRC04. Do not step.
+- Stand outside the circle on the far side, beyond BAS02. Positions go round the circle so the cameras are on at least 3 sides.
+- No tape needed here: the app places this position from the sleeves it sees. If Set-up has distances for it, tape them too.
+- Photo 1 and photo 2: landscape, 1×. Turn on the spot, do not step. Photo 2 keeps at least one cane from photo 1 in view (that is how the app points it). A baseline end in view helps but is not needed.
+- Taped positions stand on the circle side of the BAS01–BAS02 line, not behind it: two tapes from behind can be read on either side.
+- Each edge cane needs photos from two positions at least 30° apart. The Circle result step says which cane needs another photo.
 
-Completes when: photo.uploaded Right far, 2 photos.
+Completes when: photo.uploaded Position 2, 2 photos.
 
-Opens: Camera at Right far.
+Opens: Camera at Position 2.
 
 Tap after the photo (bearings):
-- Photo 1: BAS01, BAS02, CRC01 (or Not in view), CRC02 (or Not in view), CRC03 (or Not in view).
-- Photo 2: BAS02, CRC06 (or Not in view), CRC05 (or Not in view), CRC04 (or Not in view).
+- Photo 1: BAS01 (or Not in view), BAS02 (or Not in view), EDG01 (or Not in view), EDG02 (or Not in view), EDG03 (or Not in view), EDG04 (or Not in view), EDG05 (or Not in view), EDG06 (or Not in view), EDG07 (or Not in view), EDG08 (or Not in view), EDG09 (or Not in view), EDG10 (or Not in view), EDG11 (or Not in view), EDG12 (or Not in view).
+- Photo 2: BAS01 (or Not in view), BAS02 (or Not in view), EDG01 (or Not in view), EDG02 (or Not in view), EDG03 (or Not in view), EDG04 (or Not in view), EDG05 (or Not in view), EDG06 (or Not in view), EDG07 (or Not in view), EDG08 (or Not in view), EDG09 (or Not in view), EDG10 (or Not in view), EDG11 (or Not in view), EDG12 (or Not in view).
 
-Note: STN03 to BAS01 / BAS02.
+Note: Position 2 to BAS01 / BAS02.
 
-### 12. Save to OneDrive
+### 10. Camera position 3 (far side, beyond BAS01)
+
+Outside the circle, about 6 m past the edge. Turn on the spot; each photo shares a cane with the one before.
+
+- Stand outside the circle on the far side, beyond BAS01. Positions go round the circle so the cameras are on at least 3 sides.
+- No tape needed here: the app places this position from the sleeves it sees. If Set-up has distances for it, tape them too.
+- Photo 1 and photo 2: landscape, 1×. Turn on the spot, do not step. Photo 2 keeps at least one cane from photo 1 in view (that is how the app points it). A baseline end in view helps but is not needed.
+- Taped positions stand on the circle side of the BAS01–BAS02 line, not behind it: two tapes from behind can be read on either side.
+- Each edge cane needs photos from two positions at least 30° apart. The Circle result step says which cane needs another photo.
+
+Completes when: photo.uploaded Position 3, 2 photos.
+
+Opens: Camera at Position 3.
+
+Tap after the photo (bearings):
+- Photo 1: BAS01 (or Not in view), BAS02 (or Not in view), EDG01 (or Not in view), EDG02 (or Not in view), EDG03 (or Not in view), EDG04 (or Not in view), EDG05 (or Not in view), EDG06 (or Not in view), EDG07 (or Not in view), EDG08 (or Not in view), EDG09 (or Not in view), EDG10 (or Not in view), EDG11 (or Not in view), EDG12 (or Not in view).
+- Photo 2: BAS01 (or Not in view), BAS02 (or Not in view), EDG01 (or Not in view), EDG02 (or Not in view), EDG03 (or Not in view), EDG04 (or Not in view), EDG05 (or Not in view), EDG06 (or Not in view), EDG07 (or Not in view), EDG08 (or Not in view), EDG09 (or Not in view), EDG10 (or Not in view), EDG11 (or Not in view), EDG12 (or Not in view).
+
+Note: Position 3 to BAS01 / BAS02.
+
+### 11. Camera position 4 (BAS01 end)
+
+Outside the circle, about 6 m past the edge. Turn on the spot; each photo shares a cane with the one before.
+
+- Stand outside the circle on the BAS01 end. Positions go round the circle so the cameras are on at least 3 sides.
+- Tape this position to BAS01 and to BAS02 (Set-up distances), level, pole to sleeve, add R once. The app places the camera from these two tapes.
+- Photo 1 and photo 2: landscape, 1×. Turn on the spot, do not step. Photo 2 keeps at least one cane from photo 1 in view (that is how the app points it). A baseline end in view helps but is not needed.
+- Taped positions stand on the circle side of the BAS01–BAS02 line, not behind it: two tapes from behind can be read on either side.
+- Each edge cane needs photos from two positions at least 30° apart. The Circle result step says which cane needs another photo.
+
+Completes when: photo.uploaded Position 4, 2 photos.
+
+Opens: Camera at Position 4.
+
+Tap after the photo (bearings):
+- Photo 1: BAS01 (or Not in view), BAS02 (or Not in view), EDG01 (or Not in view), EDG02 (or Not in view), EDG03 (or Not in view), EDG04 (or Not in view), EDG05 (or Not in view), EDG06 (or Not in view), EDG07 (or Not in view), EDG08 (or Not in view), EDG09 (or Not in view), EDG10 (or Not in view), EDG11 (or Not in view), EDG12 (or Not in view).
+- Photo 2: BAS01 (or Not in view), BAS02 (or Not in view), EDG01 (or Not in view), EDG02 (or Not in view), EDG03 (or Not in view), EDG04 (or Not in view), EDG05 (or Not in view), EDG06 (or Not in view), EDG07 (or Not in view), EDG08 (or Not in view), EDG09 (or Not in view), EDG10 (or Not in view), EDG11 (or Not in view), EDG12 (or Not in view).
+
+Note: Position 4 to BAS01 / BAS02.
+
+### 12. Circle result
+
+The app fits the circle and compares it with your tape.
+
+- Green: the fitted diameter agrees with the tape within its uncertainty and within the limit (60 mm). Amber: close. Red: it does not agree.
+- Not a circle: the points do not sit on one circle; check the canes are on the edge you taped. Inconclusive or weak: the geometry is not good enough yet; do what the lines below say, then look again.
+- Tick when you have read the result.
+
+Completes when: Tick by hand.
+
+Opens: —.
+
+Note: Result.
+
+### 13. Save to OneDrive
 
 Wait until the file is on OneDrive.
 

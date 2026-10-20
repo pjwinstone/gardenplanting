@@ -83,12 +83,12 @@ describe('row pills and Confirm', () => {
   it('Take photos opens the camera for that camera position, not the point-type chooser', () => {
     let progress = startWorkflow(emptyProgress(), 'circle-field-test', NOW).progress;
     progress = confirmSetupWorkflow(progress, undefined, NOW).progress;
-    progress = scrollWorkflowToStep(progress, 'camera-left', NOW).progress;
+    progress = scrollWorkflowToStep(progress, 'camera-1', NOW).progress;
     const doc = commitWorkflow(emptyDocument('Circle day'), progress);
     const result = handleWorkflowCommand('workflow-go', doc, {
-      getAttribute: (name: string) => (name === 'data-step' ? 'camera-left' : null),
+      getAttribute: (name: string) => (name === 'data-step' ? 'camera-1' : null),
     });
-    expect(result.link).toEqual({ to: 'camera', stepId: 'camera-left', cameraPositionId: 'Left' });
+    expect(result.link).toEqual({ to: 'camera', stepId: 'camera-1', cameraPositionId: 'Position 1' });
   });
 
   it('Confirm then a settle-and-re-render keeps the new step', () => {

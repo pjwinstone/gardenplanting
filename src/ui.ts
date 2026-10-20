@@ -112,7 +112,7 @@ import {
   type TapView,
 } from './workflows/guided/photoTaps';
 import { detectSleeveFromOriginal, scanSleevesFromOriginal } from './workflows/guided/sleeveImage';
-import { GARDEN_MARKER_IDS } from './workflows/guided/markerSet';
+import { markerIdsFor } from './workflows/guided/markerSet';
 import { cameraPositionHint, checkCameraPositionPhoto, ensureCameraPositionPoint } from './workflows/guided/cameraCapture';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
@@ -1144,12 +1144,12 @@ async function runAutoScan(photo: Photo): Promise<void> {
   const photoId = photo.id;
   let result: Awaited<ReturnType<typeof scanSleevesFromOriginal>>;
   try {
-    result = await scanSleevesFromOriginal(photo, GARDEN_MARKER_IDS);
+    result = await scanSleevesFromOriginal(photo, markerIdsFor(state.doc));
   } catch {
     result = { sleeves: [], duplicates: [], partial: false, ms: 0, scaleX: 1, scaleY: 1, unavailable: 'Could not scan the full-size photo.' };
   }
   if (!tapDraft || tapDraft.plan.photoId !== photoId) return;
-  tapDraft = applyAutoSleeves(tapDraft, result);
+  tapDraft = applyAutoSleeves(tapDraft, result, state.doc);
   rerenderTaps();
 }
 

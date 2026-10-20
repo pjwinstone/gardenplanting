@@ -17,17 +17,17 @@ import type { GardenDocument } from '../src/model';
 
 const plan: PhotoTapPlan = {
   photoId: 'ph-1',
-  stepId: 'camera-left',
+  stepId: 'camera-1',
   stepTitle: 'Camera position Left',
-  cameraPositionId: 'Left',
+  cameraPositionId: 'Position 1',
   use: 'bearings',
   photoNumber: 1,
   photoCount: 2,
   targets: [
     { id: 'BAS01', label: 'BAS01' },
     { id: 'BAS02', label: 'BAS02' },
-    { id: 'CRC01', label: 'CRC01', optional: true },
-    { id: 'CRC03', label: 'CRC03', optional: true },
+    { id: 'EDG01', label: 'EDG01', optional: true },
+    { id: 'EDG03', label: 'EDG03', optional: true },
   ],
 };
 
@@ -53,13 +53,13 @@ describe('auto-filled taps', () => {
       scaleX: 4,
       scaleY: 4,
     });
-    // DAC (CRC05) is not a target of this photo: ignored.
-    expect(d.taps.map((t) => t.pointId)).toEqual(['BAS01', 'BAS02', 'CRC03']);
+    // DAC (EDG05) is not a target of this photo: ignored.
+    expect(d.taps.map((t) => t.pointId)).toEqual(['BAS01', 'BAS02', 'EDG03']);
     expect(d.taps[0]).toMatchObject({ px: 250.2, py: 372.5 });
-    expect(d.auto!.pins.map((p) => p.label)).toEqual(['BAS01 · 315', 'BAS02 · 36E', 'CRC03 · 8A3']);
+    expect(d.auto!.pins.map((p) => p.label)).toEqual(['BAS01 · 315', 'BAS02 · 36E', 'EDG03 · 8A3']);
     expect(d.auto!.pins.find((p) => p.code === '8A3')!.record.notForCal).toBe(true);
     expect(canSaveTaps(d)).toBe(true);
-    expect(tapBarView(d).prompt).toBe('Found BAS01, BAS02, CRC03. Tap CRC01 (3 of 4), or Save. Tap a pin to fix it.');
+    expect(tapBarView(d).prompt).toBe('Found BAS01, BAS02, EDG03. Tap EDG01 (3 of 4), or Save. Tap a pin to fix it.');
   });
 
   it('tap near a pin fixes it; a tap elsewhere adds the missed cane', () => {
@@ -69,7 +69,7 @@ describe('auto-filled taps', () => {
     expect(d.auto!.pins.find((p) => p.targetId === 'BAS01')!.moved).toBe(true);
     expect(d.taps).toHaveLength(2);
     d = placeTap(d, 100, 380, 24);
-    expect(d.taps.find((t) => t.pointId === 'CRC01')).toMatchObject({ px: 100, py: 380 });
+    expect(d.taps.find((t) => t.pointId === 'EDG01')).toMatchObject({ px: 100, py: 380 });
     // Undo removes the last target's tap, auto or not.
     d = undoTap(d);
     expect(d.taps.map((t) => t.pointId)).toEqual(['BAS01', 'BAS02']);

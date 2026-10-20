@@ -260,17 +260,23 @@ describe('marker sleeves', () => {
     expect(minDistance).toBeGreaterThanOrEqual(4);
   });
 
-  it('assigns circle rods codes at least distance 6, with no 4-band burst pair', () => {
+  it('assigns the garden sleeves: first eight at least distance 6, all at least 4, no 4-band burst pair', () => {
     const issued = new Set(PUBLISHED.split(' '));
     expect(CIRCLE_SLEEVES).toEqual([
       { point: 'BAS01', id: '315' },
       { point: 'BAS02', id: '36E' },
-      { point: 'CRC01', id: '459' },
-      { point: 'CRC02', id: '6BA' },
-      { point: 'CRC03', id: '8A3' },
-      { point: 'CRC04', id: '952' },
-      { point: 'CRC05', id: 'DAC' },
-      { point: 'CRC06', id: 'EC5' },
+      { point: 'EDG01', id: '459' },
+      { point: 'EDG02', id: '6BA' },
+      { point: 'EDG03', id: '8A3' },
+      { point: 'EDG04', id: '952' },
+      { point: 'EDG05', id: 'DAC' },
+      { point: 'EDG06', id: 'EC5' },
+      { point: 'EDG07', id: '2B4' },
+      { point: 'EDG08', id: '389' },
+      { point: 'EDG09', id: '51C' },
+      { point: 'EDG10', id: '8CA' },
+      { point: 'EDG11', id: 'A3B' },
+      { point: 'EDG12', id: 'DB7' },
     ]);
     const words = CIRCLE_SLEEVES.map((sleeve) => {
       expect(issued.has(sleeve.id)).toBe(true);
@@ -278,7 +284,7 @@ describe('marker sleeves', () => {
     });
     for (let i = 0; i < words.length; i++) {
       for (let j = i + 1; j < words.length; j++) {
-        expect(hamming(words[i], words[j])).toBeGreaterThanOrEqual(6);
+        expect(hamming(words[i], words[j])).toBeGreaterThanOrEqual(i < 8 && j < 8 ? 6 : 4);
         expect(differsOnlyInFourBandBurst(words[i], words[j])).toBe(false);
       }
     }
@@ -288,12 +294,7 @@ describe('marker sleeves', () => {
     expect(CIRCLE_SLEEVES.map((sleeve) => sleeve.point)).toEqual([
       'BAS01',
       'BAS02',
-      'CRC01',
-      'CRC02',
-      'CRC03',
-      'CRC04',
-      'CRC05',
-      'CRC06',
+      ...Array.from({ length: 12 }, (_, i) => `EDG${String(i + 1).padStart(2, '0')}`),
     ]);
     const seen = new Set<string>();
     for (const sleeve of CIRCLE_SLEEVES) {
@@ -332,7 +333,9 @@ describe('marker sleeves', () => {
 function assertRenderedSleeves(prefix: string, pdf: string, sleeves: typeof CIRCLE_SLEEVES) {
   execFileSync('pdftoppm', ['-r', '300', pdf, prefix], { stdio: 'ignore' });
   sleeves.forEach((sleeve, index) => {
-    const page = parsePpm(readFileSync(`${prefix}-${index + 1}.ppm`));
+    // pdftoppm pads page numbers to the width of the page count (all-01.ppm for 10+ pages).
+    const width = String(sleeves.length).length;
+    const page = parsePpm(readFileSync(`${prefix}-${String(index + 1).padStart(width, '0')}.ppm`));
     expect(Math.abs(page.width - (210 / 25.4) * 300)).toBeLessThanOrEqual(2);
     expect(Math.abs(page.height - (297 / 25.4) * 300)).toBeLessThanOrEqual(2);
     expect(readPixels(page)).toBe(expectedBits(sleeve.id));

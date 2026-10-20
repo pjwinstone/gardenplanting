@@ -23,7 +23,7 @@ describe('Set-up step on the roller', () => {
     const next = setupValuesWithDraft(base, { circle_diameter_m: '7,99', 'tolerances_mm.baseline': '25' });
     expect(next?.circle_diameter_m).toBeCloseTo(7.99);
     expect(next?.tolerances_mm.baseline).toBe(25);
-    expect(base.circle_diameter_m).toBe(8);
+    expect(base.circle_diameter_m).toBe(12);
     expect(setupValuesWithDraft(base, { circle_diameter_m: 'abc' })).toBeNull();
     expect(setupValuesWithDraft(base, { circle_diameter_m: '0' })).toBeNull();
   });

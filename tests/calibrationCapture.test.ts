@@ -28,7 +28,7 @@ describe('calibration photo', () => {
     expect(hint).toContain('4.0 m');
     expect(hint).toMatch(/landscape, 1×/);
     expect(hint).toMatch(/whole sleeve/);
-    expect(cameraPositionHint(emptyDocument('x'), 'Right near')).toContain('6.50 m to BAS01');
+    expect(cameraPositionHint(emptyDocument('x'), 'Position 1')).toContain('14.60 m to BAS01');
   });
 
   it('phone held upright is portrait even if the frame came out wide', () => {

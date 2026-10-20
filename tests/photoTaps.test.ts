@@ -64,7 +64,7 @@ const photoSteps = circleFieldTest.steps.filter((s) => 'on' in s.complete && s.c
 
 describe('tap screen after each guided photo', () => {
   it('every photo step defines its own taps and opens the camera, never the + Point dialog', () => {
-    expect(photoSteps.map((s) => s.id)).toEqual(['camera-calibration', 'camera-left', 'camera-right-near', 'camera-right-far']);
+    expect(photoSteps.map((s) => s.id)).toEqual(['camera-calibration', 'camera-1', 'camera-2', 'camera-3', 'camera-4']);
     for (const step of photoSteps) {
       expect(step.photoTaps, step.id).toBeDefined();
       expect(step.link.to, step.id).toBe('camera');
@@ -154,11 +154,11 @@ describe('tap screen after each guided photo', () => {
     expect(tapBarView(draft).prompt).toMatch(/^The full-size photo is no longer on this phone\. Tap the top edge/);
   });
 
-  const camera: Array<[string, string[][]]> = [
-    ['camera-left', [['BAS01', 'BAS02', 'CRC01', 'CRC02', 'CRC03', 'CRC04', 'CRC05'], ['BAS02', 'CRC06']]],
-    ['camera-right-near', [['BAS01', 'BAS02'], ['BAS02', 'CRC02', 'CRC01', 'CRC06', 'CRC03']]],
-    ['camera-right-far', [['BAS01', 'BAS02', 'CRC01', 'CRC02', 'CRC03'], ['BAS02', 'CRC06', 'CRC05', 'CRC04']]],
-  ];
+  const EDGES = Array.from({ length: 12 }, (_, i) => `EDG${String(i + 1).padStart(2, '0')}`);
+  const camera: Array<[string, string[][]]> = ['camera-1', 'camera-2', 'camera-3', 'camera-4'].map((id) => [
+    id,
+    [['BAS01', 'BAS02', ...EDGES], ['BAS01', 'BAS02', ...EDGES]],
+  ]);
   for (const [stepId, perPhoto] of camera) {
     it(`${stepId}: photo 1 and photo 2 ask for the canes the step names`, () => {
       let doc = atStep(stepId);
@@ -172,34 +172,33 @@ describe('tap screen after each guided photo', () => {
       const plan2 = photoTapPlan(second.doc, second.photoId)!;
       expect(plan2.photoNumber).toBe(2);
       expect(plan2.targets.map((t) => t.id)).toEqual(perPhoto[1]);
-      // Baseline ends are required; circle canes can be passed.
-      for (const t of [...plan1.targets, ...plan2.targets]) expect(!!t.optional).toBe(t.id.startsWith('CRC'));
+      // Every target can be passed (no baseline end needed in each photo); Save needs one tap.
+      for (const t of [...plan1.targets, ...plan2.targets]) expect(t.optional).toBe(true);
     });
   }
 
-  it('camera position: baseline ends must be tapped, canes can be Not in view, Undo steps back', () => {
-    const shot = takePhoto(atStep('camera-left'), 'camera-left');
+  it('camera position: no baseline end needed, everything can be Not in view, Save needs one tap, Undo steps back', () => {
+    const shot = takePhoto(atStep('camera-1'), 'camera-1');
     let draft = startTapDraft(photoTapPlan(shot.doc, shot.photoId)!);
-    expect(tapBarView(draft).prompt).toBe('Tap BAS01 (1 of 7)');
-    expect(tapBarView(draft).secondary).toBeUndefined();
-    draft = placeTap(draft, 10, 300);
-    draft = placeTap(draft, 600, 300);
-    expect(nextTapTarget(draft)?.id).toBe('CRC01');
-    expect(canSaveTaps(draft)).toBe(true);
+    expect(tapBarView(draft).prompt).toBe('Tap BAS01 (1 of 14)');
     expect(tapBarView(draft).secondary).toBe('Not in view');
+    expect(canSaveTaps(draft)).toBe(false);
     draft = skipTap(draft);
-    expect(tapBarView(draft).prompt).toBe('Tap CRC02 (4 of 7)');
+    draft = skipTap(draft);
+    expect(nextTapTarget(draft)?.id).toBe('EDG01');
+    expect(canSaveTaps(draft)).toBe(false);
+    draft = placeTap(draft, 600, 300);
+    expect(canSaveTaps(draft)).toBe(true);
+    expect(tapBarView(draft).prompt).toBe('Tap EDG02 (4 of 14)');
     draft = undoTap(draft);
-    expect(nextTapTarget(draft)?.id).toBe('CRC01');
-    draft = undoTap(draft);
-    expect(nextTapTarget(draft)?.id).toBe('BAS02');
+    expect(nextTapTarget(draft)?.id).toBe('EDG01');
     expect(canSaveTaps(draft)).toBe(false);
   });
 
   it('camera position taps are stored as clicks on the garden point ids', () => {
     let base = emptyDocument('Circle day');
     base = { ...base, points: [...base.points, { id: 'P-BAS01', kind: 'BASE', label: 'BAS01' } as never] };
-    const shot = takePhoto(atStep('camera-right-near', base), 'camera-right-near');
+    const shot = takePhoto(atStep('camera-2', base), 'camera-2');
     let draft = startTapDraft(photoTapPlan(shot.doc, shot.photoId)!);
     draft = placeTap(draft, 100, 200);
     draft = placeTap(draft, 500, 210);
@@ -212,7 +211,7 @@ describe('tap screen after each guided photo', () => {
   });
 
   it('a photo not on a guided step keeps the old screen (no plan)', () => {
-    const doc = atStep('camera-left');
+    const doc = atStep('camera-1');
     const ensured = ensureCameraPositionPoint(doc, 'Shed corner');
     const appended = appendPhotoToPoint(ensured.doc, ensured.pointId, { thumbnailDataUrl: THUMB, width: 640, height: 480 });
     expect(photoTapPlan(appended.doc, appended.doc.photos.at(-1)!.id)).toBeUndefined();
@@ -221,7 +220,7 @@ describe('tap screen after each guided photo', () => {
 
 describe('roller Next / Later only move the cursor', () => {
   it('moving onto a photo step or Save baseline opens nothing by itself', () => {
-    for (const from of ['plumb-canes', 'camera-calibration', 'camera-left', 'camera-right-near', 'laser-check-baseline', 'place-baseline-points']) {
+    for (const from of ['mark-edge-points', 'camera-calibration', 'camera-1', 'camera-2', 'laser-check-baseline', 'place-baseline-points']) {
       const progress = readProgress(atStep(from));
       const move = advanceWorkflow(progress, NOW);
       expect(move.changed, from).toBe(true);

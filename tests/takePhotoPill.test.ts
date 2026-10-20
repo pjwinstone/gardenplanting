@@ -45,9 +45,10 @@ describe('Take photos pill goes straight to the camera', () => {
   it('each camera step pill carries its camera position id; Save baseline goes to baseline save', () => {
     const cases: Array<[string, string]> = [
       ['camera-calibration', 'Calibration'],
-      ['camera-left', 'Left'],
-      ['camera-right-near', 'Right near'],
-      ['camera-right-far', 'Right far'],
+      ['camera-1', 'Position 1'],
+      ['camera-2', 'Position 2'],
+      ['camera-3', 'Position 3'],
+      ['camera-4', 'Position 4'],
     ];
     for (const [stepId, cameraPositionId] of cases) {
       const result = handleWorkflowCommand('workflow-go', atStep(stepId), pill(stepId));
