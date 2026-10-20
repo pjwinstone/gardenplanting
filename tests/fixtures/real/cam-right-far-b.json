@@ -1,0 +1,8 @@
+{
+  "image": "cam-right-far-b.pgm",
+  "sleeves": [
+    { "id": "315", "axisX": 597.3, "midY": 129.6, "bandPx": 3.21 },
+    { "id": "36E", "axisX": 2452.3, "midY": 188.8, "bandPx": 3.79 }
+  ],
+  "note": "Paul's CAM-RIGHT-FAR run, 2026-10-20, second photo; 36E beside a white window frame (a wrong silhouette at x 2487 must not win). Rows 1300-1759 of the original, full width."
+}
