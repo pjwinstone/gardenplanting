@@ -238,6 +238,22 @@ export interface PhotoOriginalFile {
   uploadError?: string;
 }
 
+export interface AutoSleeveRecord {
+  /** Sleeve code, e.g. '315'. */
+  id: string;
+  /** Survey point the ID is assigned to, e.g. 'BAS01'. */
+  pointName: string;
+  /** Sleeve axis at mid-code height, full-res px (x sub-pixel). */
+  axisXFullPx: number;
+  midYFullPx: number;
+  tiltDeg: number;
+  bandPx: number;
+  /** Bands under 7 px: the ray can be used, the height / fx cannot. */
+  notForCal: boolean;
+  confidence: number;
+  confirmed: boolean;
+}
+
 export interface MeasureDetection {
   /** 'auto': found from the bands and accepted. 'manual': user tapped the edges (detection unsure or unavailable). */
   method: 'auto' | 'manual';
@@ -285,6 +301,11 @@ export interface Photo {
   tapsSavedAt?: string;
   /** How SLEEVE-TOP / SLEEVE-BOTTOM in measureTaps were found (calibration photo). */
   measureDetection?: MeasureDetection;
+  /**
+   * Sleeves found by the whole-photo scan (docs/marker-detection.md) on a camera-position photo,
+   * in full-resolution pixels. `confirmed` is false when the user moved or removed that pin.
+   */
+  autoSleeves?: AutoSleeveRecord[];
   /** Baseline whose ends were marked in this frame (sighting). */
   sightedBaselineId?: string;
   exifDateTimeOriginal?: string;

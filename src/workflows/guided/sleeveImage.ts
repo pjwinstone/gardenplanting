@@ -7,6 +7,8 @@
 import type { Photo } from '../../model';
 import { getAppPhotoQueue } from '../../photoSync';
 import { detectSleeve, greyFromRgba, type SleeveDetection } from './sleeveDetect';
+import { scanSleeves, type ScanResult, type ScannedSleeve } from './sleeveScan';
+import type { ScanReply, ScanRequest } from './sleeveScan.worker';
 
 export interface FullResDetection {
   detection?: SleeveDetection;
@@ -64,4 +66,92 @@ export async function detectSleeveFromOriginal(photo: Photo, tapPreviewX: number
   } finally {
     bitmap.close();
   }
+}
+
+export interface FullResScan {
+  sleeves: ScannedSleeve[];
+  duplicates: string[];
+  partial: boolean;
+  ms: number;
+  /** Full-image pixels per preview pixel. */
+  scaleX: number;
+  scaleY: number;
+  unavailable?: string;
+}
+
+/** Rows per tile when turning the bitmap into grey: only one tile of RGBA exists at a time. */
+const TILE_ROWS = 256;
+
+/**
+ * Whole-photo scan of the full-size original (docs/marker-detection.md). One bitmap is decoded,
+ * checked against the preview (same picture, same way up, else `unavailable`), turned into an
+ * 8-bit grey image tile by tile and closed; the grey image goes to a Web Worker.
+ */
+export async function scanSleevesFromOriginal(photo: Photo, markerIds: string[], budgetMs?: number): Promise<FullResScan> {
+  const none = (unavailable: string, scaleX = 1, scaleY = 1): FullResScan => ({ sleeves: [], duplicates: [], partial: false, ms: 0, scaleX, scaleY, unavailable });
+  const record = await getAppPhotoQueue().get(photo.id).catch(() => undefined);
+  if (!record?.blob) return none('The full-size photo is no longer on this phone.');
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(record.blob, { imageOrientation: 'from-image' } as ImageBitmapOptions);
+  } catch {
+    return none('Could not open the full-size photo.');
+  }
+  let W = 0;
+  let H = 0;
+  let grey: Uint8ClampedArray;
+  let scaleX = 1;
+  let scaleY = 1;
+  try {
+    W = bitmap.width;
+    H = bitmap.height;
+    scaleX = W / Math.max(1, photo.width);
+    scaleY = H / Math.max(1, photo.height);
+    if (!originalMatchesPreview(W, H, photo.width, photo.height)) {
+      return none('The full-size photo does not line up with the preview.', scaleX, scaleY);
+    }
+    const rows = Math.min(TILE_ROWS, H);
+    const canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(W, rows) : Object.assign(document.createElement('canvas'), { width: W, height: rows });
+    const ctx = canvas.getContext('2d', { willReadFrequently: true } as CanvasRenderingContext2DSettings) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+    if (!ctx) return none('No canvas to read the photo.', scaleX, scaleY);
+    grey = new Uint8ClampedArray(W * H);
+    for (let y0 = 0; y0 < H; y0 += rows) {
+      const h = Math.min(rows, H - y0);
+      ctx.clearRect(0, 0, W, rows);
+      ctx.drawImage(bitmap, 0, y0, W, h, 0, 0, W, h);
+      const data = ctx.getImageData(0, 0, W, h).data;
+      for (let i = 0, j = 0, o = y0 * W; i < W * h; i += 1, j += 4) grey[o + i] = 0.299 * data[j] + 0.587 * data[j + 1] + 0.114 * data[j + 2];
+    }
+  } finally {
+    bitmap.close();
+  }
+  const result = await runScan({ width: W, height: H, grey, markerIds, budgetMs });
+  return { sleeves: result.sleeves, duplicates: result.duplicates, partial: result.partial, ms: result.ms, scaleX, scaleY };
+}
+
+/** In a Web Worker when the platform has one; on the main thread otherwise. */
+function runScan(req: ScanRequest): Promise<ScanResult> {
+  const inline = () => scanSleeves({ width: req.width, height: req.height, grey: req.grey }, { markerIds: req.markerIds, budgetMs: req.budgetMs });
+  if (typeof Worker === 'undefined') return Promise.resolve(inline());
+  return new Promise<ScanResult>((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new Worker(new URL('./sleeveScan.worker.ts', import.meta.url), { type: 'module' });
+    } catch {
+      resolve(inline());
+      return;
+    }
+    const done = () => worker.terminate();
+    worker.onmessage = (ev: MessageEvent<ScanReply>) => {
+      done();
+      if (ev.data.ok) resolve(ev.data.result);
+      else reject(new Error(ev.data.error));
+    };
+    worker.onerror = () => {
+      done();
+      // The image was transferred, so it cannot be scanned here as well.
+      reject(new Error('The sleeve scan stopped.'));
+    };
+    worker.postMessage(req, [req.grey.buffer]);
+  });
 }

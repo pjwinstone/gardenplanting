@@ -6,9 +6,11 @@
  * Pure functions only, so tests can walk every photo step without a DOM.
  */
 
-import type { GardenDocument, MeasureDetection, Photo, PhotoClick } from '../../model';
+import type { AutoSleeveRecord, GardenDocument, MeasureDetection, Photo, PhotoClick } from '../../model';
 import { MIN_CONFIDENCE, type SleeveDetection } from './sleeveDetect';
 import { workflowById } from './definitions';
+import { pointForMarkerId } from './markerSet';
+import type { ScannedSleeve } from './sleeveScan';
 import { nameMatchesStation, readProgress } from './engine';
 import type { PhotoTapTarget, StepPhotoTaps, WorkflowDefinition, WorkflowStep } from './types';
 
@@ -43,7 +45,35 @@ export interface PhotoTapDraft {
   /** Targets passed with "Not in view". */
   skipped: string[];
   detection?: DraftDetection;
+  /** Whole-photo sleeve scan on a camera-position photo (docs/marker-detection.md). */
+  auto?: DraftAutoScan;
 }
+
+/** One sleeve the scan found, as a pin on the preview. */
+export interface AutoPin {
+  /** Target id (survey point name), e.g. 'BAS01'. */
+  targetId: string;
+  /** Sleeve code, e.g. '315'. */
+  code: string;
+  /** "BAS01 · 315" */
+  label: string;
+  px: number;
+  py: number;
+  /** The user moved this pin (tap to fix): it is no longer the scan's answer. */
+  moved: boolean;
+  record: AutoSleeveRecord;
+}
+
+export interface DraftAutoScan {
+  state: 'finding' | 'done' | 'unavailable';
+  pins: AutoPin[];
+  /** IDs seen more than once: left for manual taps. */
+  duplicates: string[];
+  note?: string;
+}
+
+/** A tap within this many preview px of a pin moves that pin (tap to fix). */
+export const FIX_RADIUS_PX = 24;
 
 function stationOf(step: WorkflowStep): string | undefined {
   return 'on' in step.complete && step.complete.on === 'photo.uploaded' ? step.complete.stationId : undefined;
@@ -190,6 +220,70 @@ export function applySleeveDetection(
   };
 }
 
+/** A camera-position photo with no taps yet: the UI should run the whole-photo scan. */
+export function needsAutoScan(draft: PhotoTapDraft): boolean {
+  return draft.plan.use === 'bearings' && !draft.auto && draft.taps.length === 0 && draft.skipped.length === 0;
+}
+
+export function beginAutoScan(draft: PhotoTapDraft): PhotoTapDraft {
+  return { ...draft, auto: { state: 'finding', pins: [], duplicates: [] } };
+}
+
+/**
+ * Pre-fill the taps from the scan. Only sleeves whose ID belongs to one of this photo's targets
+ * are used; each becomes the tap for that target, at the axis at mid-code height.
+ * `scaleX/scaleY` are full-image pixels per preview pixel.
+ */
+export function applyAutoSleeves(
+  draft: PhotoTapDraft,
+  result: { sleeves?: ScannedSleeve[]; duplicates?: string[]; scaleX: number; scaleY: number; unavailable?: string },
+): PhotoTapDraft {
+  if (draft.auto?.state !== 'finding') return draft;
+  if (result.unavailable || !(result.scaleX > 0 && result.scaleY > 0)) {
+    return { ...draft, auto: { state: 'unavailable', pins: [], duplicates: [], note: result.unavailable } };
+  }
+  const targets = new Set(draft.plan.targets.map((t) => t.id));
+  const pins: AutoPin[] = [];
+  for (const s of result.sleeves ?? []) {
+    const point = pointForMarkerId(s.id);
+    if (!point || !targets.has(point) || pins.some((p) => p.targetId === point)) continue;
+    if (draft.taps.some((t) => t.pointId === point)) continue;
+    const record: AutoSleeveRecord = {
+      id: s.id,
+      pointName: point,
+      axisXFullPx: s.axisX,
+      midYFullPx: s.midY,
+      tiltDeg: s.tiltDeg,
+      bandPx: s.bandPx,
+      notForCal: s.notForCal,
+      confidence: s.confidence,
+      confirmed: true,
+    };
+    pins.push({ targetId: point, code: s.id, label: `${point} · ${s.id}`, px: s.axisX / result.scaleX, py: s.midY / result.scaleY, moved: false, record });
+  }
+  // Taps and pins follow the target order, so saved clicks keep the step's order.
+  const order = draft.plan.targets.map((t) => t.id);
+  pins.sort((a, b) => order.indexOf(a.targetId) - order.indexOf(b.targetId));
+  const taps = [...draft.taps, ...pins.map((p) => ({ pointId: p.targetId, px: p.px, py: p.py }))]
+    .sort((a, b) => order.indexOf(a.pointId) - order.indexOf(b.pointId));
+  const duplicates = (result.duplicates ?? []).filter((id) => {
+    const point = pointForMarkerId(id);
+    return point && targets.has(point);
+  });
+  return { ...draft, taps, auto: { state: 'done', pins, duplicates } };
+}
+
+/** The pin (tap) within FIX_RADIUS_PX of a point, nearest first. */
+function nearTap(draft: PhotoTapDraft, px: number, py: number, radius: number): PhotoClick | undefined {
+  let best: PhotoClick | undefined;
+  let bd = radius;
+  for (const tap of draft.taps) {
+    const d = Math.hypot(tap.px - px, tap.py - py);
+    if (d <= bd) { bd = d; best = tap; }
+  }
+  return best;
+}
+
 /** The next target to tap, or undefined when every target is tapped or passed. */
 export function nextTapTarget(draft: PhotoTapDraft): PhotoTapTarget | undefined {
   return draft.plan.targets.find(
@@ -197,10 +291,25 @@ export function nextTapTarget(draft: PhotoTapDraft): PhotoTapTarget | undefined 
   );
 }
 
-export function placeTap(draft: PhotoTapDraft, px: number, py: number): PhotoTapDraft {
+export function placeTap(draft: PhotoTapDraft, px: number, py: number, fixRadiusPx = FIX_RADIUS_PX): PhotoTapDraft {
   if (draft.detection?.state === 'finding') return draft;
+  if (!Number.isFinite(px) || !Number.isFinite(py)) return draft;
+  // After the scan, a tap on (or near) a found sleeve fixes that pin instead of adding one.
+  if (draft.auto?.state === 'done') {
+    const near = nearTap(draft, px, py, fixRadiusPx);
+    if (near && draft.auto.pins.some((p) => p.targetId === near.pointId)) {
+      return {
+        ...draft,
+        taps: draft.taps.map((t) => (t === near ? { ...t, px, py } : t)),
+        auto: {
+          ...draft.auto,
+          pins: draft.auto.pins.map((p) => (p.targetId === near.pointId ? { ...p, px, py, moved: true, record: { ...p.record, confirmed: false } } : p)),
+        },
+      };
+    }
+  }
   const target = nextTapTarget(draft);
-  if (!target || !Number.isFinite(px) || !Number.isFinite(py)) return draft;
+  if (!target) return draft;
   return { ...draft, taps: [...draft.taps, { pointId: target.id, px, py }] };
 }
 
@@ -230,7 +339,10 @@ export function undoTap(draft: PhotoTapDraft): PhotoTapDraft {
   }
   for (let i = draft.plan.targets.length - 1; i >= 0; i -= 1) {
     const id = draft.plan.targets[i].id;
-    if (draft.taps.some((tap) => tap.pointId === id)) return { ...draft, taps: draft.taps.filter((tap) => tap.pointId !== id) };
+    if (draft.taps.some((tap) => tap.pointId === id)) {
+      const auto = draft.auto ? { ...draft.auto, pins: draft.auto.pins.filter((p) => p.targetId !== id) } : undefined;
+      return { ...draft, taps: draft.taps.filter((tap) => tap.pointId !== id), auto };
+    }
     if (draft.skipped.includes(id)) return { ...draft, skipped: draft.skipped.filter((item) => item !== id) };
   }
   return draft;
@@ -269,7 +381,18 @@ export function tapBarView(draft: PhotoTapDraft): TapBarView {
   const title = `${plan.stepTitle}${photoPart}`;
   const det = plan.use === 'sleeve-height' ? draft.detection : undefined;
   const manualPos = next && det?.state === 'unsure' ? (plan.fallback ?? []).findIndex((t) => t.id === next.id) : -1;
-  const prompt = det?.state === 'finding'
+  const auto = plan.use === 'bearings' ? draft.auto : undefined;
+  const foundNames = auto?.pins.map((p) => p.targetId).join(', ') ?? '';
+  const dupNote = auto?.duplicates.length ? ` ${auto.duplicates.join(', ')} seen twice: tap ${auto.duplicates.length === 1 ? 'it' : 'them'}.` : '';
+  const prompt = auto?.state === 'finding'
+    ? 'Finding the canes…'
+    : auto?.state === 'done' && auto.pins.length
+      ? next
+        ? `Found ${foundNames}.${dupNote} Tap ${next.label} (${position} of ${plan.targets.length}), or Save. Tap a pin to fix it.`
+        : `Found ${foundNames}.${dupNote} Tap Save, or tap a pin to fix it.`
+      : auto?.state === 'done' && next
+        ? `No canes found.${dupNote} Tap ${next.label} (${position} of ${plan.targets.length})`
+        : det?.state === 'finding'
     ? 'Finding the sleeve edges…'
     : det?.state === 'found'
       ? 'Sleeve found. Check the two lines sit on the paper ends, then Save. Undo to tap again.'
@@ -287,7 +410,7 @@ export function tapBarView(draft: PhotoTapDraft): TapBarView {
     prompt,
     secondary: next?.optional ? 'Not in view' : undefined,
     primary: 'Save',
-    primaryEnabled: canSaveTaps(draft),
+    primaryEnabled: canSaveTaps(draft) && draft.auto?.state !== 'finding',
     canUndo: draft.taps.length > 0 || draft.skipped.length > 0,
   };
 }
@@ -341,13 +464,18 @@ export function saveTapDraft(doc: GardenDocument, draft: PhotoTapDraft): { doc: 
   };
   const clicks = draft.taps.map((tap) => ({ pointId: resolve(tap.pointId), px: tap.px, py: tap.py }));
   const ids = new Set(draft.taps.map((tap) => tap.pointId));
+  if (draft.auto?.state === 'done') {
+    const autoSleeves = draft.auto.pins.map((p) => ({ ...p.record }));
+    doc = { ...doc, photos: doc.photos.map((item) => (item.id === photo.id ? { ...item, autoSleeves } : item)) };
+  }
+  const found = draft.auto?.state === 'done' ? draft.auto.pins.filter((p) => !p.moved).length : 0;
   const hasBothEnds = ids.has('BAS01') && ids.has('BAS02');
   const tapped = draft.taps.length;
   return {
     doc,
     clicks,
     hasBothEnds,
-    message: `${tapped} cane${tapped === 1 ? '' : 's'} marked on ${draft.plan.stepTitle}.`,
+    message: `${tapped} cane${tapped === 1 ? '' : 's'} marked on ${draft.plan.stepTitle}.${found ? ` ${found} found automatically.` : ''}`,
   };
 }
 

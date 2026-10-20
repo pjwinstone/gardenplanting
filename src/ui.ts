@@ -93,7 +93,11 @@ import {
 import {
   photoTapPlan,
   placeTap,
+  applyAutoSleeves,
   applySleeveDetection,
+  beginAutoScan,
+  FIX_RADIUS_PX,
+  needsAutoScan,
   beginSleeveDetection,
   needsSleeveDetection,
   saveTapDraft,
@@ -107,7 +111,8 @@ import {
   type PhotoTapPlan,
   type TapView,
 } from './workflows/guided/photoTaps';
-import { detectSleeveFromOriginal } from './workflows/guided/sleeveImage';
+import { detectSleeveFromOriginal, scanSleevesFromOriginal } from './workflows/guided/sleeveImage';
+import { GARDEN_MARKER_IDS } from './workflows/guided/markerSet';
 import { cameraPositionHint, checkCameraPositionPhoto, ensureCameraPositionPoint } from './workflows/guided/cameraCapture';
 import type { WorkflowLink } from './workflows/guided/types';
 import {
@@ -1107,6 +1112,7 @@ function openPhotoTaps(plan: PhotoTapPlan): void {
   tapDraft = startTapDraft(plan, existing ?? [], plan.use === 'sleeve-height' ? photo?.measureDetection : undefined);
   markDraft = null;
   tapView = { scale: 1, x: 0, y: 0 };
+  if (photo && needsAutoScan(tapDraft)) void runAutoScan(photo);
   setState({
     markPhotoId: plan.photoId,
     menuOpen: false,
@@ -1128,6 +1134,22 @@ async function runSleeveDetection(photo: Photo, px: number, py: number): Promise
   }
   if (!tapDraft || tapDraft.plan.photoId !== photoId) return;
   tapDraft = applySleeveDetection(tapDraft, result);
+  rerenderTaps();
+}
+
+/** Camera-position photo: find the sleeves in the whole photo and pre-fill the taps. */
+async function runAutoScan(photo: Photo): Promise<void> {
+  if (!tapDraft) return;
+  tapDraft = beginAutoScan(tapDraft);
+  const photoId = photo.id;
+  let result: Awaited<ReturnType<typeof scanSleevesFromOriginal>>;
+  try {
+    result = await scanSleevesFromOriginal(photo, GARDEN_MARKER_IDS);
+  } catch {
+    result = { sleeves: [], duplicates: [], partial: false, ms: 0, scaleX: 1, scaleY: 1, unavailable: 'Could not scan the full-size photo.' };
+  }
+  if (!tapDraft || tapDraft.plan.photoId !== photoId) return;
+  tapDraft = applyAutoSleeves(tapDraft, result);
   rerenderTaps();
 }
 
@@ -3621,11 +3643,13 @@ function buildPhotoTapOverlay(doc: GardenDocument): HTMLElement {
     // Once found, the edges are drawn as lines above, not pins.
     if (det?.state === 'found') continue;
     const target = [...draft.plan.targets, ...(draft.plan.fallback ?? [])].find((t) => t.id === tap.pointId);
+    // Sleeves the scan found are labelled with their point and ID, e.g. "BAS01 · 315".
+    const auto = draft.auto?.pins.find((p) => p.targetId === tap.pointId);
     const pin = el('div', {
-      className: 'photo-tap__pin',
-      attrs: { style: `left:${(tap.px / pw) * 100}%;top:${(tap.py / ph) * 100}%` },
+      className: auto && !auto.moved ? 'photo-tap__pin photo-tap__pin--auto' : 'photo-tap__pin',
+      attrs: { style: `left:${(tap.px / pw) * 100}%;top:${(tap.py / ph) * 100}%`, ...(auto ? { 'data-auto': auto.code } : {}) },
     });
-    pin.appendChild(el('span', { className: 'photo-tap__pin-label', text: target?.label ?? tap.pointId }));
+    pin.appendChild(el('span', { className: 'photo-tap__pin-label', text: auto && !auto.moved ? auto.label : target?.label ?? tap.pointId }));
     layer.appendChild(pin);
   }
   frame.appendChild(layer);
@@ -3756,9 +3780,11 @@ function attachTapGestures(stage: HTMLElement, frame: HTMLElement): void {
       const img = frame.querySelector('img');
       const photo = state.doc.photos.find((p) => p.id === tapDraft!.plan.photoId);
       if (img && photo) {
-        const at = screenToPhotoPx(ev.clientX, ev.clientY, img.getBoundingClientRect(), photo);
+        const rect = img.getBoundingClientRect();
+        const at = screenToPhotoPx(ev.clientX, ev.clientY, rect, photo);
         if (at) {
-          tapDraft = placeTap(tapDraft, at.px, at.py);
+          // A finger-width (FIX_RADIUS_PX on screen) around a found sleeve fixes that pin.
+          tapDraft = placeTap(tapDraft, at.px, at.py, (FIX_RADIUS_PX * photo.width) / Math.max(1, rect.width));
           if (needsSleeveDetection(tapDraft)) void runSleeveDetection(photo, at.px, at.py);
           rerenderTaps();
           return;
