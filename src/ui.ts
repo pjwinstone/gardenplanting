@@ -190,6 +190,9 @@ import {
   type GardenReconcileResult,
 } from './gardenCloudSave';
 import { glossaryPairsForMenu } from './workflow/glossary';
+import { handleScreenCommand, installScreens, renderScreens, currentScreen } from './screens/pointScreen';
+import { pointForMarkerId } from './workflows/guided/markerSet';
+import type { AutoSleeveRecord as ScreenSleeveRecord, PhotoClick as ScreenPhotoClick } from './model';
 import { petriAddPointEnabled, setPetriAddPointEnabled } from './workflow/prefs';
 import {
   attachDraftFromPhoto,
@@ -744,6 +747,57 @@ async function applyNewPointThumb(
     if (photoId) void openPhotoMark(photoId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not use photo.';
+    surfaceFail(msg, 'photo');
+  }
+}
+
+/**
+ * Rebuilt Add point screen: attach the photo to the photo point, queue the original for
+ * OneDrive (same pipeline as every photo), then find the base-point sleeves in it with the
+ * existing whole-photo scan. Found sleeves become the photo's base point taps.
+ */
+async function captureScreenPhoto(pointId: string, file: File, done: (photoId: string) => void): Promise<void> {
+  try {
+    if (await rejectIfDng(file)) return;
+    const preview = await buildDisplayPreview(file);
+    let width: number | undefined;
+    let height: number | undefined;
+    try {
+      const nat = await imageNaturalSize(preview.dataUrl);
+      width = nat.width;
+      height = nat.height;
+    } catch {
+      /* defaults */
+    }
+    const result = appendPhotoToPoint(state.doc, pointId, { thumbnailDataUrl: preview.dataUrl, width, height });
+    if (result.reason) {
+      surfaceFail(result.reason, 'photo');
+      return;
+    }
+    const photoId = result.doc.session.selectedPhotoId!;
+    setDoc(result.doc, null);
+    done(photoId);
+    await queueCapturedOriginal(file, preview.pixels);
+    const photo = state.doc.photos.find((p) => p.id === photoId);
+    if (!photo) return;
+    let scan: Awaited<ReturnType<typeof scanSleevesFromOriginal>>;
+    try {
+      scan = await scanSleevesFromOriginal(photo, markerIdsFor(state.doc));
+    } catch {
+      scan = { sleeves: [], duplicates: [], partial: false, ms: 0, scaleX: 1, scaleY: 1, unavailable: 'Could not scan the full-size photo.' };
+    }
+    const records: ScreenSleeveRecord[] = [];
+    const clicks: ScreenPhotoClick[] = [];
+    for (const sl of scan.sleeves) {
+      const point = pointForMarkerId(sl.id, state.doc);
+      if (!point || records.some((r) => r.pointName === point)) continue;
+      records.push({ id: sl.id, pointName: point, axisXFullPx: sl.axisX, midYFullPx: sl.midY, tiltDeg: sl.tiltDeg, bandPx: sl.bandPx, notForCal: sl.notForCal, confidence: sl.confidence, confirmed: true });
+      clicks.push({ pointId: point, px: sl.axisX / scan.scaleX, py: sl.midY / scan.scaleY });
+    }
+    setDoc({ ...state.doc, photos: state.doc.photos.map((p) => (p.id === photoId ? { ...p, autoSleeves: records, clicks } : p)) }, null);
+    if (scan.unavailable) setCloudMessage(scan.unavailable);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Could not read photo.';
     surfaceFail(msg, 'photo');
   }
 }
@@ -2299,6 +2353,21 @@ export function mount(root: HTMLElement): void {
       if (next !== state.doc) setState({ doc: next });
     },
   );
+  installScreens({
+    getDoc: () => state.doc,
+    setDoc: (doc) => setDoc(doc, null),
+    rerender: () => setState({}),
+    takePhoto: (pointId, done) => void beginSurveyCapture((file) => void captureScreenPhoto(pointId, file, done)),
+    openCircleTest: () => {
+      const progress = readProgress(state.doc);
+      const cmd = progress.runs['circle-field-test'] ? 'workflow-resume' : 'workflow-start';
+      const result = handleWorkflowCommand(cmd, state.doc, { getAttribute: (n) => (n === 'data-workflow' ? 'circle-field-test' : null) });
+      setState({ doc: result.doc ?? state.doc, menuOpen: false });
+      if (result.link) applyWorkflowLink(result.link);
+      firePhotoAction('check-photos');
+    },
+    drainArchive: () => firePhotoAction('archive-drain'),
+  });
   render();
   startPhotoUploadLoop({
     getToken: async () => {
@@ -2507,6 +2576,10 @@ async function onShellClick(e: Event): Promise<void> {
   if (!cmd) return;
   e.preventDefault();
 
+  if (cmd.startsWith('screen-')) {
+    handleScreenCommand(cmd, target);
+    return;
+  }
   if (cmd.startsWith('petri-')) {
     handleAddPointPetriDomEvent(target, state.doc, applyPetriChromeResult);
     return;
@@ -3452,6 +3525,10 @@ function onShellChange(e: Event): void {
   const t = e.target as HTMLInputElement | HTMLSelectElement | null;
   if (!t) return;
   const cmd = t.getAttribute('data-cmd');
+  if (cmd === 'screen-input') {
+    handleScreenCommand(cmd, t as HTMLElement);
+    return;
+  }
   if (cmd === 'workflow-note') {
     const stepId = t.getAttribute('data-step') ?? '';
     const value = t.value;
@@ -3609,6 +3686,13 @@ function buildSurveyView(): HTMLElement {
   }
 
   wrap.appendChild(renderGuidedChrome(doc));
+  // Rebuilt screens (Home: Add point, Circle test). Hidden while a Tools screen is open.
+  const toolsOpen = state.menuOpen || state.pointDialog || state.petriAddPointOpen || state.markPhotoId;
+  const guidedActive = Boolean(readProgress(doc).activeId);
+  if (!toolsOpen && (!guidedActive || currentScreen() !== 'home')) {
+    const screens = renderScreens(doc);
+    if (screens) wrap.appendChild(screens);
+  }
   return wrap;
 }
 
@@ -4146,8 +4230,8 @@ function buildHamburgerButton(): HTMLElement {
       'aria-label': unseen
         ? `Menu — ${count} unseen error${count === 1 ? '' : 's'}`
         : state.menuOpen
-          ? 'Close menu'
-          : 'Open menu',
+          ? 'Close Tools'
+          : 'Tools',
       'aria-expanded': state.menuOpen ? 'true' : 'false',
     },
   });

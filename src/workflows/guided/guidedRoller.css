@@ -260,3 +260,13 @@
 .strength-point--amber { border-left-color: #f9a825; }
 .strength-point--red { border-left-color: #c62828; }
 .roller-hint--small { font-size: 0.8em; opacity: 0.85; }
+
+/* Next-needed marker (rebuild): a small dot on the first step still to do. */
+.roller-next-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1f7a4d;
+  margin-left: 6px;
+  flex: none;
+}

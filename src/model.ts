@@ -408,6 +408,17 @@ export interface GardenDocument {
    */
   workflowProgress?: import('./workflows/guided/types').WorkflowProgress;
   /**
+   * Base grid from the rebuilt Add point screen: base points (BAS01 at 0,0) and their taped
+   * N/E/diagonal ties on grid north (the user's own chosen direction, not the compass).
+   * Optional, so older readers ignore it.
+   */
+  baseGrid?: BaseGridDoc;
+  /** Photos superseded by a Retake on the rebuilt screens, still to move to photos/archive/. */
+  screenArchive?: {
+    pending: import('./photoArchive').ArchiveJob[];
+    log: import('./photoArchive').ArchiveLogEntry[];
+  };
+  /**
    * This garden's sleeves: survey point ↔ printed sleeve ID. Optional; when absent the
    * default set (CIRCLE_SLEEVES) is used. The whole-photo scan only accepts these IDs.
    */
@@ -1198,4 +1209,18 @@ export function confirmAbTogether(doc: GardenDocument): GardenDocument {
 
 function uniqueRods(existing: string[], add: string[]): string[] {
   return [...new Set([...existing, ...add])];
+}
+
+export interface BaseGridPoint {
+  id: string;
+  /** Two-sleeve post: top to bottom sleeve, centre to centre, m. Omitted: single sleeve. */
+  postSeparationM?: number;
+  savedAt: string;
+}
+
+export interface BaseGridDoc {
+  points: BaseGridPoint[];
+  ties: { id: string; from: string; to: string; eastM?: number; northM?: number; diagonalM?: number; savedAt: string }[];
+  /** Grid north vs compass north, degrees (reserved for sun work; not used by the solver). */
+  gridToCompassDeg?: number;
 }

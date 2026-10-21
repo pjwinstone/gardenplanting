@@ -81,7 +81,8 @@ let chromeCommit: ((update: (doc: GardenDocument) => GardenDocument) => void) | 
 /** Last roller panel and the state it was drawn from. Reused while nothing changed, so a
  * re-render from elsewhere (photo loop, cloud status, error log) does not rebuild the wheel
  * under the user's finger or swallow a tap on a row pill. */
-let rollerCache: { key: string; panel: HTMLElement; touching: () => boolean; recentre: () => void } | null = null;
+let photosViewerPhoto: string | null = null;
+let rollerCache: { key: string; panel: HTMLElement; touching: () => boolean; recentre: () => void; currentId: string; scrollTop?: number } | null = null;
 /** Set-up form edits not yet confirmed (dotted key -> typed text). Survives re-renders. */
 let setupDraft: Record<string, string> = {};
 let chromeDoc: GardenDocument | null = null;
@@ -239,7 +240,8 @@ export function handleWorkflowCommand(
     const after = move.progress.activeId ? move.progress.runs[move.progress.activeId] : undefined;
     if (def && after && !after.finishedAt) {
       const blocker = doneBlocker(doc, def.steps, after);
-      if (blocker && after.currentStepId === blocker.stepId) move = { ...move, notice: doneBlockerNotice(blocker) };
+      // The roller stays put; the notice names the step that blocks Done.
+      if (blocker) move = { ...move, notice: doneBlockerNotice(blocker) };
     }
   }
   else if (cmd === 'workflow-scroll') move = scrollWorkflowToStep(progress, stepId || '');
@@ -262,8 +264,8 @@ export function handleWorkflowCommand(
       const pair = move.progress.activeId ? move.progress.runs[move.progress.activeId] : undefined;
       const def = move.progress.activeId ? workflowById(move.progress.activeId) : undefined;
       if (pair && def && pair.currentStepId === SETUP_STEP_ID) {
-        const target = firstUnsettledStepId(def, pair);
-        const next = target && target !== SETUP_STEP_ID ? target : def.steps[0]?.id;
+        // Confirm acts like Next: on to step 1, never a jump further down the roller.
+        const next = def.steps[0]?.id;
         if (next) move = { ...scrollWorkflowToStep(move.progress, next), notice: move.notice, changed: true };
       }
     }
@@ -315,10 +317,13 @@ export function handleWorkflowCommand(
   }
   else if (cmd === 'workflow-photos') {
     photosViewerStep = stepId || null;
+    // From the photo strip: open on just that photo.
+    photosViewerPhoto = source.getAttribute('data-photo');
     return {};
   }
   else if (cmd === 'workflow-photos-close') {
     photosViewerStep = null;
+    photosViewerPhoto = null;
     return {};
   }
   else if (cmd === 'workflow-photo-retake') {
@@ -326,6 +331,7 @@ export function handleWorkflowCommand(
     const one = source.getAttribute('data-photo');
     const r = one && canonicalStepId(stepId) === EDGE_PHOTOS_STEP_ID ? retakeOnePhotoInDoc(doc, stepId, one) : retakeStepPhotosInDoc(doc, stepId);
     photosViewerStep = null;
+    photosViewerPhoto = null;
     const def = progress.activeId ? workflowById(progress.activeId) : undefined;
     const link = pillLink(def, stepId) ?? def?.steps.find((item) => item.id === stepId)?.link;
     if (!r.changed) return {};
@@ -427,13 +433,11 @@ function renderRollerPanel(
   // Action states are part of the key: an upload status change must redraw the pill.
   const actions = def.steps.map((step) => deriveActionState(chromeDoc, run, step));
   const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive(), actions });
-  if (rollerCache && rollerCache.key === key) {
-    const cached = rollerCache;
-    requestAnimationFrame(() => {
-      if (cached.panel.isConnected && !cached.touching()) cached.recentre();
-    });
-    return cached.panel;
-  }
+  // Same content: reuse the panel as it is. No recentre here: the wheel only moves when the
+  // user scrolls or taps Next/Back (a recentre on every redraw snapped a scrolling list back).
+  if (rollerCache && rollerCache.key === key) return rollerCache.panel;
+  const movedByUser = !rollerCache || rollerCache.currentId !== run.currentStepId;
+  const keepScroll = rollerCache?.scrollTop;
   const panel = el('section', 'workflow-roller-sheet');
   panel.dataset.testid = 'workflow-bar';
   const top = el('div', 'roller-top');
@@ -467,6 +471,7 @@ function renderRollerPanel(
   list.style.paddingBottom = `${pad}px`;
   const rowIds = rollerRowIds(def);
   const currentId = run.currentStepId;
+  const nextNeededId = firstUnsettledStepId(def, run);
   for (const stepId of rowIds) {
     const row = el('div', 'roller-row');
     row.dataset.stepId = stepId;
@@ -479,6 +484,12 @@ function renderRollerPanel(
     row.append(ic);
     const title = el('span', 'roller-t' + (stepId === currentId ? ' roller-t-cur' : ''), rowTitle(def, stepId));
     row.append(title);
+    if (stepId === nextNeededId && stepId !== currentId) {
+      const dot = el('span', 'roller-next-dot', '');
+      dot.setAttribute('aria-label', 'Next needed');
+      dot.dataset.testid = 'roller-next-needed';
+      row.append(dot);
+    }
     if (stepId === currentId) {
       const step = def.steps.find((item) => item.id === stepId);
       // Pill colour and text come only from the step's action sub-net (action.net.yaml).
@@ -508,6 +519,7 @@ function renderRollerPanel(
     if (currentStep.id === CIRCLE_RESULT_STEP_ID) panel.append(renderCircleResult(chromeDoc, run));
     panel.append(renderButtonRow(def, run, currentStep));
   }
+  if (currentId !== SETUP_STEP_ID) panel.append(renderRunPhotoStrip(def, run));
   if (notice) panel.append(el('p', 'workflow-notice', notice));
 
   const recentre = () => {
@@ -515,9 +527,15 @@ function renderRollerPanel(
     if (currentRow && list.clientHeight > 0) list.scrollTop = currentRow.offsetTop - pad;
   };
   let handle: { touching: () => boolean } = { touching: () => false };
-  rollerCache = { key, panel, touching: () => handle.touching(), recentre };
+  const cache: NonNullable<typeof rollerCache> = { key, panel, touching: () => handle.touching(), recentre, currentId, scrollTop: keepScroll };
+  rollerCache = cache;
+  // Remember the user's position while attached: a detached list reads scrollTop 0.
+  list.addEventListener('scroll', () => { if (list.isConnected) cache.scrollTop = list.scrollTop; }, { passive: true });
   requestAnimationFrame(() => {
-    recentre();
+    // Centre on the current row only when it changed (Next/Back/settle); otherwise keep the
+    // user's scroll position across a redraw (photo upload, doc save).
+    if (movedByUser || keepScroll === undefined) recentre();
+    else list.scrollTop = keepScroll;
     handle = attachRollerWheel(wheel, rowIds, currentId, (stepId) => {
       if (stepId === currentId) return;
       const update = (doc: GardenDocument): GardenDocument => {
@@ -749,14 +767,15 @@ function renderPhotosViewer(def: WorkflowDefinition, run: WorkflowRun, stepId: s
   const step = def.steps.find((s) => s.id === stepId);
   if (!step) return sheet;
   sheet.append(el('h2', 'workflow-title', `${rowNumber(def, stepId)} ${step.title}: photos`));
-  const photos = stepPhotos(chromeDoc, run, step);
+  const all = stepPhotos(chromeDoc, run, step);
+  const photos = photosViewerPhoto && all.some((p) => p.id === photosViewerPhoto) ? all.filter((p) => p.id === photosViewerPhoto) : all;
   const action = deriveActionState(chromeDoc, run, step);
   if (action.place === 'error') sheet.append(el('p', 'workflow-notice', actionReasonLine(action) || 'This step needs a new photo.'));
   const perPhoto = step.id === EDGE_PHOTOS_STEP_ID;
-  if (photos.length > 1) {
+  if (all.length > 1) {
     sheet.append(el('p', 'workflow-detail', perPhoto
       ? 'Retake replaces just that photo; the new one takes the same edge point. The old one moves to the archive.'
-      : `Retake replaces all ${photos.length} photos of this step; the old ones move to the archive.`));
+      : `Retake replaces all ${all.length} photos of this step; the old ones move to the archive.`));
   }
   const edgeOf = perPhoto ? edgeAssignmentsFor(chromeDoc, run) : new Map<string, string>();
   if (!photos.length) {
@@ -1205,4 +1224,29 @@ export function resetWorkflowChromeForTests(): void {
   pickerOpen = false;
   sheetOpen = false;
   notice = null;
+}
+
+
+/**
+ * Photo strip on every step: every photo of this run, tap one to view or retake it. Uses the
+ * same viewer and Retake as the step's Photos button (one photo for edge photos).
+ */
+function renderRunPhotoStrip(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
+  const strip = el('div', 'screen-strip');
+  strip.dataset.testid = 'run-photo-strip';
+  for (const step of def.steps) {
+    for (const photo of stepPhotos(chromeDoc, run, step)) {
+      const b = button('', 'workflow-photos', { className: 'screen-thumb', step: step.id, testid: 'strip-thumb' });
+      b.dataset.photo = photo.id;
+      b.setAttribute('aria-label', `${step.title}: ${photo.originalFile?.fileName ?? photo.id}`);
+      if (photo.thumbnailDataUrl) {
+        const img = document.createElement('img');
+        img.src = photo.thumbnailDataUrl;
+        img.alt = '';
+        b.append(img);
+      }
+      strip.append(b);
+    }
+  }
+  return strip;
 }

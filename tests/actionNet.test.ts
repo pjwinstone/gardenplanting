@@ -303,7 +303,7 @@ describe('field test with every step\'s action sub-net composed', () => {
     expect(action(doc, 'camera-calibration').reason).toMatch(/no capture time/);
   });
 
-  it('Done from the last step lands on the first step that is not green and says why', () => {
+  it('Done from the last step says which step is not green, without moving the roller', () => {
     // Paul's case: 8, 9, 10 done on screen but step 8's upload failed, so it never ticked.
     let doc = walkToEnd(fresh(), { stopAt: 'camera-calibration' });
     doc = moveTo(doc, 'camera-calibration');
@@ -321,7 +321,7 @@ describe('field test with every step\'s action sub-net composed', () => {
     const after = readProgress(result.doc ?? doc);
     expect(workflowShowsNotice()).toBe('Not finished. Step 6 Calibration photo (focal length): Upload failed: Size mismatch (local 4591996, OneDrive 0)');
     expect(after.runs[ID]?.finishedAt).toBeFalsy();
-    expect(after.runs[ID]?.currentStepId).toBe('camera-calibration');
+    expect(after.runs[ID]?.currentStepId).toBe('save-to-onedrive');
     const b = doneBlocker(doc, circleFieldTest.steps, run(doc))!;
     expect(b.stepId).toBe('camera-calibration');
     expect(doneBlockerNotice(b)).toBe('Not finished. Step 6 Calibration photo (focal length): Upload failed: Size mismatch (local 4591996, OneDrive 0)');

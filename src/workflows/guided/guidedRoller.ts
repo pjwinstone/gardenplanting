@@ -8,6 +8,8 @@ import type { WorkflowDefinition, WorkflowRun, WorkflowStep } from './types';
 
 const ROW_PX = 44;
 const WHEEL_ROWS = 5;
+/** Quiet time after the last scroll event before the wheel settles on a row. */
+export const SETTLE_MS = 180;
 
 export function rollerRowIds(def: WorkflowDefinition): string[] {
   return [SETUP_STEP_ID, ...def.steps.map((step) => step.id)];
@@ -144,10 +146,13 @@ export function attachRollerWheel(
     touching = true;
     userMoved = true;
   };
+  // Finger up: momentum may still be running. Settle only once the scroll has stopped
+  // (scrollend, or no scroll event for SETTLE_MS); settling mid-momentum re-rendered the
+  // panel and snapped the list back, which was the jitter.
   const end = () => {
     touching = false;
     window.clearTimeout(settleTimer);
-    settleTimer = window.setTimeout(settle, 120);
+    settleTimer = window.setTimeout(settle, SETTLE_MS);
   };
   list.addEventListener('touchstart', start, { passive: true });
   list.addEventListener('touchend', end, { passive: true });
@@ -159,7 +164,7 @@ export function attachRollerWheel(
     if (!raf) raf = window.requestAnimationFrame(update);
     if (!userMoved || touching) return;
     window.clearTimeout(settleTimer);
-    settleTimer = window.setTimeout(settle, 120);
+    settleTimer = window.setTimeout(settle, SETTLE_MS);
   }, { passive: true });
   list.addEventListener('scrollend', settle);
   update();
