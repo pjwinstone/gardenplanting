@@ -93,45 +93,47 @@ describe('opening a field test run', () => {
     expect(run(startWorkflow(emptyProgress(), ID, NOW).progress).currentStepId).toBe('setup');
   });
 
-  it('reopening lands on the first step that is not green, with the banner', () => {
+  // Paul (21 Oct 2026): the roller never moves by itself. Reopening keeps the row it was left on
+  // and the banner names the next step needed.
+  it('reopening keeps the row it was left on and names the first step not green', () => {
     let p = startWorkflow(emptyProgress(), ID, NOW).progress;
     p = confirmSetupWorkflow(p, undefined, NOW).progress;
     for (const s of circleFieldTest.steps.slice(0, 5)) p = tickWorkflow(p, s.id, undefined, NOW).progress;
     p = scrollWorkflowToStep(p, 'edge-photos', NOW).progress; // cursor left on 8
     p = { ...p, activeId: undefined };
     const move = resumeWorkflow(p, ID, NOW);
-    expect(run(move.progress).currentStepId).toBe('camera-calibration');
-    expect(move.notice).toBe('Resumed at step 6, Calibration photo (focal length) is the first step not done. Scroll up for Set-up.');
+    expect(run(move.progress).currentStepId).toBe('edge-photos');
+    expect(move.notice).toBe('Next needed: step 6, Calibration photo (focal length) is the first step not done.');
   });
 
-  it('reopening names an error, and lands on Set-up when it is unconfirmed', () => {
+  it('reopening names an error, and names Set-up when it is unconfirmed', () => {
     let p = startWorkflow(emptyProgress(), ID, NOW).progress;
     p = advanceWorkflow(p, NOW).progress;
-    expect(resumeWorkflow({ ...p, activeId: undefined }, ID, NOW).notice).toBe('Resumed at step 0, Set-up is not confirmed yet.');
+    expect(resumeWorkflow({ ...p, activeId: undefined }, ID, NOW).notice).toBe('Set-up is not confirmed yet (step 0, scroll up).');
     p = confirmSetupWorkflow(p, undefined, NOW).progress;
     p = rejectEvidenceWorkflow(p, 'gather-kit', 'x', NOW).progress;
     const move = resumeWorkflow({ ...p, activeId: undefined }, ID, NOW);
-    expect(run(move.progress).currentStepId).toBe('gather-kit');
-    expect(move.notice).toMatch(/^Resumed at step 1, Gather the kit has an error\./);
+    expect(run(move.progress).currentStepId).toBe(run(p).currentStepId);
+    expect(move.notice).toMatch(/^Next needed: step 1, Gather the kit has an error\./);
   });
 
-  it('Resume after Pause lands the same way', () => {
+  it('Resume after Pause keeps the row too', () => {
     let p = startWorkflow(emptyProgress(), ID, NOW).progress;
     p = confirmSetupWorkflow(p, undefined, NOW).progress;
     p = scrollWorkflowToStep(p, 'edge-photos', NOW).progress;
     p = pauseWorkflow(p, NOW).progress;
     const move = resumePausedWorkflow(p, ID, NOW);
-    expect(run(move.progress).currentStepId).toBe('gather-kit');
-    expect(move.notice).toMatch(/^Resumed at step 1,/);
+    expect(run(move.progress).currentStepId).toBe('edge-photos');
+    expect(move.notice).toMatch(/^Next needed: step 1,/);
   });
 
-  it('the Resume button shows the banner, and the cog still jumps to step 0', () => {
+  it('the Resume button does not move the roller, and the cog still jumps to step 0', () => {
     let p = startWorkflow(emptyProgress(), ID, NOW).progress;
     p = confirmSetupWorkflow(p, undefined, NOW).progress;
     let doc = commitWorkflow(emptyDocument('x'), { ...p, activeId: undefined });
     const resumed = handleWorkflowCommand('workflow-resume', doc, { getAttribute: (n) => (n === 'data-workflow' ? ID : null) });
     doc = resumed.doc ?? doc;
-    expect(readProgress(doc).runs[ID]?.currentStepId).toBe('gather-kit');
+    expect(readProgress(doc).runs[ID]?.currentStepId).toBe(p.runs[ID]?.currentStepId);
     const cog = handleWorkflowCommand('workflow-setup', doc, { getAttribute: () => null });
     expect(readProgress(cog.doc ?? doc).runs[ID]?.currentStepId).toBe('setup');
   });

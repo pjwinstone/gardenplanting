@@ -1,0 +1,156 @@
+# point.net.yaml — the "Add point" activity (rebuild, rev 1).
+# The screens are drawn from this file: every user step is one roller row, rendered with the
+# same template (title, what it needs, inputs, photo strip, Photos | Back | Next | Cancel).
+# All on-screen wording for this activity lives under `text:` (and step title/needs/reasons);
+# terms are defined in glossary.yaml. Two point types: base point (base layer) and photo point.
+
+id: add-point
+title: Add point
+revision: 1
+
+places:
+  - {id: ready, label: Ready}
+  - {id: base_start, label: Base point chosen}
+  - {id: photo_start, label: Photo point chosen}
+  - {id: from_chosen, label: Existing base point chosen}
+  - {id: offsets_taped, label: N and E offsets taped}
+  - {id: diagonal_checked, label: Diagonal check done}
+  - {id: post_set, label: Post type set}
+  - {id: layer_chosen, label: Layer chosen}
+  - {id: photos_taken, label: Photos taken}
+  - {id: solved, label: Solved}
+  - {id: done, label: Point saved}
+
+steps:
+  - id: choose_type
+    branch: any
+    title: Point type
+    needs: Choose base point or photo point.
+    consume: [ready]
+    choice: {base: [base_start], photo: [photo_start]}
+    reasons: {no_type: Choose base point or photo point first.}
+
+  - id: from_point
+    branch: base
+    title: Measure from
+    needs: Pick the existing base point you tape from.
+    consume: [base_start]
+    produce: [from_chosen]
+    reasons: {no_from: Pick the base point you tape from.}
+
+  - id: offsets
+    branch: base
+    title: N and E offsets
+    needs: Tape the offset along grid north and along grid east, in metres (minus for south or west).
+    consume: [from_chosen]
+    produce: [offsets_taped]
+    reasons: {no_offsets: Needs both tapes, north and east.}
+
+  - id: diagonal
+    branch: base
+    title: Diagonal check
+    needs: Tape the diagonal straight from the existing base point to the new one.
+    consume: [offsets_taped]
+    produce: [diagonal_checked]
+    reasons: {no_diagonal: Needs the diagonal tape., diagonal_red: "The diagonal does not agree with the N and E tapes. Re-tape before going on."}
+
+  - id: post
+    branch: base
+    title: Post type
+    needs: Single sleeve, or a two-sleeve post (top and bottom sleeves, measured centre to centre).
+    consume: [diagonal_checked]
+    produce: [post_set]
+    reasons: {bad_separation: "Sleeve separation must be between 0.3 m and 3 m."}
+
+  - id: save_base
+    branch: base
+    title: Save base point
+    needs: Check the numbers, then save the base point to the base grid.
+    consume: [post_set]
+    produce: [done]
+    reasons: {}
+
+  - id: layer
+    branch: photo
+    title: Layer
+    needs: Choose the layer this photo point belongs to.
+    consume: [photo_start]
+    produce: [layer_chosen]
+    reasons: {no_layer: Choose a layer first.}
+
+  - id: photos
+    branch: photo
+    title: Photos
+    needs: Stand on the point and take one or more photos that show base points. You may turn between photos; do not move your feet.
+    consume: [layer_chosen]
+    produce: [photos_taken]
+    reasons: {no_photos: Take at least one photo., uploading: Wait for the photos to be read.}
+
+  - id: solve
+    branch: photo
+    title: Result
+    needs: The app works out where you stood, and how well.
+    consume: [photos_taken]
+    produce: [solved]
+    reasons: {not_solved: "Not solved yet. See the reason above, or retake a photo."}
+
+  - id: save_photo
+    branch: photo
+    title: Save photo point
+    needs: Save the photo point on its layer.
+    consume: [solved]
+    produce: [done]
+    reasons: {}
+
+text:
+  type_base: Base point
+  type_base_help: On the base grid. Taped from an existing base point.
+  type_photo: Photo point
+  type_photo_help: "On a layer: boundary/railing, path, house/structure or bed. Found from photos."
+  first_base: "This is the first base point. It is BAS01, at 0,0 on the base grid."
+  not_needed_first: Not needed for the first base point.
+  new_point_is: "New base point: {id}"
+  north_m: Grid north offset (m)
+  east_m: Grid east offset (m)
+  diagonal_m: Diagonal (m)
+  diagonal_expected: "From the N and E tapes the diagonal should be {expected} m."
+  diagonal_ok: "Diagonal check passed (off by {diff} mm)."
+  diagonal_red: "Diagonal check failed: off by {diff} mm. Re-tape."
+  single_sleeve: Single sleeve
+  two_sleeve: Two-sleeve post
+  separation_m: Sleeve separation, centre to centre (m)
+  summary_base: "{id}: {north} m grid north, {east} m grid east from {from}. {post}."
+  layer_boundary: Boundary / railing
+  layer_path: Path
+  layer_structure: House / structure
+  layer_bed: Bed
+  take_photo: Take photo
+  photo_reading: Reading photo…
+  seen: "Base points seen: {list}"
+  seen_none: No base points found in the photos yet.
+  accuracy: "About ±{mm} mm (95 %)."
+  needs_fx: "No focal length yet: do the calibration photo in Circle test first."
+  needs_grid: Add at least 3 base points first.
+  saved: "Saved {id}."
+  photos_btn: Photos
+  back_btn: Back
+  next_btn: Next
+  cancel_btn: Cancel
+  save_btn: Save
+  retake_btn: Retake
+  close_btn: Close
+  dismiss_btn: OK
+  no_photos_yet: No photos yet.
+  why: "Why: {reason}"
+  at_first_step: This is the first step.
+  photo_status_uploading: Uploading…
+  photo_status_on_phone: On the phone
+  photo_status_onedrive: On the phone and OneDrive
+  photo_status_failed: "Upload failed: {error}"
+  retake_help: Retake replaces just this photo. The old one moves to the archive.
+
+hints:
+  fewer_than_3: "Tip: aim for at least 3 base points around the house. You have {n}."
+  two_seen: "Tip: this spot only sees 2 base points ({list}). A base point roughly {dir} of here, 3–8 m away, would give a proper check."
+  two_seen_generic: "Tip: this spot only sees 2 base points. Adding one more in view, well to one side, would give a proper check."
+  bad_geometry: "Tip: the base points in view are nearly in a line from here. One off to the side would help."

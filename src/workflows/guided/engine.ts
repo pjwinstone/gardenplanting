@@ -579,9 +579,11 @@ export function startWorkflow(progress: WorkflowProgress, id: string, now = new 
  */
 function resumeLanding(def: WorkflowDefinition, run: WorkflowRun): { run: WorkflowRun; notice?: string } {
   if (!isFieldTestRoller(def)) return { run };
+  // The roller never moves by itself: reopening keeps the row you left it on and only says
+  // which step still needs doing (the small marker on the roller shows it too).
   const target = firstUnsettledStepId(def, run) ?? def.steps[def.steps.length - 1]!.id;
-  const landed = { ...run, currentStepId: target };
-  if (target === SETUP_STEP_ID) return { run: landed, notice: 'Resumed at step 0, Set-up is not confirmed yet.' };
+  const landed = run;
+  if (target === SETUP_STEP_ID) return { run: landed, notice: 'Set-up is not confirmed yet (step 0, scroll up).' };
   const step = def.steps.find((item) => item.id === target)!;
   const state = run.steps[target];
   const status = normalizeStatus(state?.status ?? 'open');
@@ -592,7 +594,7 @@ function resumeLanding(def: WorkflowDefinition, run: WorkflowRun): { run: Workfl
       : status === 'needs_recheck'
         ? `${step.title} needs a re-check`
         : `${step.title} is the first step not done`;
-  return { run: landed, notice: `Resumed at step ${step.n ?? ''}, ${why}. Scroll up for Set-up.` };
+  return { run: landed, notice: `Next needed: step ${step.n ?? ''}, ${why}.` };
 }
 
 export function resumeWorkflow(progress: WorkflowProgress, id: string, now = new Date().toISOString()): WorkflowMove {
@@ -755,24 +757,15 @@ export function doneWorkflow(progress: WorkflowProgress, now = new Date().toISOS
       changed: progressJson(progress) !== progressJson(ticked),
     };
   }
+  // On the last row Next does not jump the roller to an open step; it says which one is open.
   if (roller && !setupConfirmed(nextPair.run) && onLast) {
-    const run: WorkflowRun = { ...nextPair.run, currentStepId: SETUP_STEP_ID, updatedAt: now };
-    return {
-      progress: { ...ticked, runs: { ...ticked.runs, [nextPair.def.id]: run } },
-      notice: 'Set-up not confirmed.',
-      changed: true,
-    };
+    return { progress: ticked, notice: 'Set-up not confirmed (step 0, scroll up).', changed: progressJson(progress) !== progressJson(ticked) };
   }
   const unsettled = firstUnsettledStepId(nextPair.def, nextPair.run);
   if (roller && unsettled && onLast) {
     const jump = nextPair.def.steps.find((item) => item.id === unsettled);
     const title = unsettled === SETUP_STEP_ID ? 'Set-up' : (jump?.title ?? unsettled);
-    const run: WorkflowRun = { ...nextPair.run, currentStepId: unsettled, updatedAt: now };
-    return {
-      progress: { ...ticked, runs: { ...ticked.runs, [nextPair.def.id]: run } },
-      notice: `${title} is still open.`,
-      changed: true,
-    };
+    return { progress: ticked, notice: `${title} is still open.`, changed: progressJson(progress) !== progressJson(ticked) };
   }
   if (open.length > 0) {
     return {
@@ -1361,12 +1354,20 @@ export function applyArchiveDrain(
     const e = doneIds.has(p.id) ? byId.get(p.id) : undefined;
     return e && p.originalFile ? { ...p, originalFile: { ...p.originalFile, archivePath: e.path } } : p;
   });
-  return { ...doc, photos, workflowProgress: { ...progress, runs } };
+  // Retakes on the rebuilt screens keep their jobs on the garden, not on a guided run.
+  const sa = doc.screenArchive;
+  const screenArchive = sa
+    ? {
+        pending: sa.pending.filter((j) => !result.done.some((e) => e.photoId === j.photoId && e.fileName === j.fileName)),
+        log: [...sa.log, ...result.done.filter((e) => sa.pending.some((j) => j.photoId === e.photoId))],
+      }
+    : undefined;
+  return { ...doc, photos, workflowProgress: { ...progress, runs }, ...(screenArchive ? { screenArchive } : {}) };
 }
 
 /** All archive jobs still pending, across runs. */
 export function pendingArchiveJobs(doc: GardenDocument): import('../../photoArchive').ArchiveJob[] {
-  return Object.values(readProgress(doc).runs).flatMap((run) => run?.photoArchive?.pending ?? []);
+  return [...Object.values(readProgress(doc).runs).flatMap((run) => run?.photoArchive?.pending ?? []), ...(doc.screenArchive?.pending ?? [])];
 }
 
 export function rejectEvidenceWorkflow(

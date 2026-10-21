@@ -35,11 +35,17 @@
 #   - focal-length stays; fx is code shorthand.
 #   - Plurals add s. Many baselines; one default baseline pins the frame.
 #
+# Naming (Paul, 21 Oct 2026 — screen rebuild)
+#   - Two point types: base point (always on the base layer) and photo point (any other layer:
+#     boundary/railing, path, house/structure, bed). "Observation point" is not used.
+#   - Grid north / grid east: Paul's own chosen directions along the house, not the compass.
+#   - Screen wording lives in workflow/point.net.yaml (text:, hints:) and this glossary only.
+#
 # See also: advisor-review-2.md, constraints.example.yaml
 
 version: 1
 title: Garden Planting glossary
-revision: 11
+revision: 12
 reviewed_by:
 - agent: geometry-maths-advisor
   agent_id: e7e34885-32ba-4339-98a1-0479c57450a9
@@ -1861,10 +1867,12 @@ terms:
   - baseline
 - id: base-point
   term: Base point
-  short: One point of the base grid, BAS01, BAS02 …, marked by a sleeve on a plumbed post.
-  long: A base point carries one coded sleeve (BASnn) on a post, or two on a two-sleeve post. Its position
-    comes from the North/East/diagonal ties of the base grid. Each edge photo is fixed from the base points
-    it can see; 4 or more at good angles gives a checked point.
+  short: One point of the base grid, BAS01, BAS02 …, marked by a sleeve on a plumbed post. Always on the base layer.
+  long: A base point carries one coded sleeve (BASnn) on a post, or two on a two-sleeve post. The first base
+    point is BAS01 at 0,0. Every other one is taped from an existing base point along grid north and grid
+    east, with the diagonal as the check (Add point, then Base point). Photo points and edge photos are
+    fixed from the base points they can see; aim for at least 3 around the house, and 4 or more in view
+    at good angles gives a checked point.
   category: survey
   aliases:
   - BAS point
@@ -1916,3 +1924,157 @@ terms:
   related:
   - two-sleeve-post
   - reliability-shift
+- id: photo-point
+  term: Photo point
+  short: A point found from photos taken standing on it, on any layer except the base layer.
+  long: Stand on the spot and take one or more photos that show base points (you may turn, but not move
+    your feet). The app finds the base point sleeves, works out where you stood, and shows how well
+    (green, amber, red or grey, and about how many mm). Layers are boundary/railing, path,
+    house/structure and bed.
+  category: survey
+  aliases:
+  - observation point
+  - measured point (rebuild)
+  code_names:
+  - photoPointSolve
+  - type_photo
+  related:
+  - base-point
+  - point-type
+- id: point-type
+  term: Point type
+  short: The first step of Add point - base point or photo point.
+  long: A base point goes on the base grid and is taped. A photo point goes on a layer and is found from
+    photos. The choice sets which steps follow on the roller.
+  category: app-screen
+  code_names:
+  - choose_type
+  related:
+  - base-point
+  - photo-point
+- id: grid-north
+  term: Grid north
+  short: The direction you chose as "north" for the base grid, roughly north but not the compass.
+  long: Pick a straight line that suits the garden, for example along the back of the house; it may be
+    20 to 40 degrees off compass north. All N offsets are taped along it. The difference from compass
+    north can be stored later for sun work; the survey does not need it.
+  category: survey
+  aliases:
+  - grid N
+  code_names:
+  - northM
+  - gridToCompassDeg
+  related:
+  - grid-east
+  - base-grid
+- id: grid-east
+  term: Grid east
+  short: Square (90 degrees) to grid north, to the right when facing grid north.
+  long: E offsets are taped along grid east. Minus means grid west; a minus N offset means grid south.
+  category: survey
+  code_names:
+  - eastM
+  related:
+  - grid-north
+- id: diagonal-check
+  term: Diagonal check
+  short: The straight tape from the existing base point to the new one, checked against the N and E tapes.
+  long: From the N and E offsets the app knows what the diagonal should be. If the taped diagonal is too
+    far off (the w-test is over 3.29) the check fails and Next stays off until you re-tape.
+  category: quality-check
+  code_names:
+  - diagonalM
+  - diagonalCheck
+  related:
+  - base-point
+  - w-test
+- id: sleeve-separation
+  term: Sleeve separation
+  short: On a two-sleeve post, the distance from the middle of the top sleeve to the middle of the bottom one.
+  long: Default 1.2 m, measured centre to centre (the same as top edge to top edge). If a post needs a
+    different gap, measure what you used and enter it for that base point.
+  category: measurement
+  units: m
+  code_names:
+  - separationM
+  - POST_SEPARATION_DEFAULT_M
+  related:
+  - two-sleeve-post
+- id: circle-test
+  term: Circle test
+  short: The check of the whole method on a taped circle - photos from the edge points, a circle fit, and the taped diameter.
+  long: Edge photos are taken standing on each edge point; the app fits a circle through the solved points
+    and compares its diameter with the tape. It opens from Home.
+  category: app-screen
+  aliases:
+  - circle field test
+  code_names:
+  - circle-field-test
+  related:
+  - edge-photo
+- id: edge-photo
+  term: Edge photo
+  short: In the circle test, one photo taken standing on one edge point.
+  long: Each edge photo should show base points. A Retake replaces just that photo; the new one takes the
+    same edge point.
+  category: app-screen
+  code_names:
+  - edge-photos
+  related:
+  - circle-test
+  - retake
+- id: retake
+  term: Retake
+  short: Replace one photo. Tap it in the photo strip, then Retake.
+  long: The old photo is kept on record and moved to photos/archive/ on OneDrive; the new photo takes
+    its place. The roller does not move.
+  category: app-screen
+  code_names:
+  - retakePhoto
+  - retakeOnePhotoInDoc
+  related:
+  - photo-strip
+  - archive
+- id: photo-strip
+  term: Photo strip
+  short: The row of photo thumbnails on every step. Tap one to view or retake it.
+  long: Shows every photo of the current run, on every step, not just the step that took it.
+  category: app-screen
+  related:
+  - retake
+- id: archive
+  term: Archive
+  short: Where retaken photos go - photos/archive/ in the garden's OneDrive folder.
+  long: Nothing is deleted at once. Old archived photos can be cleaned out later from Tools.
+  category: app-screen
+  code_names:
+  - screenArchive
+  - photoArchive
+  related:
+  - retake
+- id: roller
+  term: Roller
+  short: The wheel of steps. Scroll it or tap Next and Back; it never moves by itself.
+  long: A tick marks a step that is done; a small dot marks the next step still needed. Every step has
+    the same buttons - Photos, Back, Next, Cancel - and a greyed-out button says why.
+  category: app-screen
+  related:
+  - photo-strip
+- id: hint
+  term: Tip
+  short: A gentle suggestion, for example to add a base point. Tap OK to hide it; it never stops Next.
+  long: Tips are advice only. The app suggests at least 3 base points, and when a photo point sees only 2
+    it suggests where one more would help.
+  category: app-screen
+  code_names:
+  - hintsFor
+  related:
+  - base-point
+- id: tools
+  term: Tools
+  short: The menu button. Set-up, OneDrive, the error log, printing markers and the old screens live here.
+  long: Home only shows Add point and Circle test. Everything else is under Tools.
+  category: app-screen
+  aliases:
+  - menu
+  - hamburger
