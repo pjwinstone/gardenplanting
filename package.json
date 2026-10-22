@@ -15,10 +15,12 @@
     "test:occ-off-baseline": "node scripts/check-occ-off-baseline.mjs",
     "test:station-baseline": "node scripts/check-station-baseline.mjs",
     "build:checklist-pdf": "node scripts/build-checklist-pdf.mjs",
-    "build:marker-sleeves": "tsx scripts/build-marker-sleeves.ts"
+    "build:marker-sleeves": "tsx scripts/build-marker-sleeves.ts",
+    "test:e2e": "npm run build && playwright test"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.3",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^22.15.0",
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^15.11.7",

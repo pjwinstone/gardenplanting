@@ -182,7 +182,204 @@ export function renderScreens(doc: GardenDocument): HTMLElement | null {
   if (screen === 'home') return renderHome(doc);
   if (!run) return null;
   if (viewerPhotoId) return renderViewer(doc, run, viewerPhotoId);
+  // A base point (new or edited) is one full-screen form, not the roller.
+  if (run.type === 'base') return renderBaseModal(doc, run);
   return renderStep(doc, run);
+}
+
+// ------------------------------------------------------------------ base point form (modal)
+
+/** The diagonal check line for the form (warning only; never blocks Save). */
+export function modalCheckText(doc: GardenDocument, r: PointRun): { text: string; level: 'ok' | 'amber' | 'wait' } {
+  if (isFirstBasePoint(doc, r)) return { text: '', level: 'wait' };
+  if (r.northM == null || r.eastM == null || !r.from) return { text: t(pointNet, 'modal_check_wait'), level: 'wait' };
+  if (r.diagonalM == null) return { text: t(pointNet, 'diagonal_missing'), level: 'amber' };
+  const c = diagonalCheck(doc, r);
+  if (!c) return { text: t(pointNet, 'modal_check_wait'), level: 'wait' };
+  const expected = t(pointNet, 'diagonal_expected', { expected: c.expectedM.toFixed(3) });
+  return c.warning ? { text: `${expected} ${c.warning.text}`, level: 'amber' } : { text: `${expected} ${t(pointNet, 'diagonal_ok', { diff: c.diffMm })}`, level: 'ok' };
+}
+
+/** Why Save is not ready (missing from / distances, bad separation), or null. */
+export function modalSaveReason(doc: GardenDocument, r: PointRun): string | null {
+  for (const id of ['from_point', 'offsets', 'post']) {
+    const why = stepReason(doc, r, id);
+    if (why) return why;
+  }
+  return null;
+}
+
+function liveInput(label: string, field: string, value: number | undefined, testid: string): HTMLElement {
+  const wrap = el('label', 'bm-field');
+  wrap.append(el('span', 'bm-label', label));
+  const input = el('input', 'bm-input');
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.setAttribute('enterkeyhint', 'next');
+  input.value = value == null ? '' : String(value);
+  input.dataset.cmd = 'screen-live';
+  input.dataset.field = field;
+  input.dataset.testid = testid;
+  input.setAttribute('aria-label', label);
+  wrap.append(input);
+  return wrap;
+}
+
+function signToggle(signField: 'nSign' | 'eSign', sign: 1 | -1, names: [string, string], testid: string): HTMLElement {
+  const tog = el('div', 'bm-toggle');
+  tog.setAttribute('role', 'group');
+  ([1, -1] as const).forEach((v, i) => {
+    const b = btn(names[i]!, 'screen-sign', { data: { field: signField, value: String(v) }, testid: `${testid}-${v > 0 ? 'plus' : 'minus'}` });
+    b.classList.add('bm-toggle-btn');
+    if (sign === v) b.classList.add('screen-choice-on');
+    b.setAttribute('aria-pressed', String(sign === v));
+    tog.append(b);
+  });
+  return tog;
+}
+
+let modalFocus: { field: string; start: number | null; end: number | null } | null = null;
+let modalKey = '';
+
+function renderBaseModal(doc: GardenDocument, r: PointRun): HTMLElement {
+  // A redraw (OneDrive status, a toggle) rebuilds the form: keep the field being typed in.
+  const key = `${r.startedAt}|${r.editId ?? ''}`;
+  if (key !== modalKey) {
+    modalKey = key;
+    modalFocus = null;
+  }
+  const active = document.activeElement as HTMLInputElement | null;
+  if (active?.dataset?.cmd === 'screen-live') modalFocus = { field: active.dataset.field ?? '', start: active.selectionStart, end: active.selectionEnd };
+  const id = targetBaseId(doc, r);
+  const first = isFirstBasePoint(doc, r);
+  const root = el('div', 'bm-root');
+  root.dataset.testid = 'base-modal';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  const head = el('header', 'bm-head');
+  const title = el('h2', 'bm-title', r.editId ? t(pointNet, 'modal_edit_title', { id }) : t(pointNet, 'modal_new_title'));
+  title.dataset.testid = 'base-modal-title';
+  head.append(title);
+  if (!r.editId) head.append(el('p', 'bm-sub', t(pointNet, 'modal_new_id', { id })));
+  const body = el('div', 'bm-body');
+  body.dataset.testid = 'base-modal-body';
+  if (first) body.append(el('p', 'bm-note', t(pointNet, 'modal_first')));
+  else {
+    // Measured from: every live base point except this one.
+    const fromWrap = el('label', 'bm-field');
+    fromWrap.append(el('span', 'bm-label', t(pointNet, 'modal_from')));
+    const sel = el('select', 'bm-input bm-select');
+    sel.dataset.cmd = 'screen-live';
+    sel.dataset.field = 'from';
+    sel.dataset.testid = 'in-from';
+    const blank = el('option', '', t(pointNet, 'modal_from_pick'));
+    blank.value = '';
+    sel.append(blank);
+    for (const b of baseGridOf(doc).ids.filter((x) => x !== id)) {
+      const o = el('option', '', b);
+      o.value = b;
+      if (b === r.from) o.selected = true;
+      sel.append(o);
+    }
+    if (!r.from) blank.selected = true;
+    fromWrap.append(sel);
+    body.append(fromWrap);
+    const ns = el('div', 'bm-row');
+    ns.append(liveInput(t(pointNet, 'modal_ns'), 'northM', r.northM == null ? undefined : Math.abs(r.northM), 'in-north'), signToggle('nSign', r.nSign ?? 1, [t(pointNet, 'dir_n'), t(pointNet, 'dir_s')], 'in-north'));
+    const ew = el('div', 'bm-row');
+    ew.append(liveInput(t(pointNet, 'modal_ew'), 'eastM', r.eastM == null ? undefined : Math.abs(r.eastM), 'in-east'), signToggle('eSign', r.eSign ?? 1, [t(pointNet, 'dir_e'), t(pointNet, 'dir_w')], 'in-east'));
+    const dg = el('div', 'bm-row');
+    dg.append(liveInput(t(pointNet, 'modal_diag'), 'diagonalM', r.diagonalM, 'in-diagonal'));
+    body.append(ns, ew, dg);
+  }
+  const post = el('div', 'bm-row bm-post');
+  const postBtn = btn(`${t(pointNet, 'modal_post')}: ${t(pointNet, r.twoSleeve ? 'modal_on' : 'modal_off')}`, 'screen-post', { data: { value: r.twoSleeve ? 'single' : 'two' }, testid: 'post-toggle' });
+  postBtn.classList.add('bm-switch');
+  if (r.twoSleeve) postBtn.classList.add('screen-choice-on');
+  postBtn.setAttribute('role', 'switch');
+  postBtn.setAttribute('aria-checked', String(!!r.twoSleeve));
+  post.append(postBtn);
+  body.append(post);
+  if (r.twoSleeve) {
+    const sep = el('div', 'bm-row');
+    sep.append(liveInput(t(pointNet, 'modal_sep'), 'separationM', r.separationM ?? POST_SEPARATION_DEFAULT_M, 'in-separation'));
+    body.append(sep);
+  }
+  const check = el('p', 'bm-check');
+  check.dataset.testid = 'diagonal-check';
+  const paint = () => {
+    const c = run ? modalCheckText(host?.getDoc() ?? doc, run) : { text: '', level: 'wait' as const };
+    check.textContent = c.text;
+    check.className = `bm-check bm-check-${c.level}`;
+    const why = run ? modalSaveReason(host?.getDoc() ?? doc, run) : null;
+    save.disabled = !!why;
+    reason.textContent = why ?? '';
+  };
+  if (!first) body.append(check);
+  if (notice) body.append(el('p', 'workflow-notice', notice));
+  const foot = el('footer', 'bm-foot');
+  const reason = el('p', 'bm-reason');
+  reason.dataset.testid = 'save-reason';
+  const save = btn(t(pointNet, 'save_btn'), 'screen-save', { primary: true, testid: 'btn-save' });
+  const cancel = btn(t(pointNet, 'cancel_btn'), 'screen-cancel', { testid: 'btn-cancel' });
+  const btns = el('div', 'bm-btns');
+  btns.append(cancel, save);
+  foot.append(reason, btns);
+  root.append(head, body, foot);
+  paint();
+  // Typing updates the run at once and repaints only the check line: no redraw, so the
+  // keyboard and caret stay put.
+  const live = (e: Event) => {
+    const target = e.target as HTMLInputElement | HTMLSelectElement;
+    if (target.dataset?.cmd !== 'screen-live' || !run) return;
+    if (target.dataset.field === 'from') run = edit(run, 'from_point', { from: target.value || undefined });
+    else applyInput(target as HTMLInputElement);
+    persist();
+    paint();
+  };
+  root.addEventListener('input', live);
+  root.addEventListener('change', live);
+  root.addEventListener('focusin', (e) => {
+    const target = e.target as HTMLElement;
+    if (target.dataset?.cmd !== 'screen-live') return;
+    modalFocus = { field: target.dataset.field ?? '', start: null, end: null };
+    // Keep the focused field clear of the keyboard.
+    window.setTimeout(() => target.scrollIntoView?.({ block: 'center', behavior: 'smooth' }), 250);
+  });
+  root.addEventListener('focusout', (e) => {
+    const next = (e as FocusEvent).relatedTarget as HTMLElement | null;
+    if (!next || !root.contains(next)) window.setTimeout(() => { if (!root.contains(document.activeElement)) modalFocus = null; }, 0);
+  });
+  trackKeyboard(root);
+  if (modalFocus) {
+    const want = modalFocus;
+    window.requestAnimationFrame(() => {
+      const input = root.querySelector<HTMLInputElement>(`[data-field="${want.field}"]`);
+      if (!input || !root.isConnected) return;
+      input.focus({ preventScroll: true });
+      if (want.start != null && 'setSelectionRange' in input) try { input.setSelectionRange(want.start, want.end ?? want.start); } catch { /* select */ }
+    });
+  }
+  return root;
+}
+
+/** Pad the form by the on-screen keyboard height (visualViewport), so Save and the field stay visible. */
+function trackKeyboard(root: HTMLElement): void {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const update = () => {
+    if (!root.isConnected) {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      return;
+    }
+    const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    root.style.setProperty('--bm-kb', `${kb}px`);
+  };
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+  window.requestAnimationFrame(update);
 }
 
 let homeShowAll = false;
