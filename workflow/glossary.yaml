@@ -45,7 +45,7 @@
 
 version: 1
 title: Garden Planting glossary
-revision: 12
+revision: 13
 reviewed_by:
 - agent: geometry-maths-advisor
   agent_id: e7e34885-32ba-4339-98a1-0479c57450a9
@@ -2078,3 +2078,50 @@ terms:
   aliases:
   - menu
   - hamburger
+- id: base-point-list
+  term: Base point list
+  short: Every base point with its position and post. Tap one to change its measurements.
+  long: The list scrolls on its own and never moves the steps. Editing a point works out the whole base grid
+    again and checks the diagonal again. A point with a diagonal warning is shown amber or red.
+  category: app-screen
+  code_names:
+  - renderBasePointList
+  - basePointRows
+  related:
+  - base-point
+- id: direction-toggle
+  term: N/S and E/W toggles
+  short: Type the tape distance as a positive number and tap which way it goes.
+  long: North and south, east and west are on your own grid north, not the compass. The app turns the
+    distance and the toggle into the signed offset it saves.
+  category: app-screen
+  code_names:
+  - signedTape
+  - nSign
+  - eSign
+  related:
+  - base-point
+- id: save-base-point
+  term: Save base point
+  short: Saves the tape measurements and the post together in one tap.
+  long: It replaces the old Save tie and Save post buttons. Saving again for the same point replaces its
+    measurements rather than adding a copy.
+  category: app-screen
+  aliases:
+  - Save tie
+  - Save post
+  code_names:
+  - upsertBasePoint
+  related:
+  - base-point
+- id: show-anyway
+  term: Show anyway
+  short: Shows photo points and the circle test before you have 3 base points.
+  long: The app suggests 3 base points first but never stops you. Results with fewer may be less certain,
+    and the app says why.
+  category: app-screen
+  code_names:
+  - showAll
+  - MIN_BASE_POINTS_FOR_PHOTOS
+  related:
+  - base-point

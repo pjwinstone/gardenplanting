@@ -41,7 +41,7 @@ steps:
   - id: offsets
     branch: base
     title: N and E offsets
-    needs: Tape the offset along grid north and along grid east, in metres (minus for south or west).
+    needs: Tape the offset along grid north or south, and along grid east or west. Type the distance; tap N/S and E/W for the direction.
     consume: [from_chosen]
     produce: [offsets_taped]
     reasons: {no_offsets: Needs both tapes, north and east.}
@@ -103,6 +103,25 @@ steps:
     reasons: {}
 
 text:
+  home_add_point: Add point
+  home_circle_test: Circle test
+  show_anyway: Show anyway
+  circle_hidden: "The circle test needs at least 3 base points (you have {n}). Add base points first."
+  photo_hidden: "Photo points need at least 3 base points (you have {n}). Start with base points."
+  editing_point: "Editing base point {id}. Change any value; Save base point re-solves the whole base grid."
+  dir_n: N
+  dir_s: S
+  dir_e: E
+  dir_w: W
+  list_title: "Base points ({n}). Tap one to edit it."
+  list_empty: No base points yet. The first one is BAS01 at 0,0.
+  list_position: "{n} N, {e} E"
+  list_not_placed: Not placed yet
+  list_from: "from {from}"
+  list_post: "two-sleeve post {sep} m"
+  list_add: Add base point
+  calib_previous: Previous photo
+  calib_current: Current photo
   type_base: Base point
   type_base_help: On the base grid. Taped from an existing base point.
   type_photo: Photo point
@@ -110,8 +129,8 @@ text:
   first_base: "This is the first base point. It is BAS01, at 0,0 on the base grid."
   not_needed_first: Not needed for the first base point.
   new_point_is: "New base point: {id}"
-  north_m: Grid north offset (m)
-  east_m: Grid east offset (m)
+  north_m: Grid north or south (m, a positive distance)
+  east_m: Grid east or west (m, a positive distance)
   diagonal_m: Diagonal (m)
   diagonal_expected: "From the N and E tapes the diagonal should be {expected} m."
   diagonal_ok: "Diagonal check passed (off by {diff} mm)."
@@ -136,7 +155,8 @@ text:
   back_btn: Back
   next_btn: Next
   cancel_btn: Cancel
-  save_btn: Save
+  save_btn: Save base point
+  save_photo_btn: Save photo point
   retake_btn: Retake
   close_btn: Close
   dismiss_btn: OK

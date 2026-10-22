@@ -848,6 +848,18 @@ export function pausedRun(progress: WorkflowProgress): { id: WorkflowId; run: Wo
   return undefined;
 }
 
+/** Photos of a step that a Retake superseded, newest last (the viewer shows the latest as "Previous"). */
+export function supersededPhotosForStep(doc: GardenDocument, stationId: string, run: WorkflowRun): Photo[] {
+  const start = photoTimeMs(run.startedAt);
+  return doc.photos
+    .filter((p) => p.supersededAt && photoOnStation(doc, p, stationId))
+    .filter((p) => {
+      const r = photoTimeMs(p.originalFile?.receivedAt);
+      return start === undefined || r === undefined || r >= start;
+    })
+    .sort((a, b) => (a.supersededAt! < b.supersededAt! ? -1 : 1));
+}
+
 function photoOnStation(doc: GardenDocument, photo: Photo, stationId: string): boolean {
   const points = doc.points.filter((point) => {
     if (nameMatchesStation(point.id, stationId) || nameMatchesStation(point.label ?? '', stationId)) return true;

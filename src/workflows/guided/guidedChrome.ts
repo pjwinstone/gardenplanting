@@ -13,7 +13,7 @@ import {
   doneBlocker,
   doneBlockerNotice,
 } from './actionNet';
-import { baseNetworkForRun, CIRCLE_RESULT_STEP_ID, circleResultDetailForRun, EDGE_PHOTOS_STEP_ID, edgeAssignmentsFor, TAPE_DIAMETER_STEP_ID } from './circleResult';
+import { CIRCLE_RESULT_STEP_ID, circleResultDetailForRun, EDGE_PHOTOS_STEP_ID, edgeAssignmentsFor, TAPE_DIAMETER_STEP_ID } from './circleResult';
 import { strengthLines } from '../../solver/controlCluster';
 import { GUIDED_WORKFLOWS, workflowById } from './definitions';
 import { diagramSvg } from './diagrams';
@@ -34,6 +34,7 @@ import {
   retakeEvidenceWorkflow,
   retakeStepPhotosInDoc,
   retakeOnePhotoInDoc,
+  supersededPhotosForStep,
   removeBaseTieWorkflow,
   saveBaseTieWorkflow,
   saveBasePostWorkflow,
@@ -64,7 +65,9 @@ import {
   wheelHeightPx,
 } from './guidedRoller';
 import { cameraCaptureContext, cameraLink } from './cameraCapture';
-import { canonicalStepId, migrateFieldTestSetup, SETUP_STEP_ID } from './fieldTestMeta';
+import { canonicalStepId, SETUP_STEP_ID } from './fieldTestMeta';
+import { renderBasePointList } from '../../screens/basePointList';
+import { pointNet, t } from '../../screens/stepNet';
 import { firstUnsettledStepId, isSettled, normalizeStatus } from './guards';
 import { placeRect, readSafeInsets, workflowChromeRects } from './layout';
 import type { CircleTape, CircleTapeEdge, FieldTestSetupValues, WorkflowDefinition, WorkflowLink, WorkflowPastRun, WorkflowProgress, WorkflowRun, WorkflowStep } from './types';
@@ -504,11 +507,12 @@ function renderRollerPanel(
       const action = step ? deriveActionState(chromeDoc, run, step) : undefined;
       const pill = step && action ? actionPillLabel(step, action) : undefined;
       if (pill && action) {
-        const node = button(pill, actionPillCommand(action), { className: actionPillClass(action), step: stepId, testid: 'roller-pill' });
+        const pc = pillCommandFor(chromeDoc, run, step!, action);
+        const node = button(pill, pc.cmd, { className: actionPillClass(action), step: stepId, testid: 'roller-pill' });
         node.dataset.action = action.place;
         const photoId = action.markPhotoId ?? action.photoId;
         if (photoId) node.dataset.photoId = photoId;
-        if (action.place === 'uploading' || action.place === 'done') node.disabled = true;
+        if (pc.disabled) node.disabled = true;
         row.append(node);
       }
       row.append(button('?', 'workflow-expand', { className: 'roller-q', step: stepId }));
@@ -570,11 +574,9 @@ function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElemen
   const grid = el('div', 'roller-form-grid');
   grid.append(formTile('Circle diameter (m)', 'circle_diameter_m', values.circle_diameter_m.toFixed(2)));
   grid.append(formTile('Edge points (at least 8)', 'edge_points', String(values.edge_points)));
-  grid.append(formTile('Base grid start, BAS01–BAS02 (m)', 'baseline_length_m', values.baseline_length_m.toFixed(3)));
   grid.append(formTile('Two-sleeve post: sleeves apart, default (m)', 'post_separation_m', values.post_separation_m.toFixed(3)));
   grid.append(formTile('Calibration distance (m)', 'calibration_distance_m', values.calibration_distance_m.toFixed(1)));
   grid.append(formTile('Archive age before clean-out (days)', 'photo_archive_age_days', String(values.photo_archive_age_days)));
-  grid.append(formTile('Tolerance BAS01–BAS02 tape (mm)', 'tolerances_mm.baseline', String(values.tolerances_mm.baseline)));
   grid.append(formTile('Circle diameter limit, base-grid class (mm)', 'tolerances_mm.circle_diameter_baseline', String(values.tolerances_mm.circle_diameter_baseline)));
   grid.append(formTile('Circle diameter limit, plantable (mm)', 'tolerances_mm.circle_diameter_plantable', String(values.tolerances_mm.circle_diameter_plantable)));
   form.append(grid);
@@ -691,60 +693,25 @@ export function baseTieFromDraft(draft: { from: string; to: string; e: string; n
 }
 
 /** 'Grow the base grid': the N/E/diagonal tie form, two-sleeve posts, the ties so far and the network's checks. */
-function renderBaseTieForm(run: WorkflowRun): HTMLElement {
+function renderBaseTieForm(_run: WorkflowRun): HTMLElement {
+  // Base points are added and edited only through Add point > Base point (one Save base point
+  // saves the tie and the post type together). Here: the shared list, with its own scroll area.
   const form = el('div', 'roller-setup-form');
   form.dataset.testid = 'base-tie-form';
-  const grid = el('div', 'roller-form-grid');
-  const field = (label: string, key: keyof typeof baseTieDraft, mode: 'text' | 'decimal') => {
-    const tile = el('label', 'roller-form-tile');
-    tile.append(el('small', '', label));
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.inputMode = mode;
-    input.className = 'roller-form-input';
-    input.dataset.testid = `base-tie-${key}`;
-    input.value = baseTieDraft[key];
-    input.addEventListener('input', () => { baseTieDraft = { ...baseTieDraft, [key]: input.value }; });
-    tile.append(input);
-    grid.append(tile);
-  };
-  field('From (placed point)', 'from', 'text');
-  field('To (new or other point)', 'to', 'text');
-  field('East (m, minus = west)', 'e', 'decimal');
-  field('North (m, minus = south)', 'n', 'decimal');
-  field('Diagonal (m, the check)', 'd', 'decimal');
-  field('Post sleeves apart at To (m, two-sleeve post)', 's', 'decimal');
-  form.append(grid);
-  const act = el('div', 'roller-form-act');
-  act.append(el('div', 'roller-hint', 'Tape East, then North, then the diagonal. The app re-adjusts after each tie. Two-sleeve post: type the top-to-bottom sleeve distance and Save post (blank = Set-up default).'));
-  act.append(button('Save tie', 'workflow-base-tie', { primary: true, testid: 'workflow-base-tie' }));
-  act.append(button('Save post', 'workflow-base-post', { testid: 'workflow-base-post' }));
-  form.append(act);
-  const posts = Object.entries(run.basePostSeparationM ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  const dflt = migrateFieldTestSetup(run.setup?.values).post_separation_m;
-  form.append(el('p', 'roller-hint', `Two-sleeve posts (bottom sleeve BASnnB): ${posts.length ? posts.map(([id, m]) => `${id} ${m.toFixed(3)} m`).join(', ') + '; others' : 'all'} ${dflt.toFixed(3)} m (Set-up default).`));
-  const ties = run.baseTies ?? [];
-  const net = baseNetworkForRun(run);
-  if (ties.length && !net) form.append(el('p', 'roller-hint roller-hint--warn', 'The ties do not place every point yet: a new point needs East and North from a placed point.'));
-  if (net) {
-    const placed = Object.keys(net.points).sort();
-    form.append(el('p', 'roller-hint', `Placed: ${placed.map((id) => `${id} (E ${net.points[id].x.toFixed(3)}, N ${net.points[id].y.toFixed(3)})`).join(', ')}.`));
-  }
-  ties.forEach((t, i) => {
-    const row = el('div', 'base-tie-row');
-    const readings = [t.eastM != null ? `E ${t.eastM.toFixed(3)}` : '', t.northM != null ? `N ${t.northM.toFixed(3)}` : '', t.diagonalM != null ? `diag ${t.diagonalM.toFixed(3)}` : ''].filter(Boolean).join(' · ');
-    // A failing diagonal is a warning on that base point (amber, red when far out), never a block.
-    const warn = net?.warnings.find((w) => w.tie === i);
-    const checkText = warn ? ` — ${warn.text}` : '';
-    const cls = warn ? (Math.abs(warn.w) > 2 * 3.29 ? ' base-tie--red' : ' base-tie--amber') : '';
-    row.className = `base-tie-row${cls}`;
-    row.append(el('span', 'roller-hint', `${t.from}→${t.to}: ${readings}${checkText}`));
-    const rm = button('Remove', 'workflow-base-tie-remove', { testid: 'base-tie-remove' });
-    rm.dataset.tie = t.id;
-    row.append(rm);
-    form.append(row);
-  });
+  form.append(el('p', 'roller-hint', 'Tap a base point to edit it, or Add base point. Each save re-solves the whole base grid; a diagonal warning shows on the point with the reason.'));
+  if (chromeDoc) form.append(renderBasePointList(chromeDoc));
   return form;
+}
+
+/**
+ * What the row pill does. A photo step that already has its photo (uploading or done) opens the
+ * shared photo viewer (previous + current photo, Retake) instead of a dead, disabled pill.
+ */
+export function pillCommandFor(doc: GardenDocument | null, run: WorkflowRun, step: WorkflowStep, action: ReturnType<typeof deriveActionState>): { cmd: string; disabled: boolean } {
+  if (action.place === 'uploading' || action.place === 'done') {
+    return stepPhotos(doc, run, step).length ? { cmd: 'workflow-photos', disabled: false } : { cmd: actionPillCommand(action), disabled: true };
+  }
+  return { cmd: actionPillCommand(action), disabled: false };
 }
 
 /** The step's photos (current ones), for the viewer and the Photos button. */
@@ -789,6 +756,22 @@ function renderPhotosViewer(def: WorkflowDefinition, run: WorkflowRun, stepId: s
       : `Retake replaces all ${all.length} photos of this step; the old ones move to the archive.`));
   }
   const edgeOf = perPhoto ? edgeAssignmentsFor(chromeDoc, run) : new Map<string, string>();
+  // Previous (retaken) photo beside the current one, e.g. the calibration photo.
+  const c = step.complete;
+  const previous = !perPhoto && chromeDoc && 'on' in c && c.on === 'photo.uploaded' ? supersededPhotosForStep(chromeDoc, c.stationId, run).at(-1) : undefined;
+  if (previous) {
+    const item = el('div', 'workflow-photo-item workflow-photo-previous');
+    item.dataset.testid = 'viewer-previous';
+    item.append(el('div', 'workflow-photo-name', `${t(pointNet, 'calib_previous')} · ${previous.originalFile?.fileName ?? previous.id}`));
+    if (previous.thumbnailDataUrl) {
+      const img = document.createElement('img');
+      img.src = previous.thumbnailDataUrl;
+      img.alt = '';
+      img.className = 'workflow-photo-thumb';
+      item.append(img);
+    }
+    sheet.append(item);
+  }
   if (!photos.length) {
     sheet.append(el('p', 'workflow-detail', 'No photos for this step yet.'));
     const r = button('Retake', 'workflow-photo-retake', { primary: true, step: stepId, testid: 'photo-retake' });
@@ -804,7 +787,7 @@ function renderPhotosViewer(def: WorkflowDefinition, run: WorkflowRun, stepId: s
       img.className = 'workflow-photo-thumb';
       item.append(img);
     }
-    item.append(el('div', 'workflow-photo-name', `${edgeOf.get(photo.id) ? `${edgeOf.get(photo.id)} · ` : ''}${photo.originalFile?.fileName ?? photo.id}`));
+    item.append(el('div', 'workflow-photo-name', `${previous ? `${t(pointNet, 'calib_current')} · ` : ''}${edgeOf.get(photo.id) ? `${edgeOf.get(photo.id)} · ` : ''}${photo.originalFile?.fileName ?? photo.id}`));
     item.append(el('div', 'roller-hint', photoStatusLine(photo)));
     const retake = button('Retake', 'workflow-photo-retake', { step: stepId, testid: 'photo-retake' });
     retake.dataset.photo = photo.id;
