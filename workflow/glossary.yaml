@@ -45,7 +45,7 @@
 
 version: 1
 title: Garden Planting glossary
-revision: 14
+revision: 15
 reviewed_by:
 - agent: geometry-maths-advisor
   agent_id: e7e34885-32ba-4339-98a1-0479c57450a9
@@ -2140,3 +2140,18 @@ terms:
   related:
   - base-point-list
   - base-point
+- id: base-point-form
+  term: Base point form
+  short: The full-screen form for a new or edited base point, with Save base point and Cancel at the bottom.
+  long: It shows Measured from, the North/South and East/West distances with their toggles, the Diagonal,
+    and the Two-sleeve post switch with its separation. The diagonal check under the fields updates as you
+    type and is a warning only. Save stays available whatever the diagonal says.
+  category: app-screen
+  code_names:
+  - renderBaseModal
+  - modalCheckText
+  - modalSaveReason
+  related:
+  - base-point
+  - base-point-list
+  - save-base-point

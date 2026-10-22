@@ -9,3 +9,5 @@ Thumbs.db
 .vite/
 coverage/
 *.local
+test-results/
+playwright-report/

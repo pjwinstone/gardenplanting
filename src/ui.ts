@@ -2573,6 +2573,10 @@ function applyWorkflowLink(link: WorkflowLink): void {
 async function onShellClick(e: Event): Promise<void> {
   const target = (e.target as HTMLElement | null)?.closest?.('[data-cmd]') as HTMLElement | null;
   if (!target) return;
+  // Text fields and pickers are handled by their input/change events. Treating a tap on one as
+  // a command (preventDefault + redraw) replaced the field the moment it was focused, so on
+  // iPhone the keyboard came up and went away and nothing could be typed.
+  if (target.matches('input, select, textarea')) return;
   const cmd = target.getAttribute('data-cmd');
   if (!cmd) return;
   e.preventDefault();

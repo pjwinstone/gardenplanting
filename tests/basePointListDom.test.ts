@@ -90,10 +90,10 @@ describe('base point list: tap vs scroll vs swipe', () => {
     S.handleScreenCommand('screen-edit-base', row);
     expect(S.currentScreen()).toBe('add-point');
     const sheet = S.renderScreens(d)!;
-    expect(sheet.dataset.step).toBe('from_point');
-    // The add-point sheet must stack above the circle test (workflow-root z-index 36).
+    expect(sheet.dataset.testid).toBe('base-modal');
+    // The base point form must stack above the circle test (workflow-root z-index 36).
     const css = readFileSync('src/screens/screens.css', 'utf8');
-    const z = Number(/\.screen-sheet \{[^}]*z-index: (\d+)/.exec(css)![1]);
+    const z = Number(/\.bm-root \{[^}]*z-index: (\d+)/.exec(css)![1]);
     const wf = Number(/\.workflow-root \{[^}]*z-index: (\d+)/.exec(readFileSync('src/workflows/guided/guidedChrome.css', 'utf8'))![1]);
     expect(z).toBeGreaterThan(wf);
   });

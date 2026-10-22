@@ -126,6 +126,20 @@ text:
   restored_notice: "Base point {id} restored."
   list_restore: Restore
   list_deleted: "Deleted, still links the grid. Not used in photos. Tap to edit its measurements."
+  modal_edit_title: "Edit base point {id}"
+  modal_new_title: New base point
+  modal_new_id: "It will be saved as {id}."
+  modal_from: Measured from
+  modal_from_pick: Choose a base point
+  modal_ns: "North/South distance (m)"
+  modal_ew: "East/West distance (m)"
+  modal_diag: "Diagonal (m)"
+  modal_post: Two-sleeve post
+  modal_on: "on"
+  modal_off: "off"
+  modal_sep: "Sleeve separation, centre to centre (m)"
+  modal_check_wait: Type the two distances and the diagonal to check them.
+  modal_first: "BAS01 is the grid origin, 0,0. It has no tape measurements; only the post type."
   calib_previous: Previous photo
   calib_current: Current photo
   type_base: Base point
