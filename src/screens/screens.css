@@ -32,3 +32,17 @@
 .screen-amber { color: #8a5a00; }
 .screen-choice-amber { background: #fff3d6; border-color: #e2a400; }
 .screen-choice-red { background: #fde3e0; border-color: #c0392b; }
+
+.screen-home { flex-direction: column; }
+.screen-home-row { display: flex; gap: 10px; }
+.screen-home-row .screen-btn { flex: 1; min-height: 56px; font-size: 17px; }
+.screen-tape { display: flex; gap: 6px; align-items: flex-end; flex: 1 1 100%; }
+.screen-toggle { display: flex; }
+.screen-toggle-btn { min-width: 48px; }
+/* Base point list: its own scroll area, never moves the roller. */
+.base-list, .screen-scroll-list { max-height: 40vh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; display: flex; flex-direction: column; gap: 6px; flex: 1 1 100%; padding: 4px; border: 1px solid #cdd; border-radius: 12px; background: #fafcfb; }
+.base-list-head { font-weight: 600; font-size: 14px; }
+.base-list-row { display: flex; flex-direction: column; align-items: flex-start; text-align: left; min-height: 52px; padding: 8px 10px; border-radius: 10px; border: 1px solid #9ab; background: #fff; font-size: 15px; }
+.base-list-row small { font-size: 13px; }
+.base-list-amber { background: #fff3d6; border-color: #e2a400; }
+.base-list-red { background: #fde3e0; border-color: #c0392b; }

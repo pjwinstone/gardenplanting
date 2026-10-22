@@ -2,10 +2,9 @@
  * Add point (rebuild): run state, step guards, base grid, photo point solve, hints and retake.
  * Pure functions on the garden document so they can be tested without the DOM.
  */
-import type { BaseGridDoc, GardenDocument, Photo, PointKind } from '../model';
+import type { GardenDocument, Photo, PointKind } from '../model';
 import type { ArchiveJob } from '../photoArchive';
 import {
-  adjustGridNetwork,
   adjustSession,
   gateEdgePoints,
   POST_SEPARATION_DEFAULT_M,
@@ -13,8 +12,8 @@ import {
   subCovariance,
   type EdgeGate,
   type GridDiagonalWarning,
-  type GridNetworkResult,
 } from '../solver/controlCluster';
+import { baseGridOf, basePointCount, MIN_BASE_POINTS_FOR_PHOTOS, networkOf, nextBaseId, primaryTie, upsertBasePoint } from '../baseGrid';
 import { calibrationFx } from '../workflows/guided/circleResult';
 import { readProgress } from '../workflows/guided/engine';
 import { fireStep, hasTokens, pointNet, rowsFor, t, unfireFrom, type Branch, type FiredStep, type NetStep } from './stepNet';
@@ -37,6 +36,14 @@ export interface PointRun {
   diagonalM?: number;
   twoSleeve?: boolean;
   separationM?: number;
+  /** Grid north (+1) or grid south (−1) for the N tape; the box takes a positive distance. */
+  nSign?: 1 | -1;
+  /** Grid east (+1) or grid west (−1) for the E tape. */
+  eSign?: 1 | -1;
+  /** Editing this existing base point (else a new one). */
+  editId?: string;
+  /** Show photo points even with fewer than 3 base points (the tip's "Show anyway"). */
+  showAll?: boolean;
   layer?: PhotoLayer;
   /** Photo point id (made on the first photo). */
   pointId?: string;
@@ -66,47 +73,29 @@ export function nextNeeded(run: PointRun): string | undefined {
 
 // ---------------------------------------------------------------- base grid
 
-export interface BaseGridView {
-  ids: string[];
-  ties: BaseGridDoc['ties'];
-  postSeparation: Record<string, number>;
-}
+export { baseGridOf, baseWarnings, nextBaseId, networkOf, type BaseGridView } from '../baseGrid';
 
-/** Base grid = the garden's base points, plus any tied in the circle test run (same BAS ids). */
-export function baseGridOf(doc: GardenDocument): BaseGridView {
-  const grid = doc.baseGrid ?? { points: [], ties: [] };
-  const circle = readProgress(doc).runs['circle-field-test'];
-  const ties = [...grid.ties];
-  for (const tie of circle?.baseTies ?? []) if (!ties.some((x) => x.from === tie.from && x.to === tie.to)) ties.push(tie);
-  const ids = new Set<string>(grid.points.map((p) => p.id));
-  if (ties.length) ids.add('BAS01');
-  for (const tie of ties) {
-    ids.add(tie.from);
-    ids.add(tie.to);
-  }
-  const postSeparation: Record<string, number> = { ...(circle?.basePostSeparationM ?? {}) };
-  for (const p of grid.points) if (p.postSeparationM) postSeparation[p.id] = p.postSeparationM;
-  return { ids: [...ids].sort(), ties, postSeparation };
-}
-
-export function nextBaseId(doc: GardenDocument): string {
-  const ids = baseGridOf(doc).ids;
-  if (!ids.length) return 'BAS01';
-  const n = Math.max(...ids.map((id) => Number(id.replace(/\D/g, '')) || 0)) + 1;
-  return `BAS${String(n).padStart(2, '0')}`;
-}
-
-export function isFirstBasePoint(doc: GardenDocument): boolean {
+export function isFirstBasePoint(doc: GardenDocument, run?: PointRun): boolean {
+  if (run?.editId) return run.editId === 'BAS01';
   return baseGridOf(doc).ids.length === 0;
 }
 
-export function networkOf(ties: BaseGridDoc['ties']): GridNetworkResult | undefined {
-  if (!ties.length) return undefined;
-  try {
-    return adjustGridNetwork('BAS01', ties);
-  } catch {
-    return undefined;
-  }
+/** The base point this run saves: the one being edited, or the next new id. */
+export function targetBaseId(doc: GardenDocument, run: PointRun): string {
+  return run.editId ?? nextBaseId(doc);
+}
+
+/** Start editing an existing base point: the Add point base flow, filled in with its values. */
+export function editBasePointRun(doc: GardenDocument, id: string, now = new Date().toISOString()): PointRun {
+  const tie = primaryTie(doc, id);
+  const sep = baseGridOf(doc).postSeparation[id];
+  const run: PointRun = { ...newPointRun(now), type: 'base', editId: id, from: tie?.from, northM: tie?.northM, eastM: tie?.eastM, diagonalM: tie?.diagonalM, twoSleeve: sep != null, separationM: sep };
+  return { ...run, nSign: (tie?.northM ?? 0) < 0 ? -1 : 1, eSign: (tie?.eastM ?? 0) < 0 ? -1 : 1, fired: [{ id: 'choose_type', choice: 'base' }], current: 'from_point' };
+}
+
+/** Apply a typed positive distance with the run's N/S or E/W choice. */
+export function signedTape(text: number | undefined, sign: 1 | -1 | undefined): number | undefined {
+  return text == null ? undefined : Math.abs(text) * (sign ?? 1);
 }
 
 /**
@@ -116,19 +105,11 @@ export function networkOf(ties: BaseGridDoc['ties']): GridNetworkResult | undefi
 export function diagonalCheck(doc: GardenDocument, run: PointRun): { expectedM: number; diffMm: number; red: boolean; warning?: GridDiagonalWarning } | undefined {
   if (run.northM == null || run.eastM == null || run.diagonalM == null || !run.from) return undefined;
   const expectedM = Math.hypot(run.northM, run.eastM);
-  const to = nextBaseId(doc);
-  const net = networkOf([...baseGridOf(doc).ties, { id: 'new', from: run.from, to, northM: run.northM, eastM: run.eastM, diagonalM: run.diagonalM, savedAt: '' }]);
+  const to = targetBaseId(doc, run);
+  const net = networkOf([...baseGridOf(doc).ties.filter((t) => t.to !== to), { id: 'new', from: run.from, to, northM: run.northM, eastM: run.eastM, diagonalM: run.diagonalM, savedAt: '' }]);
   const warning = net?.warnings.find((w) => w.point === to);
   const diffMm = Math.round((run.diagonalM - expectedM) * 1000);
   return { expectedM, diffMm, red: !!warning, warning };
-}
-
-/** Per base point: the diagonal warning, if any (for the list highlight). */
-export function baseWarnings(doc: GardenDocument): Record<string, GridDiagonalWarning> {
-  const net = networkOf(baseGridOf(doc).ties);
-  const out: Record<string, GridDiagonalWarning> = {};
-  for (const w of net?.warnings ?? []) out[w.point] = w;
-  return out;
 }
 
 // ---------------------------------------------------------------- guards
@@ -138,7 +119,7 @@ export function stepReason(doc: GardenDocument, run: PointRun, stepId: string, s
   const step = pointNet.steps.find((s) => s.id === stepId);
   if (!step) return null;
   const r = step.reasons;
-  const first = isFirstBasePoint(doc);
+  const first = isFirstBasePoint(doc, run);
   switch (stepId) {
     case 'choose_type':
       return run.type ? null : r.no_type;
@@ -202,20 +183,13 @@ export function edit(run: PointRun, stepId: string, patch: Partial<PointRun>): P
 
 // ---------------------------------------------------------------- saving
 
+/** Save base point: tie and post type together (one button), then the whole grid re-solves. */
 export function saveBasePoint(doc: GardenDocument, run: PointRun, now = new Date().toISOString()): { doc: GardenDocument; id: string } {
-  const id = nextBaseId(doc);
-  const grid: BaseGridDoc = doc.baseGrid ?? { points: [], ties: [] };
-  const first = isFirstBasePoint(doc);
+  const id = targetBaseId(doc, run);
+  const first = isFirstBasePoint(doc, run);
   const sep = run.twoSleeve ? run.separationM ?? POST_SEPARATION_DEFAULT_M : undefined;
-  const points = [...grid.points.filter((p) => p.id !== id), { id, savedAt: now, ...(sep ? { postSeparationM: sep } : {}) }];
-  const ties = first
-    ? grid.ties
-    : [...grid.ties, { id: `tie-${id}`, from: run.from!, to: id, northM: run.northM, eastM: run.eastM, diagonalM: run.diagonalM, savedAt: now }];
-  const net = networkOf(ties);
-  const xy = id === 'BAS01' ? { x: 0, y: 0 } : net?.points[id];
-  const point = { id, kind: 'BL' as const, layerId: 'base', fixed: true, label: id, ...(xy ? { x: xy.x, y: xy.y } : {}) };
-  const others = doc.points.filter((p) => p.id !== id);
-  return { doc: { ...doc, baseGrid: { ...grid, points, ties }, points: [...others, point], updatedAt: now }, id };
+  const next = upsertBasePoint(doc, first ? { id, postSeparationM: sep } : { id, from: run.from, northM: run.northM, eastM: run.eastM, diagonalM: run.diagonalM, postSeparationM: sep }, now);
+  return { doc: next, id };
 }
 
 export function newPhotoPointId(doc: GardenDocument, layer: PhotoLayer): string {
@@ -370,7 +344,7 @@ const DIRS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west'
 export function hintsFor(doc: GardenDocument, run: PointRun, solve?: PhotoPointSolve): Hint[] {
   const out: Hint[] = [];
   const grid = baseGridOf(doc);
-  if (grid.ids.length < 3) out.push({ id: 'fewer_than_3', text: t(pointNet, 'fewer_than_3', { n: grid.ids.length }) });
+  if (grid.ids.length < MIN_BASE_POINTS_FOR_PHOTOS) out.push({ id: 'fewer_than_3', text: t(pointNet, 'fewer_than_3', { n: grid.ids.length }) });
   if (run.type === 'photo' && solve && solve.seen.length === 2) {
     const net = networkOf(grid.ties);
     const [a, b] = solve.seen;
@@ -385,4 +359,9 @@ export function hintsFor(doc: GardenDocument, run: PointRun, solve?: PhotoPointS
   }
   if (run.type === 'photo' && solve?.message && /danger|line/i.test(solve.message)) out.push({ id: 'bad_geometry', text: t(pointNet, 'bad_geometry') });
   return out.filter((h) => !run.dismissedHints.includes(h.id));
+}
+
+/** Photo points show once there are 3 base points (or after "Show anyway"): advice, not a gate. */
+export function photoPointsShown(doc: GardenDocument, run?: PointRun): boolean {
+  return basePointCount(doc) >= MIN_BASE_POINTS_FOR_PHOTOS || !!run?.showAll || run?.type === 'photo';
 }

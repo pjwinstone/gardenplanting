@@ -15,6 +15,7 @@ import {
   type EdgePhoto,
   type GridNetworkResult,
 } from '../../solver/controlCluster';
+import { baseGridOf, baseNetworkForDoc } from '../../baseGrid';
 import { linkedPhotosForStep } from './engine';
 import { migrateFieldTestSetup } from './fieldTestMeta';
 import { edgePointsFor } from './markerSet';
@@ -119,13 +120,15 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
   const values = migrateFieldTestSetup(run.setup?.values);
   const needs = (headline: string, guidance: string[]): CircleResultDetail => ({ verdict: { state: 'needs-data', headline, guidance }, gates: [], unlevelled: 0 });
   if (!doc) return needs('No garden open.', []);
-  const network = baseNetworkForRun(run);
-  if (!network) return needs('No base points yet.', ['Add base points to the base grid: East, North and the diagonal from BAS01 (step: Grow the base grid).']);
+  // One base grid for the whole garden (Add point > Base point), plus older ties on this run.
+  const grid = baseGridOf(doc, run);
+  const network = baseNetworkForDoc(doc, run);
+  if (!network) return needs('No base points yet.', ['Add base points with Add point > Base point (at least 3; 4 or more in view is better).']);
   const red = network.diagonals.filter((o) => o.flag === 'red');
   const fx = calibrationFx(doc, run);
   if (!fx) return { ...needs('No focal length yet.', ['Take and mark the calibration photo (step: Calibration photo).']), network };
   const ids = [...network.order];
-  const postSep = (id: string) => run.basePostSeparationM?.[id] ?? values.post_separation_m;
+  const postSep = (id: string) => grid.postSeparation[id] ?? values.post_separation_m;
   const control = [{ id: 'BAS01', x: 0, y: 0 }, ...ids.map((id) => ({ id, ...network.points[id] }))].map((c) => ({ ...c, postSeparationM: postSep(c.id) }));
   const sub = subCovariance(network, ids);
   // BAS01 is the datum: a tiny σ keeps the prior block positive definite.

@@ -7,8 +7,14 @@
 import type { GardenDocument, Photo } from '../model';
 import { POST_SEPARATION_DEFAULT_M } from '../solver/controlCluster';
 import { attachRollerWheel } from '../workflows/guided/guidedRoller';
+import { basePointCount, MIN_BASE_POINTS_FOR_PHOTOS } from '../baseGrid';
+import { containScroll, renderBasePointList } from './basePointList';
 import {
   addRunPhoto,
+  editBasePointRun,
+  photoPointsShown,
+  signedTape,
+  targetBaseId,
   baseGridOf,
   cancelRun,
   baseWarnings,
@@ -23,7 +29,6 @@ import {
   isFirstBasePoint,
   livePhotos,
   newPointRun,
-  nextBaseId,
   nextNeeded,
   PHOTO_LAYERS,
   photoPointSolve,
@@ -131,6 +136,22 @@ function btn(text: string, cmd: string, opts: { primary?: boolean; reason?: stri
   return b;
 }
 
+function tapeWithToggle(label: string, field: string, value: number | undefined, testid: string, signField: 'nSign' | 'eSign', sign: 1 | -1, names: [string, string]): HTMLElement {
+  const wrap = el('div', 'screen-tape');
+  wrap.append(numberInput(label, field, value == null ? undefined : Math.abs(value), testid));
+  const tog = el('div', 'screen-toggle');
+  tog.setAttribute('role', 'group');
+  ([1, -1] as const).forEach((v, i) => {
+    const b = btn(names[i]!, 'screen-sign', { data: { field: signField, value: String(v) }, testid: `${testid}-${v > 0 ? 'plus' : 'minus'}` });
+    b.classList.add('screen-toggle-btn');
+    if (sign === v) b.classList.add('screen-choice-on');
+    b.setAttribute('aria-pressed', String(sign === v));
+    tog.append(b);
+  });
+  wrap.append(tog);
+  return wrap;
+}
+
 function numberInput(label: string, field: string, value: number | undefined, testid: string): HTMLElement {
   const wrap = el('label', 'screen-field');
   wrap.append(el('span', '', label));
@@ -157,17 +178,31 @@ function choiceButton(text: string, cmd: string, selected: boolean, data: Record
 // ------------------------------------------------------------------ render
 
 export function renderScreens(doc: GardenDocument): HTMLElement | null {
-  if (screen === 'home') return renderHome();
+  if (screen === 'home') return renderHome(doc);
   if (!run) return null;
   if (viewerPhotoId) return renderViewer(doc, run, viewerPhotoId);
   return renderStep(doc, run);
 }
 
-function renderHome(): HTMLElement {
+let homeShowAll = false;
+
+function renderHome(doc: GardenDocument): HTMLElement {
   const sheet = el('section', 'screen-sheet screen-home');
   sheet.dataset.testid = 'screen-home';
-  sheet.append(btn('Add point', 'screen-start-point', { primary: true, testid: 'home-add-point' }));
-  sheet.append(btn('Circle test', 'screen-circle-test', { primary: true, testid: 'home-circle-test' }));
+  const row = el('div', 'screen-home-row');
+  row.append(btn(t(pointNet, 'home_add_point'), 'screen-start-point', { primary: true, testid: 'home-add-point' }));
+  // A new survey starts with base points; the circle test shows once there are 3 (advice only).
+  const n = basePointCount(doc);
+  if (n >= MIN_BASE_POINTS_FOR_PHOTOS || homeShowAll) row.append(btn(t(pointNet, 'home_circle_test'), 'screen-circle-test', { primary: true, testid: 'home-circle-test' }));
+  sheet.append(row);
+  if (n < MIN_BASE_POINTS_FOR_PHOTOS && !homeShowAll) {
+    const tip = el('div', 'screen-hint');
+    tip.dataset.testid = 'hint-circle-hidden';
+    tip.append(el('span', '', t(pointNet, 'circle_hidden', { n })));
+    tip.append(btn(t(pointNet, 'show_anyway'), 'screen-home-show-all', { testid: 'home-show-all' }));
+    sheet.append(tip);
+  }
+  sheet.append(renderBasePointList(doc));
   return sheet;
 }
 
@@ -254,7 +289,7 @@ function renderStep(doc: GardenDocument, r: PointRun): HTMLElement {
   const photoPoint = r.type === 'photo' && isDone(r, 'layer');
   row.append(btn(t(pointNet, 'photos_btn'), 'screen-take-photo', { reason: photoPoint ? null : t(pointNet, 'why', { reason: pointNet.steps.find((s) => s.id === 'layer')!.reasons.no_layer! }), testid: 'btn-photos' }));
   row.append(btn(t(pointNet, 'back_btn'), 'screen-back', { reason: at <= 0 ? t(pointNet, 'at_first_step') : null, testid: 'btn-back' }));
-  const nextBtn = btn(last ? t(pointNet, 'save_btn') : t(pointNet, 'next_btn'), last ? 'screen-save' : 'screen-next', { primary: true, reason, testid: 'btn-next' });
+  const nextBtn = btn(last ? t(pointNet, step.id === 'save_photo' ? 'save_photo_btn' : 'save_btn') : t(pointNet, 'next_btn'), last ? 'screen-save' : 'screen-next', { primary: true, reason, testid: 'btn-next' });
   row.append(nextBtn);
   row.append(btn(t(pointNet, 'cancel_btn'), 'screen-cancel', { testid: 'btn-cancel' }));
   sheet.append(row);
@@ -268,29 +303,41 @@ function renderStep(doc: GardenDocument, r: PointRun): HTMLElement {
 
 function renderBody(doc: GardenDocument, r: PointRun, stepId: string, solve: ReturnType<typeof photoPointSolve> | undefined): HTMLElement {
   const body = el('div', 'screen-body');
-  const first = isFirstBasePoint(doc);
+  const first = isFirstBasePoint(doc, r);
+  const target = targetBaseId(doc, r);
   switch (stepId) {
     case 'choose_type':
       body.append(choiceButton(t(pointNet, 'type_base'), 'screen-type', r.type === 'base', { value: 'base' }, 'type-base', t(pointNet, 'type_base_help')));
-      body.append(choiceButton(t(pointNet, 'type_photo'), 'screen-type', r.type === 'photo', { value: 'photo' }, 'type-photo', t(pointNet, 'type_photo_help')));
+      if (photoPointsShown(doc, r)) body.append(choiceButton(t(pointNet, 'type_photo'), 'screen-type', r.type === 'photo', { value: 'photo' }, 'type-photo', t(pointNet, 'type_photo_help')));
+      else {
+        const tip = el('div', 'screen-hint');
+        tip.dataset.testid = 'hint-photo-hidden';
+        tip.append(el('span', '', t(pointNet, 'photo_hidden', { n: basePointCount(doc) })));
+        tip.append(btn(t(pointNet, 'show_anyway'), 'screen-show-all', { testid: 'show-all' }));
+        body.append(tip);
+      }
       break;
     case 'from_point':
       if (first) body.append(el('p', '', t(pointNet, 'first_base')));
       else {
-        body.append(el('p', '', t(pointNet, 'new_point_is', { id: nextBaseId(doc) })));
+        body.append(el('p', '', t(pointNet, r.editId ? 'editing_point' : 'new_point_is', { id: target })));
         const warn = baseWarnings(doc);
-        for (const id of baseGridOf(doc).ids) {
+        const list = el('div', 'screen-scroll-list');
+        containScroll(list);
+        body.append(list);
+        for (const id of baseGridOf(doc).ids.filter((x) => x !== r.editId)) {
           const b = choiceButton(id, 'screen-from', r.from === id, { value: id }, `from-${id}`, warn[id]?.text);
           if (warn[id]) b.classList.add(Math.abs(warn[id]!.w) > 2 * 3.29 ? 'screen-choice-red' : 'screen-choice-amber');
-          body.append(b);
+          list.append(b);
         }
       }
       break;
     case 'offsets':
       if (first) body.append(el('p', '', t(pointNet, 'not_needed_first')));
       else {
-        body.append(numberInput(t(pointNet, 'north_m'), 'northM', r.northM, 'in-north'));
-        body.append(numberInput(t(pointNet, 'east_m'), 'eastM', r.eastM, 'in-east'));
+        // Positive distance in the box, direction on the toggle (the iPhone pad has no minus).
+        body.append(tapeWithToggle(t(pointNet, 'north_m'), 'northM', r.northM, 'in-north', 'nSign', r.nSign ?? 1, [t(pointNet, 'dir_n'), t(pointNet, 'dir_s')]));
+        body.append(tapeWithToggle(t(pointNet, 'east_m'), 'eastM', r.eastM, 'in-east', 'eSign', r.eSign ?? 1, [t(pointNet, 'dir_e'), t(pointNet, 'dir_w')]));
       }
       break;
     case 'diagonal': {
@@ -316,7 +363,7 @@ function renderBody(doc: GardenDocument, r: PointRun, stepId: string, solve: Ret
       break;
     case 'save_base':
       body.append(el('p', '', t(pointNet, 'summary_base', {
-        id: nextBaseId(doc),
+        id: target,
         north: first ? 0 : r.northM ?? '',
         east: first ? 0 : r.eastM ?? '',
         from: first ? 'BAS01' : r.from ?? '',
@@ -404,7 +451,8 @@ const FIELD_STEP: Record<string, string> = { northM: 'offsets', eastM: 'offsets'
 function applyInput(input: HTMLInputElement): void {
   const field = input.dataset.field ?? '';
   if (!run || !FIELD_STEP[field]) return;
-  const v = num(input.value);
+  const raw = num(input.value);
+  const v = field === 'northM' ? signedTape(raw, run.nSign) : field === 'eastM' ? signedTape(raw, run.eSign) : raw;
   if ((run as unknown as Record<string, unknown>)[field] === v) return;
   run = edit(run, FIELD_STEP[field]!, { [field]: v } as Partial<PointRun>);
 }
@@ -430,6 +478,7 @@ export function handleScreenCommand(cmd: string, source: HTMLElement): boolean {
   switch (cmd) {
     case 'screen-start-point':
       run = newPointRun();
+      if (basePointCount(doc) < MIN_BASE_POINTS_FOR_PHOTOS) run = edit(run, 'choose_type', { type: 'base' });
       screen = 'add-point';
       lastCentred = null;
       savedScroll = undefined;
@@ -437,6 +486,35 @@ export function handleScreenCommand(cmd: string, source: HTMLElement): boolean {
     case 'screen-circle-test':
       h.openCircleTest();
       return true;
+    case 'screen-show-all':
+      if (run) run = { ...run, showAll: true };
+      break;
+    case 'screen-home-show-all':
+      homeShowAll = true;
+      break;
+    case 'screen-add-base':
+      run = edit(newPointRun(), 'choose_type', { type: 'base' });
+      screen = 'add-point';
+      lastCentred = null;
+      savedScroll = undefined;
+      break;
+    case 'screen-edit-base':
+      run = editBasePointRun(doc, value);
+      screen = 'add-point';
+      lastCentred = null;
+      savedScroll = undefined;
+      break;
+    case 'screen-sign': {
+      readLiveInputs(source.ownerDocument);
+      const f = source.dataset.field as 'nSign' | 'eSign';
+      const v = (Number(value) < 0 ? -1 : 1) as 1 | -1;
+      if (run && (f === 'nSign' || f === 'eSign')) {
+        const key = f === 'nSign' ? 'northM' : 'eastM';
+        const cur = run[key];
+        run = edit(run, 'offsets', { [f]: v, [key]: cur == null ? undefined : Math.abs(cur) * v } as Partial<PointRun>);
+      }
+      break;
+    }
     case 'screen-type':
       if (run) run = edit(run, 'choose_type', { type: value as PointRun['type'] });
       break;
