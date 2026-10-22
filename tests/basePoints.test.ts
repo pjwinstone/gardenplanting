@@ -89,3 +89,53 @@ describe('tasks 3–8: base points', () => {
     expect(src).not.toMatch(/Save tie|Save post/);
   });
 });
+
+import { deleteBasePoint, isDeletedBasePoint, restoreBasePoint } from '../src/baseGrid';
+import { deleteConfirmText } from '../src/screens/basePointList';
+import { baseNetworkForDoc } from '../src/baseGrid';
+
+describe('delete a base point (virtual node: the grid underneath is unchanged)', () => {
+  function chain() {
+    let d = grid();
+    d = upsertBasePoint(d, { id: 'BAS04', from: 'BAS03', northM: 2, eastM: 0, diagonalM: 2 }, NOW);
+    return d;
+  }
+  it('confirm says it leaves photos and dependants keep positions', () => {
+    const text = deleteConfirmText(chain(), 'BAS03');
+    expect(text).toMatch(/BAS03/);
+    expect(text).toMatch(/no longer be used in photos/);
+    expect(text).toMatch(/keep their positions/);
+  });
+  it('stops being a marker but its ties stay: dependants keep coordinates and covariance', () => {
+    const before = chain();
+    const d = deleteBasePoint(before, 'BAS03', NOW);
+    const g = baseGridOf(d);
+    expect(g.ids).not.toContain('BAS03');
+    expect(g.deletedIds).toEqual(['BAS03']);
+    expect(basePointCount(d)).toBe(3);
+    expect(d.points.some((p) => p.id === 'BAS03')).toBe(false);
+    const a = baseNetworkForDoc(before)!, b = baseNetworkForDoc(d)!;
+    expect(b.points.BAS04).toEqual(a.points.BAS04);
+    expect(b.covariance).toEqual(a.covariance);
+    expect(d.points.find((p) => p.id === 'BAS04')!.x).toBeCloseTo(before.points.find((p) => p.id === 'BAS04')!.x!);
+    const rows = basePointRows(d);
+    expect(rows.find((r) => r.id === 'BAS03')!.deleted).toBe(true);
+    expect(rows.find((r) => r.id === 'BAS04')!.warning).toBeUndefined();
+    expect(nextBaseId(d)).toBe('BAS05');
+  });
+  it('BAS01 can be deleted; 0,0 stays defined by the virtual BAS01', () => {
+    const before = chain();
+    const d = deleteBasePoint(before, 'BAS01', NOW);
+    expect(baseGridOf(d).ids).not.toContain('BAS01');
+    expect(baseNetworkForDoc(d)!.points.BAS02).toEqual(baseNetworkForDoc(before)!.points.BAS02);
+  });
+  it('a deleted point can still be edited (stays deleted, grid re-solves) and Restore brings it back', () => {
+    let d = deleteBasePoint(chain(), 'BAS03', NOW);
+    d = upsertBasePoint(d, { id: 'BAS03', from: 'BAS02', northM: 4.1, eastM: 0, diagonalM: 4.1 }, NOW);
+    expect(isDeletedBasePoint(d, 'BAS03')).toBe(true);
+    expect(baseNetworkForDoc(d)!.points.BAS03!.y).toBeCloseTo(4.1);
+    d = restoreBasePoint(d, 'BAS03', NOW);
+    expect(baseGridOf(d).ids).toContain('BAS03');
+    expect(d.points.some((p) => p.id === 'BAS03')).toBe(true);
+  });
+});

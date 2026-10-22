@@ -8,7 +8,8 @@ import type { GardenDocument, Photo } from '../model';
 import { POST_SEPARATION_DEFAULT_M } from '../solver/controlCluster';
 import { attachRollerWheel } from '../workflows/guided/guidedRoller';
 import { basePointCount, MIN_BASE_POINTS_FOR_PHOTOS } from '../baseGrid';
-import { containScroll, renderBasePointList } from './basePointList';
+import { clearSwiped, containScroll, setListNotice, deleteConfirmText, renderBasePointList } from './basePointList';
+import { deleteBasePoint, restoreBasePoint } from '../baseGrid';
 import {
   addRunPhoto,
   editBasePointRun,
@@ -497,6 +498,18 @@ export function handleScreenCommand(cmd: string, source: HTMLElement): boolean {
       screen = 'add-point';
       lastCentred = null;
       savedScroll = undefined;
+      break;
+    case 'screen-delete-base': {
+      const ok = typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(deleteConfirmText(doc, value)) : true;
+      if (!ok) break;
+      commitDoc(deleteBasePoint(doc, value));
+      clearSwiped();
+      setListNotice(t(pointNet, 'deleted_notice', { id: value }));
+      break;
+    }
+    case 'screen-restore-base':
+      commitDoc(restoreBasePoint(doc, value));
+      setListNotice(t(pointNet, 'restored_notice', { id: value }));
       break;
     case 'screen-edit-base':
       run = editBasePointRun(doc, value);

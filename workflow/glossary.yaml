@@ -45,7 +45,7 @@
 
 version: 1
 title: Garden Planting glossary
-revision: 13
+revision: 14
 reviewed_by:
 - agent: geometry-maths-advisor
   agent_id: e7e34885-32ba-4339-98a1-0479c57450a9
@@ -2080,7 +2080,7 @@ terms:
   - hamburger
 - id: base-point-list
   term: Base point list
-  short: Every base point with its position and post. Tap one to change its measurements.
+  short: Every base point with its position and post. Tap one to change it; swipe left to delete it.
   long: The list scrolls on its own and never moves the steps. Editing a point works out the whole base grid
     again and checks the diagonal again. A point with a diagonal warning is shown amber or red.
   category: app-screen
@@ -2124,4 +2124,19 @@ terms:
   - showAll
   - MIN_BASE_POINTS_FOR_PHOTOS
   related:
+  - base-point
+- id: delete-base-point
+  term: Delete base point
+  short: Swipe a base point left in the list, tap Delete, then confirm. It is no longer used in photos.
+  long: The point stops being a marker but its tape measurements stay in the base grid, so points measured
+    through it keep their positions and uncertainty. BAS01 can be deleted too; 0,0 stays where it was.
+    The list shows it greyed ("deleted, still links the grid"); you can still edit its measurements, and
+    Restore brings it back.
+  category: app-screen
+  code_names:
+  - deleteBasePoint
+  - restoreBasePoint
+  - deletedIds
+  related:
+  - base-point-list
   - base-point
