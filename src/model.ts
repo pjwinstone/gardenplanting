@@ -1223,4 +1223,9 @@ export interface BaseGridDoc {
   ties: { id: string; from: string; to: string; eastM?: number; northM?: number; diagonalM?: number; savedAt: string }[];
   /** Grid north vs compass north, degrees (reserved for sun work; not used by the solver). */
   gridToCompassDeg?: number;
+  /**
+   * Deleted base points: no longer markers, but their ties stay in the adjustment as virtual
+   * nodes (the underlying grid is unchanged). Restore removes the entry.
+   */
+  deleted?: { id: string; deletedAt: string }[];
 }

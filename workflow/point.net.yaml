@@ -113,13 +113,19 @@ text:
   dir_s: S
   dir_e: E
   dir_w: W
-  list_title: "Base points ({n}). Tap one to edit it."
+  list_title: "Base points ({n}). Tap one to edit it; swipe left to delete."
   list_empty: No base points yet. The first one is BAS01 at 0,0.
   list_position: "{n} N, {e} E"
   list_not_placed: Not placed yet
   list_from: "from {from}"
   list_post: "two-sleeve post {sep} m"
   list_add: Add base point
+  list_delete: Delete
+  delete_confirm: "Delete base point {id}? It will no longer be used in photos. Points measured through it keep their positions."
+  deleted_notice: "Base point {id} deleted. It still links the grid."
+  restored_notice: "Base point {id} restored."
+  list_restore: Restore
+  list_deleted: "Deleted, still links the grid. Not used in photos. Tap to edit its measurements."
   calib_previous: Previous photo
   calib_current: Current photo
   type_base: Base point
