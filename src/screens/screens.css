@@ -29,3 +29,6 @@
 .screen-green { color: #1f7a4d; }
 .screen-muted { color: #667; font-size: 13px; }
 .screen-viewer-img { width: 100%; border-radius: 12px; }
+.screen-amber { color: #8a5a00; }
+.screen-choice-amber { background: #fff3d6; border-color: #e2a400; }
+.screen-choice-red { background: #fde3e0; border-color: #c0392b; }

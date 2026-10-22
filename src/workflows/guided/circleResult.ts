@@ -155,10 +155,10 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
   }
   const centre = control.reduce((s, c) => ({ x: s.x + c.x / control.length, y: s.y + c.y / control.length }), { x: 0, y: 0 });
   try {
-    const out = controlCircleVerdict(
+    const runWith = (controlCovariance: number[][]) => controlCircleVerdict(
       {
         control,
-        controlCovariance: cov,
+        controlCovariance,
         photos: usable,
         fx0: fx.fx,
         calibrationSigmaRel: fx.sigmaRel,
@@ -172,9 +172,16 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
         plannedPoints: values.edge_points,
       },
     );
+    const out = runWith(cov);
     const verdict = { ...out.verdict };
+    // Diagonal-warning scaling may push the result out of tolerance: that is amber, not red.
+    if (verdict.state === 'red' && network.warnings.some((w) => w.factor > 1)) {
+      const raw = subCovariance({ ...network, covariance: network.covarianceUnscaled }, ids);
+      const rawCov = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i < 2 || j < 2 ? (i === j ? 1e-8 : 0) : raw[i - 2][j - 2])));
+      if (runWith(rawCov).verdict.state !== 'red') verdict.state = 'amber';
+    }
     const extra: string[] = [];
-    if (red.length) extra.push(`Base-point diagonal check fails on ${red.map((d) => `${d.from}→${d.to}`).join(', ')}: re-tape before trusting this.`);
+    if (network.warnings.length) extra.push(...network.warnings.map((w) => `${w.point}: ${w.text}.`));
     const skipped = photos.length - usable.length;
     if (skipped) extra.push(`${skipped} edge photo${skipped === 1 ? '' : 's'} left out: fewer than 3 tied base points tapped (and not 2 two-sleeve posts).`);
     if (misaligned.length) extra.push(`Two-sleeve post not used (top and bottom sleeve not one above the other): ${misaligned.join(', ')}. Check the taps, or plumb the post.`);

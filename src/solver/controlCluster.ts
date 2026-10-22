@@ -251,6 +251,26 @@ export interface GridNetworkResult {
   sigma0: number;
   gridToNorthRad: number;
   gridToNorthSigmaRad: number;
+  /** Failed diagonal checks, as warnings (never blocks). */
+  warnings: GridDiagonalWarning[];
+  /** Covariance before the diagonal-warning scaling (to tell whether the scaling alone made something red). */
+  covarianceUnscaled: number[][];
+}
+
+export interface GridDiagonalWarning {
+  /** Base point the failing tie places. */
+  point: string;
+  tie: number;
+  /** Taped diagonal minus the one from the N and E tapes, mm. */
+  offMm: number;
+  /** 1.96 × σ of that misclosure, mm. */
+  expectedMm: number;
+  w: number;
+  /** Factor on the point's σ (covariance ×factor²). 1 when it was Huber down-weighted instead. */
+  factor: number;
+  downWeighted: boolean;
+  /** "Diagonal off by X mm (expected ±Y mm); base point uncertainty ×Z" */
+  text: string;
 }
 
 /**
@@ -343,46 +363,105 @@ export function adjustGridNetwork(origin: string, ties: GridTie[], opts: GridNet
     return { A, l, sigma: rows.map((r) => r.sigma), blocks };
   };
 
-  let lsq = build();
-  let Ni: number[][] | null = null;
-  for (let it = 0; it < 10; it++) {
-    const { N, PA } = normals(lsq, m);
-    Ni = invSpd(N);
-    if (!Ni) throw new Error('The ties do not fix every point (add a tie).');
-    const rhs = Array<number>(m).fill(0);
-    lsq.A.forEach((_, i) => { for (let p = 0; p < m; p++) rhs[p] += PA[i][p] * lsq.l[i]; });
-    const dx = Ni.map((r) => r.reduce((s, v, q) => s + v * rhs[q], 0));
-    dx.forEach((d, i) => { par[i] += d; });
-    lsq = build();
-    if (Math.max(...dx.map(Math.abs)) < 1e-9) break;
+  const solve = () => {
+    let lsq = build();
+    let Ni: number[][] | null = null;
+    for (let it = 0; it < 10; it++) {
+      const { N, PA } = normals(lsq, m);
+      Ni = invSpd(N);
+      if (!Ni) throw new Error('The ties do not fix every point (add a tie).');
+      const rhs = Array<number>(m).fill(0);
+      lsq.A.forEach((_, i) => { for (let p = 0; p < m; p++) rhs[p] += PA[i][p] * lsq.l[i]; });
+      const dx = Ni.map((r) => r.reduce((s, v, q) => s + v * rhs[q], 0));
+      dx.forEach((d, i) => { par[i] += d; });
+      lsq = build();
+      if (Math.max(...dx.map(Math.abs)) < 1e-9) break;
+    }
+    const { N } = normals(lsq, m);
+    Ni = invSpd(N)!;
+    let vpv = 0;
+    const Pv = weightTimes(lsq, lsq.l.map((x) => -x));
+    const qvvs: number[] = [];
+    const observations: GridObservationResult[] = rows.map((r, i) => {
+      const v = -lsq.l[i];
+      const s2 = rowCov(lsq, i);
+      vpv += v * Pv[i];
+      const qvv = Math.max(s2 - quad(lsq.A[i], Ni!, lsq.A[i]), 0);
+      qvvs.push(qvv);
+      const rr = qvv / s2;
+      const w = qvv > 1e-16 ? v / Math.sqrt(qvv) : 0;
+      const flag: GridObservationResult['flag'] = rr < UNCHECKED_R ? 'grey' : Math.abs(w) > BLUNDER_W ? 'red' : Math.abs(w) > 1.96 ? 'amber' : 'green';
+      const t = ties[r.tie];
+      return { tie: r.tie, kind: r.kind, from: t.from, to: t.to, observedM: r.obs, residualM: v, sigmaM: Math.sqrt(s2), r: rr, w, flag };
+    });
+    return { Ni, vpv, observations, qvvs };
+  };
+
+  let sol = solve();
+  // Diagonal check as a warning, never a block (Paul, 22 Oct 2026; Geometry & Maths Advisor rule):
+  //  - |w| <= k (3.29): no change.
+  //  - |w| > k on a base point with local redundancy >= 2: Huber down-weight the reading with the
+  //    largest |w| at that point (weight p = k/|w|, i.e. sigma × |w|/k) and re-solve once.
+  //  - local redundancy 1 (the usual N + E + diagonal tie): keep the weights (no down-weighting),
+  //    keep the coordinates, and scale that point's covariance rows/columns so its 2×2 block grows
+  //    by sigma0² = v'Pv/dof = w². Downstream points pick this up through the normal covariance.
+  const k = BLUNDER_W;
+  const pointOf = (o: GridObservationResult) => (o.to === origin ? o.from : o.to);
+  const touches = (p: string) => rows.map((_, i) => i).filter((i) => ties[rows[i].tie].from === p || ties[rows[i].tie].to === p);
+  const localDof = (p: string) => touches(p).length - 2;
+  const redDiag = () => sol.observations.filter((o) => o.kind === 'diagonal' && Math.abs(o.w) > k);
+  const huberPts = [...new Set(redDiag().map(pointOf))].filter((p) => localDof(p) >= 2);
+  if (huberPts.length) {
+    for (const p of huberPts) {
+      const idx = touches(p).reduce((best, i) => (Math.abs(sol.observations[i].w) > Math.abs(sol.observations[best].w) ? i : best), touches(p)[0]);
+      const w = Math.abs(sol.observations[idx].w);
+      if (w > k) rows[idx].sigma *= w / k;
+    }
+    sol = solve();
   }
-  const { N } = normals(lsq, m);
-  Ni = invSpd(N)!;
+  const cov = sol.Ni.map((r) => [...r]);
+  const warnings: GridDiagonalWarning[] = [];
+  for (const o of redDiag()) {
+    const p = pointOf(o);
+    const t = ties[o.tie];
+    const scale = Math.abs(o.w);
+    const factor = localDof(p) >= 2 ? 1 : scale;
+    if (factor > 1) {
+      // C' = D·C·D with D = factor on this point's E, N rows: its block ×factor² (= sigma0²),
+      // its cross terms ×factor, so the extra uncertainty flows to points tied through it.
+      const c = col.get(p)!;
+      for (let i = 0; i < m; i++) for (const j of [c, c + 1]) { cov[i][j] *= factor; cov[j][i] = cov[i][j]; }
+      for (const i of [c, c + 1]) for (const j of [c, c + 1]) cov[i][j] = sol.Ni[i][j] * factor * factor;
+    }
+    const expected = t.eastM != null && t.northM != null ? Math.hypot(t.eastM, t.northM) : o.observedM - o.residualM;
+    const offMm = Math.round((o.observedM - expected) * 1000);
+    const idx = sol.observations.indexOf(o);
+    const plusMm = Math.round(1.96 * Math.sqrt(sol.qvvs[idx]) * 1000);
+    warnings.push({
+      point: p,
+      tie: o.tie,
+      offMm,
+      expectedMm: plusMm,
+      w: o.w,
+      factor,
+      downWeighted: factor === 1,
+      text: `Diagonal off by ${Math.abs(offMm)} mm (expected ±${plusMm} mm); base point uncertainty ×${factor.toFixed(1)}`,
+    });
+  }
   const dof = rows.length - m;
-  let vpv = 0;
-  const Pv = weightTimes(lsq, lsq.l.map((x) => -x));
-  const observations: GridObservationResult[] = rows.map((r, i) => {
-    const v = -lsq.l[i];
-    const s2 = rowCov(lsq, i);
-    vpv += v * Pv[i];
-    const qvv = Math.max(s2 - quad(lsq.A[i], Ni!, lsq.A[i]), 0);
-    const rr = qvv / s2;
-    const w = qvv > 1e-16 ? v / Math.sqrt(qvv) : 0;
-    const flag: GridObservationResult['flag'] = rr < UNCHECKED_R ? 'grey' : Math.abs(w) > BLUNDER_W ? 'red' : Math.abs(w) > 1.96 ? 'amber' : 'green';
-    const t = ties[r.tie];
-    return { tie: r.tie, kind: r.kind, from: t.from, to: t.to, observedM: r.obs, residualM: v, sigmaM: Math.sqrt(s2), r: rr, w, flag };
-  });
   const points: Record<string, Xy> = { [origin]: { x: 0, y: 0 } };
   for (const p of order) points[p] = get(p);
   return {
     points,
     order,
-    covariance: Ni,
-    observations,
-    diagonals: observations.filter((o) => o.kind === 'diagonal'),
-    sigma0: dof > 0 ? Math.sqrt(vpv / dof) : NaN,
+    covariance: cov,
+    covarianceUnscaled: sol.Ni,
+    observations: sol.observations,
+    diagonals: sol.observations.filter((o) => o.kind === 'diagonal'),
+    sigma0: dof > 0 ? Math.sqrt(sol.vpv / dof) : NaN,
     gridToNorthRad: opts.gridToNorthRad ?? 0,
     gridToNorthSigmaRad: opts.gridToNorthSigmaRad ?? (4 * Math.PI) / 180,
+    warnings,
   };
 }
 

@@ -88,6 +88,7 @@ import {
   commitWorkflow,
   hydrateWorkflowProgress,
   readProgress,
+  keepRollerPosition,
   rejectEvidenceWorkflow,
   withWorkflowEvent,
   workflowAfterUploadedPhoto,
@@ -1875,7 +1876,7 @@ function adoptRemoteGarden(
   clearGardenSaveOwed();
   setGardenCloudFileName(fileName);
   notifyCloudPrefsChanged();
-  setState({ doc: hydrateWorkflowProgress(doc), refuseMessage: null }, { fromRemote: true });
+  setState({ doc: keepRollerPosition(hydrateWorkflowProgress(doc), state.doc), refuseMessage: null }, { fromRemote: true });
   offerReattachLocalPhotos(localOnlyPhotos, preservedAs, localPoints);
   return true;
 }

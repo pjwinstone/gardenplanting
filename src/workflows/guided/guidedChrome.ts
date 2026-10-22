@@ -82,7 +82,7 @@ let chromeCommit: ((update: (doc: GardenDocument) => GardenDocument) => void) | 
  * re-render from elsewhere (photo loop, cloud status, error log) does not rebuild the wheel
  * under the user's finger or swallow a tap on a row pill. */
 let photosViewerPhoto: string | null = null;
-let rollerCache: { key: string; panel: HTMLElement; touching: () => boolean; recentre: () => void; currentId: string; scrollTop?: number } | null = null;
+let rollerCache: { key: string; panel: HTMLElement; busy: () => boolean; recentre: () => void; lastScroll?: number } | null = null;
 /** Set-up form edits not yet confirmed (dotted key -> typed text). Survives re-renders. */
 let setupDraft: Record<string, string> = {};
 let chromeDoc: GardenDocument | null = null;
@@ -433,11 +433,19 @@ function renderRollerPanel(
   // Action states are part of the key: an upload status change must redraw the pill.
   const actions = def.steps.map((step) => deriveActionState(chromeDoc, run, step));
   const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive(), actions });
-  // Same content: reuse the panel as it is. No recentre here: the wheel only moves when the
-  // user scrolls or taps Next/Back (a recentre on every redraw snapped a scrolling list back).
-  if (rollerCache && rollerCache.key === key) return rollerCache.panel;
-  const movedByUser = !rollerCache || rollerCache.currentId !== run.currentStepId;
-  const keepScroll = rollerCache?.scrollTop;
+  // Same content: reuse the panel. The app redraws by emptying the shell and appending again, and
+  // a list taken out of the page and put back loses its scroll (scrollTop 0 = Set-up in the
+  // capsule). That was the "flips to step 0 with no touch" bug: any background redraw (upload,
+  // archive drain timer, autosave, a diagonal-check notice) showed row 0, and the next touch
+  // settled on it. So every redraw puts the current row back in the capsule, unless the user is
+  // mid-scroll. This never changes currentStepId; only scroll settle, Next and Back do.
+  if (rollerCache && rollerCache.key === key) {
+    const cached = rollerCache;
+    requestAnimationFrame(() => {
+      if (cached.panel.isConnected && !cached.busy()) cached.recentre();
+    });
+    return cached.panel;
+  }
   const panel = el('section', 'workflow-roller-sheet');
   panel.dataset.testid = 'workflow-bar';
   const top = el('div', 'roller-top');
@@ -526,16 +534,16 @@ function renderRollerPanel(
     const currentRow = list.querySelector<HTMLElement>(`[data-step-id="${CSS.escape(currentId)}"]`);
     if (currentRow && list.clientHeight > 0) list.scrollTop = currentRow.offsetTop - pad;
   };
-  let handle: { touching: () => boolean } = { touching: () => false };
-  const cache: NonNullable<typeof rollerCache> = { key, panel, touching: () => handle.touching(), recentre, currentId, scrollTop: keepScroll };
+  // A redraw with new content while the user is mid-scroll keeps their position on the new list.
+  const prev = rollerCache;
+  const carry = prev && prev.busy() ? prev.lastScroll : undefined;
+  let handle: { busy: () => boolean } = { busy: () => false };
+  const cache: NonNullable<typeof rollerCache> = { key, panel, busy: () => handle.busy(), recentre, lastScroll: undefined };
   rollerCache = cache;
-  // Remember the user's position while attached: a detached list reads scrollTop 0.
-  list.addEventListener('scroll', () => { if (list.isConnected) cache.scrollTop = list.scrollTop; }, { passive: true });
+  list.addEventListener('scroll', () => { if (list.isConnected) cache.lastScroll = list.scrollTop; }, { passive: true });
   requestAnimationFrame(() => {
-    // Centre on the current row only when it changed (Next/Back/settle); otherwise keep the
-    // user's scroll position across a redraw (photo upload, doc save).
-    if (movedByUser || keepScroll === undefined) recentre();
-    else list.scrollTop = keepScroll;
+    if (carry !== undefined) list.scrollTop = carry;
+    else recentre();
     handle = attachRollerWheel(wheel, rowIds, currentId, (stepId) => {
       if (stepId === currentId) return;
       const update = (doc: GardenDocument): GardenDocument => {
@@ -725,9 +733,12 @@ function renderBaseTieForm(run: WorkflowRun): HTMLElement {
   ties.forEach((t, i) => {
     const row = el('div', 'base-tie-row');
     const readings = [t.eastM != null ? `E ${t.eastM.toFixed(3)}` : '', t.northM != null ? `N ${t.northM.toFixed(3)}` : '', t.diagonalM != null ? `diag ${t.diagonalM.toFixed(3)}` : ''].filter(Boolean).join(' · ');
-    const check = net?.diagonals.find((d) => d.tie === i);
-    const checkText = check ? ` — diagonal ${check.flag}, w ${check.w.toFixed(2)}, ${(check.residualM * 1000).toFixed(0)} mm` : '';
-    row.append(el('span', `roller-hint${check?.flag === 'red' ? ' roller-hint--warn' : ''}`, `${t.from}→${t.to}: ${readings}${checkText}`));
+    // A failing diagonal is a warning on that base point (amber, red when far out), never a block.
+    const warn = net?.warnings.find((w) => w.tie === i);
+    const checkText = warn ? ` — ${warn.text}` : '';
+    const cls = warn ? (Math.abs(warn.w) > 2 * 3.29 ? ' base-tie--red' : ' base-tie--amber') : '';
+    row.className = `base-tie-row${cls}`;
+    row.append(el('span', 'roller-hint', `${t.from}→${t.to}: ${readings}${checkText}`));
     const rm = button('Remove', 'workflow-base-tie-remove', { testid: 'base-tie-remove' });
     rm.dataset.tie = t.id;
     row.append(rm);

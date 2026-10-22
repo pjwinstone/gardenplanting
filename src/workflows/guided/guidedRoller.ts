@@ -96,6 +96,8 @@ export function wheelHeightPx(run: WorkflowRun): number {
 export interface RollerWheelHandle {
   /** True while a finger (or mouse) is on the wheel. A re-render must not move it then. */
   touching(): boolean;
+  /** True while the user is scrolling: finger down, or momentum not yet settled. */
+  busy(): boolean;
 }
 
 /**
@@ -111,8 +113,8 @@ export function attachRollerWheel(
 ): RollerWheelHandle {
   const list = wheel.querySelector<HTMLElement>('[data-roller-list]');
   let touching = false;
-  const handle: RollerWheelHandle = { touching: () => touching };
-  if (!list) return handle;
+  if (!list) return { touching: () => false, busy: () => false };
+  const handle: RollerWheelHandle = { touching: () => touching, busy: () => touching || userMoved || settleTimer !== undefined };
   const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   let raf = 0;
   let userMoved = false;

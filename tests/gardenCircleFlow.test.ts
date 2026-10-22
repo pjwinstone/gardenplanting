@@ -88,7 +88,7 @@ describe('garden circle field test (docs/garden-circle.md)', () => {
     expect(circleResultForRun(emptyDocument('x'), p.runs[ID]!).headline).toMatch(/No focal length yet/);
   });
 
-  it('Add base points: N/E/diagonal ties stored on the run, logged, re-adjusted; a bad diagonal is red', () => {
+  it('Add base points: N/E/diagonal ties stored on the run, logged, re-adjusted; a bad diagonal is a warning on that base point', () => {
     expect(baseTieFromDraft({ from: 'bas01', to: 'bas03', e: '3,2', n: '4.1', d: '' })).toEqual({ from: 'BAS01', to: 'BAS03', eastM: 3.2, northM: 4.1, diagonalM: undefined });
     expect(baseTieFromDraft({ from: 'BAS01', to: 'BAS03', e: 'x', n: '', d: '' })).toBeNull();
     let p = fresh();
@@ -100,7 +100,7 @@ describe('garden circle field test (docs/garden-circle.md)', () => {
     expect(ok.notice).toMatch(/every diagonal checks out/);
     p = tickWorkflow(ok.progress, 'circle-result', undefined, NOW).progress;
     const bad = saveBaseTieWorkflow(p, { from: 'BAS03', to: 'BAS04', eastM: -1.8, northM: 2.2, diagonalM: Math.hypot(1.8, 2.2) + 0.03 }, NOW);
-    expect(bad.notice).toMatch(/Diagonal check fails on BAS03→BAS04/);
+    expect(bad.notice).toMatch(/BAS04: Diagonal off by \d+ mm \(expected ±\d+ mm\); base point uncertainty ×/);
     const run = bad.progress.runs[ID]!;
     expect(run.baseTies).toHaveLength(3);
     expect(run.runLog?.filter((e) => e.type === 'base-tie.saved')).toHaveLength(3);
