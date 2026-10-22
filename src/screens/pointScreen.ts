@@ -11,6 +11,7 @@ import {
   addRunPhoto,
   baseGridOf,
   cancelRun,
+  baseWarnings,
   diagonalCheck,
   edit,
   ensurePhotoPoint,
@@ -277,7 +278,12 @@ function renderBody(doc: GardenDocument, r: PointRun, stepId: string, solve: Ret
       if (first) body.append(el('p', '', t(pointNet, 'first_base')));
       else {
         body.append(el('p', '', t(pointNet, 'new_point_is', { id: nextBaseId(doc) })));
-        for (const id of baseGridOf(doc).ids) body.append(choiceButton(id, 'screen-from', r.from === id, { value: id }, `from-${id}`));
+        const warn = baseWarnings(doc);
+        for (const id of baseGridOf(doc).ids) {
+          const b = choiceButton(id, 'screen-from', r.from === id, { value: id }, `from-${id}`, warn[id]?.text);
+          if (warn[id]) b.classList.add(Math.abs(warn[id]!.w) > 2 * 3.29 ? 'screen-choice-red' : 'screen-choice-amber');
+          body.append(b);
+        }
       }
       break;
     case 'offsets':
@@ -295,7 +301,12 @@ function renderBody(doc: GardenDocument, r: PointRun, stepId: string, solve: Ret
       body.append(numberInput(t(pointNet, 'diagonal_m'), 'diagonalM', r.diagonalM, 'in-diagonal'));
       if (r.northM != null && r.eastM != null) body.append(el('p', '', t(pointNet, 'diagonal_expected', { expected: Math.hypot(r.northM, r.eastM).toFixed(3) })));
       const c = diagonalCheck(doc, r);
-      if (c) body.append(el('p', c.red ? 'screen-red' : 'screen-green', t(pointNet, c.red ? 'diagonal_red' : 'diagonal_ok', { diff: c.diffMm })));
+      if (c) {
+        const msg = c.warning ? c.warning.text : t(pointNet, 'diagonal_ok', { diff: c.diffMm });
+        const line = el('p', c.warning ? 'screen-amber' : 'screen-green', msg);
+        line.dataset.testid = 'diagonal-check';
+        body.append(line);
+      } else if (r.diagonalM == null) body.append(el('p', 'screen-amber', t(pointNet, 'diagonal_missing')));
       break;
     }
     case 'post':

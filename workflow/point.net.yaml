@@ -49,10 +49,10 @@ steps:
   - id: diagonal
     branch: base
     title: Diagonal check
-    needs: Tape the diagonal straight from the existing base point to the new one.
+    needs: Tape the diagonal straight from the existing base point to the new one. It is a check, never a block; if it is off, the point is kept with a larger uncertainty and the reason.
     consume: [offsets_taped]
     produce: [diagonal_checked]
-    reasons: {no_diagonal: Needs the diagonal tape., diagonal_red: "The diagonal does not agree with the N and E tapes. Re-tape before going on."}
+    reasons: {}
 
   - id: post
     branch: base
@@ -115,7 +115,7 @@ text:
   diagonal_m: Diagonal (m)
   diagonal_expected: "From the N and E tapes the diagonal should be {expected} m."
   diagonal_ok: "Diagonal check passed (off by {diff} mm)."
-  diagonal_red: "Diagonal check failed: off by {diff} mm. Re-tape."
+  diagonal_missing: "No diagonal yet: the base point is saved unchecked. Tape it when you can."
   single_sleeve: Single sleeve
   two_sleeve: Two-sleeve post
   separation_m: Sleeve separation, centre to centre (m)

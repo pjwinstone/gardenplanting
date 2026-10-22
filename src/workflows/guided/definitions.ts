@@ -104,10 +104,10 @@ export const circleFieldTest: WorkflowDefinition = {
       detail: [
         'BAS01 is the origin of a North/East grid. Set North and East by eye or with the compass; the grid is the frame, north is for display only.',
         'For each new base point (BAS02, BAS03, … from the marker set): from a point already placed, tape how far East it is and how far North (minus for west or south), then tape the diagonal straight to it. Type the three and Save tie.',
-        'The diagonal is the check. If it shows red, re-tape that tie (remove it and save it again). Extra ties to other points make it stronger.',
+        'The diagonal is the check. If it is off, the base point is kept with a larger uncertainty and the reason (amber in the list); re-tape when you can. Extra ties to other points make it stronger.',
         'Spread several base points so each edge point will see 4 or more of them at good angles: some near the middle, staggered so none hides behind another. Plumb each post.',
         'Two-sleeve posts: where bushes leave only 2 base points in view, put a bottom sleeve (BASnnB) on those posts. Type the top-to-bottom distance (centre to centre) in Post sleeves apart and Save post; blank uses the Set-up default (1.2 m). Two such posts give a 2-point fix (amber, unchecked); with 3 or more base points in view their ranges add checks.',
-        'Tick when every base point is placed and no diagonal is red.',
+        'Tick when every base point is placed. A diagonal warning does not stop you.',
       ],
       noteLabel: 'Base points',
       complete: { on: 'manual' },

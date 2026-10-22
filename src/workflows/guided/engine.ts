@@ -464,6 +464,27 @@ export function hydrateWorkflowProgress(doc: GardenDocument): GardenDocument {
   return { ...doc, workflowProgress: mirrored };
 }
 
+/**
+ * The roller position is this phone's own view, not survey data. When a OneDrive copy replaces
+ * the garden (autosave conflict, sign-in, open), keep the row the user is on: a remote copy saved
+ * earlier carries an older currentStepId (often Set-up), which made the roller jump with no touch.
+ */
+export function keepRollerPosition(remote: GardenDocument, local: GardenDocument | null | undefined): GardenDocument {
+  const lp = readProgress(local ?? undefined);
+  const rp = remote.workflowProgress;
+  if (!rp) return remote;
+  let changed = false;
+  const runs = { ...rp.runs };
+  for (const [id, run] of Object.entries(runs) as [WorkflowId, WorkflowRun | undefined][]) {
+    const mine = lp.runs[id];
+    if (run && mine && mine.startedAt === run.startedAt && mine.currentStepId !== run.currentStepId) {
+      runs[id] = { ...run, currentStepId: mine.currentStepId };
+      changed = true;
+    }
+  }
+  return changed ? { ...remote, workflowProgress: { ...rp, runs } } : remote;
+}
+
 export function commitWorkflow(doc: GardenDocument, progress: WorkflowProgress): GardenDocument {
   writeWorkflowMirror(progress, doc.createdAt);
   const empty = !progress.activeId && Object.keys(progress.runs).length === 0 && !(progress.pastRuns?.length);
@@ -1156,12 +1177,11 @@ export function baseNetworkSummary(ties: BaseTie[]): { ok: boolean; text: string
   if (!ties.length) return { ok: false, text: 'No ties yet.' };
   try {
     const net = adjustGridNetwork('BAS01', ties);
-    const red = net.diagonals.filter((d) => d.flag === 'red');
     const placed = Object.keys(net.points).length;
-    const text = red.length
-      ? `${placed} base points. Diagonal check fails on ${red.map((d) => `${d.from}→${d.to} (w ${d.w.toFixed(1)})`).join(', ')}: re-tape that tie.`
+    const text = net.warnings.length
+      ? `${placed} base points. ${net.warnings.map((w) => `${w.point}: ${w.text}`).join('. ')}.`
       : `${placed} base points placed; every diagonal checks out.`;
-    return { ok: red.length === 0, text, net };
+    return { ok: net.warnings.length === 0, text, net };
   } catch (err) {
     return { ok: false, text: (err as Error).message };
   }

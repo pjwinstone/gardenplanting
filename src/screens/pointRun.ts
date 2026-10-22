@@ -12,6 +12,7 @@ import {
   sightingsFromPhoto,
   subCovariance,
   type EdgeGate,
+  type GridDiagonalWarning,
   type GridNetworkResult,
 } from '../solver/controlCluster';
 import { calibrationFx } from '../workflows/guided/circleResult';
@@ -108,15 +109,26 @@ export function networkOf(ties: BaseGridDoc['ties']): GridNetworkResult | undefi
   }
 }
 
-/** Diagonal check on the new tie, within the whole base grid. */
-export function diagonalCheck(doc: GardenDocument, run: PointRun): { expectedM: number; diffMm: number; red: boolean } | undefined {
+/**
+ * Diagonal check on the new tie, within the whole base grid. A warning only: it never blocks
+ * Next or Save. `warning` carries the text and the factor on the point's uncertainty.
+ */
+export function diagonalCheck(doc: GardenDocument, run: PointRun): { expectedM: number; diffMm: number; red: boolean; warning?: GridDiagonalWarning } | undefined {
   if (run.northM == null || run.eastM == null || run.diagonalM == null || !run.from) return undefined;
   const expectedM = Math.hypot(run.northM, run.eastM);
   const to = nextBaseId(doc);
   const net = networkOf([...baseGridOf(doc).ties, { id: 'new', from: run.from, to, northM: run.northM, eastM: run.eastM, diagonalM: run.diagonalM, savedAt: '' }]);
-  const obs = net?.diagonals.find((o) => o.to === to && o.from === run.from);
+  const warning = net?.warnings.find((w) => w.point === to);
   const diffMm = Math.round((run.diagonalM - expectedM) * 1000);
-  return { expectedM, diffMm, red: obs ? obs.flag === 'red' : Math.abs(diffMm) > 25 };
+  return { expectedM, diffMm, red: !!warning, warning };
+}
+
+/** Per base point: the diagonal warning, if any (for the list highlight). */
+export function baseWarnings(doc: GardenDocument): Record<string, GridDiagonalWarning> {
+  const net = networkOf(baseGridOf(doc).ties);
+  const out: Record<string, GridDiagonalWarning> = {};
+  for (const w of net?.warnings ?? []) out[w.point] = w;
+  return out;
 }
 
 // ---------------------------------------------------------------- guards
@@ -135,9 +147,9 @@ export function stepReason(doc: GardenDocument, run: PointRun, stepId: string, s
     case 'offsets':
       return first || (run.northM != null && run.eastM != null) ? null : r.no_offsets;
     case 'diagonal': {
-      if (first) return null;
-      if (run.diagonalM == null) return r.no_diagonal;
-      return diagonalCheck(doc, run)?.red ? r.diagonal_red : null;
+      // Always give an answer: a missing or failing diagonal is a warning, never a block.
+      void first;
+      return null;
     }
     case 'post': {
       if (!run.twoSleeve) return null;
@@ -313,6 +325,14 @@ export function photoPointSolve(doc: GardenDocument, run: PointRun): PhotoPointS
     const input = { control, controlCovariance: cov, photos: usable, fx0: fx.fx, calibrationSigmaRel: fx.sigmaRel, searchCentre: centre, searchRadiusM: 30 };
     const res = adjustSession(input);
     const gates = gateEdgePoints(input, res);
+    // A point pushed out of tolerance only by a base point's diagonal-warning scaling is amber, not red.
+    if (net.warnings.some((w) => w.factor > 1) && gates.some((g) => g.cls === 'red')) {
+      const raw = subCovariance({ ...net, covariance: net.covarianceUnscaled }, ids);
+      const rawCov = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i < 2 || j < 2 ? (i === j ? 1e-8 : 0) : raw[i - 2]![j - 2]!)));
+      const rawInput = { ...input, controlCovariance: rawCov };
+      const rawGates = gateEdgePoints(rawInput, adjustSession(rawInput));
+      gates.forEach((g, i) => { if (g.cls === 'red' && rawGates[i]?.cls !== 'red') g.cls = 'amber'; });
+    }
     // One spot, several photos: weighted mean of the photo positions; best gate wins.
     const order = ['green', 'amber', 'red', 'grey'] as const;
     const best = [...gates].sort((a, b) => order.indexOf(a.cls) - order.indexOf(b.cls))[0]!;

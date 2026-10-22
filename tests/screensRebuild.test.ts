@@ -6,6 +6,8 @@ import { attachRollerWheel, SETTLE_MS } from '../src/workflows/guided/guidedRoll
 import {
   addRunPhoto,
   baseGridOf,
+  baseWarnings,
+  diagonalCheck,
   cancelRun,
   edit,
   ensurePhotoPoint,
@@ -24,7 +26,7 @@ import {
   type PointRun,
 } from '../src/screens/pointRun';
 import { pointNet, t } from '../src/screens/stepNet';
-import { pendingArchiveJobs } from '../src/workflows/guided/engine';
+import { applyArchiveDrain, applyWorkflowEvent, commitWorkflow, confirmSetupWorkflow, emptyProgress, keepRollerPosition, pendingArchiveJobs, readProgress, saveBaseTieWorkflow, scrollWorkflowToStep, startWorkflow } from '../src/workflows/guided/engine';
 import { POST_SEPARATION_DEFAULT_M } from '../src/solver/controlCluster';
 
 function addBase(doc: GardenDocument, from: string, n: number, e: number, opts: { two?: boolean; sep?: number } = {}): GardenDocument {
@@ -69,12 +71,26 @@ describe('Add point: base point', () => {
     expect(nextBaseId(doc)).toBe('BAS03');
   });
 
-  it('a bad diagonal keeps Next off and says why', () => {
+  it('a bad diagonal is a warning: Next still works, the roller goes on (not to step 0)', () => {
     const doc = addBase(emptyDocument('g'), 'BAS01', 0, 0);
-    const run: PointRun = { ...edit(newPointRun(), 'choose_type', { type: 'base' }), from: 'BAS01', northM: 3, eastM: 4, diagonalM: 5.2, current: 'diagonal' };
-    expect(stepReason(doc, run, 'diagonal')).toMatch(/does not agree/);
-    expect(goNext(doc, run).run.current).toBe('diagonal');
-    expect(stepReason(doc, { ...run, diagonalM: undefined }, 'diagonal')).toBe('Needs the diagonal tape.');
+    const run: PointRun = { ...edit(newPointRun(), 'choose_type', { type: 'base' }), from: 'BAS01', northM: 3, eastM: 4, diagonalM: 5.02, current: 'diagonal', fired: [{ id: 'choose_type', choice: 'base' }, { id: 'from_point' }, { id: 'offsets' }] };
+    expect(stepReason(doc, run, 'diagonal')).toBeNull();
+    const c = diagonalCheck(doc, run)!;
+    expect(c.warning?.text).toMatch(/^Diagonal off by 20 mm/);
+    const moved = goNext(doc, run);
+    expect(moved.reason).toBeUndefined();
+    expect(moved.run.current).toBe('post');
+    expect(stepReason(doc, { ...run, diagonalM: undefined }, 'diagonal')).toBeNull();
+  });
+
+  it('the base point with a failing diagonal is highlighted in the list with the reason', () => {
+    let doc = addBase(emptyDocument('g'), 'BAS01', 0, 0);
+    let run: PointRun = edit(newPointRun(), 'choose_type', { type: 'base' });
+    for (const patch of [{}, { from: 'BAS01' }, { northM: 3, eastM: 4 }, { diagonalM: 5.02 }, {}] as Partial<PointRun>[]) {
+      run = goNext(doc, { ...run, ...patch }).run;
+    }
+    doc = saveBasePoint(doc, run).doc;
+    expect(baseWarnings(doc).BAS02?.text).toMatch(/Diagonal off by 20 mm \(expected ±\d+ mm\); base point uncertainty ×/);
   });
 
   it('two-sleeve post defaults to 1.2 m centre to centre', () => {
@@ -255,5 +271,46 @@ describe('wording comes from the net and the glossary', () => {
       expect(ids.has(id), id).toBe(true);
     }
     expect(g.terms.some((x) => x.term === 'Observation point')).toBe(false);
+  });
+});
+
+describe('nothing but scroll, Next and Back moves the circle roller', () => {
+  const ID = 'circle-field-test';
+  const onStep = (stepId: string) => {
+    let p = startWorkflow(emptyProgress(), ID, '2026-10-22T09:00:00Z').progress;
+    p = confirmSetupWorkflow(p, undefined, '2026-10-22T09:00:01Z').progress;
+    p = scrollWorkflowToStep(p, stepId, '2026-10-22T09:00:02Z').progress;
+    return p;
+  };
+  const cur = (p: ReturnType<typeof emptyProgress>) => p.runs[ID]?.currentStepId;
+
+  it('a failing diagonal on Grow the base grid does not move the roller', () => {
+    let p = onStep('add-base-points');
+    p = saveBaseTieWorkflow(p, { from: 'BAS01', to: 'BAS02', eastM: 4, northM: 3, diagonalM: 5 }).progress;
+    const bad = saveBaseTieWorkflow(p, { from: 'BAS02', to: 'BAS03', eastM: 2, northM: 2, diagonalM: Math.hypot(2, 2) + 0.03 });
+    expect(bad.changed).toBe(true);
+    expect(bad.notice).toMatch(/Diagonal off by 30 mm/);
+    expect(cur(bad.progress)).toBe('add-base-points');
+  });
+
+  it('background events (upload, autosave, archive drain) do not move it', () => {
+    const p = onStep('add-base-points');
+    const doc = commitWorkflow(emptyDocument('g'), p);
+    const saved = applyWorkflowEvent(p, { type: 'cloud.saved' });
+    expect(cur(saved)).toBe('add-base-points');
+    const up = applyWorkflowEvent(p, { type: 'photo.uploaded', stationId: 'Calibration', pointLabel: '', objectName: '', count: 1, photoIds: ['x'] } as never);
+    expect(cur(up)).toBe('add-base-points');
+    const drained = applyArchiveDrain(doc, { pending: [], done: [{ at: 'now', action: 'archived', photoId: 'x', fileName: 'x.jpg', path: 'photos/archive/x.jpg' }] });
+    expect(readProgress(drained).runs[ID]?.currentStepId).toBe('add-base-points');
+  });
+
+  it('a OneDrive copy saved earlier (on Set-up) does not pull the roller back to step 0', () => {
+    const p = onStep('add-base-points');
+    const local = commitWorkflow(emptyDocument('g'), p);
+    const remote = { ...local, workflowProgress: { ...p, runs: { ...p.runs, [ID]: { ...p.runs[ID]!, currentStepId: 'setup' } } } };
+    expect(readProgress(keepRollerPosition(remote, local)).runs[ID]?.currentStepId).toBe('add-base-points');
+    // A different run (another garden or a new run) is not touched.
+    const other = { ...remote, workflowProgress: { ...remote.workflowProgress, runs: { [ID]: { ...remote.workflowProgress.runs[ID]!, startedAt: 'other' } } } };
+    expect(readProgress(keepRollerPosition(other, local)).runs[ID]?.currentStepId).toBe('setup');
   });
 });

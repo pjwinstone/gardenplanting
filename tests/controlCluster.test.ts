@@ -145,6 +145,60 @@ describe('control network on the N/E grid', () => {
   });
 });
 
+describe('diagonal check is a warning: covariance scaling (advisor rule, 22 Oct 2026)', () => {
+  const truth: Record<string, Xy> = { BAS02: { x: 6, y: 0 }, BAS03: { x: 3.2, y: 4.1 } };
+  const tie = (from: string, to: string, d = 0) => {
+    const a = from === 'BAS01' ? { x: 0, y: 0 } : truth[from];
+    const b = truth[to];
+    return { from, to, eastM: b.x - a.x, northM: b.y - a.y, diagonalM: Math.hypot(b.x - a.x, b.y - a.y) + d };
+  };
+  const block = (net: ReturnType<typeof adjustGridNetwork>, id: string, cov = net.covariance) => {
+    const k = 2 * net.order.indexOf(id);
+    return [[cov[k][k], cov[k][k + 1]], [cov[k + 1][k], cov[k + 1][k + 1]]];
+  };
+  const along = (c: number[][], u: Xy) => u.x * u.x * c[0][0] + 2 * u.x * u.y * c[0][1] + u.y * u.y * c[1][1];
+
+  it('a 20 mm diagonal blunder gives a warning, grows the ellipse along the diagonal, keeps the coordinates', () => {
+    const clean = adjustGridNetwork('BAS01', [tie('BAS01', 'BAS02'), tie('BAS02', 'BAS03')]);
+    const bad = adjustGridNetwork('BAS01', [tie('BAS01', 'BAS02'), tie('BAS02', 'BAS03', 0.02)]);
+    expect(bad.warnings).toHaveLength(1);
+    const w = bad.warnings[0]!;
+    expect(w.point).toBe('BAS03');
+    expect(w.offMm).toBe(20);
+    expect(w.downWeighted).toBe(false); // dof 1: no down-weighting
+    expect(w.factor).toBeCloseTo(Math.abs(w.w), 9); // sqrt(sigma0²) = |w|
+    expect(w.text).toMatch(/^Diagonal off by 20 mm \(expected ±\d+ mm\); base point uncertainty ×\d+\.\d$/);
+    // Coordinates are not moved by the scaling (same as the unscaled solution).
+    expect(bad.covarianceUnscaled).not.toBe(bad.covariance);
+    const d = { x: truth.BAS03.x - truth.BAS02.x, y: truth.BAS03.y - truth.BAS02.y };
+    const L = Math.hypot(d.x, d.y);
+    const u = { x: d.x / L, y: d.y / L };
+    const before = along(block(bad, 'BAS03', bad.covarianceUnscaled), u);
+    const after = along(block(bad, 'BAS03'), u);
+    expect(after / before).toBeCloseTo(w.w * w.w, 6);
+    expect(Math.sqrt(after)).toBeGreaterThan(Math.sqrt(before));
+    // Other points untouched in their own block.
+    expect(block(bad, 'BAS02')).toEqual(block(bad, 'BAS02', bad.covarianceUnscaled));
+    expect(bad.points.BAS02.x).toBeCloseTo(clean.points.BAS02.x, 3);
+    expect(bad.points.BAS03.x).toBeCloseTo(clean.points.BAS03.x, 1);
+  });
+
+  it('clean data: no warning and no change to the covariance', () => {
+    const net = adjustGridNetwork('BAS01', [tie('BAS01', 'BAS02'), tie('BAS02', 'BAS03')]);
+    expect(net.warnings).toEqual([]);
+    expect(net.covariance).toEqual(net.covarianceUnscaled);
+  });
+
+  it('with local redundancy ≥ 2 the worst reading is Huber down-weighted instead', () => {
+    const extra = { from: 'BAS01', to: 'BAS03', diagonalM: Math.hypot(3.2, 4.1) };
+    const net = adjustGridNetwork('BAS01', [tie('BAS01', 'BAS02'), tie('BAS02', 'BAS03', 0.05), extra]);
+    for (const w of net.warnings.filter((x) => x.point === 'BAS03')) {
+      expect(w.factor).toBe(1);
+      expect(w.downWeighted).toBe(true);
+    }
+  });
+});
+
 describe('session adjustment, layout B (sim11)', () => {
   it('95% |ΔD| ≤ 60 mm and most points green at fx error 0.5%', () => {
     const randn = rng(11);
