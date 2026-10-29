@@ -8,14 +8,14 @@ const NOW = '2026-06-01T12:00:00.000Z';
 const src = { getAttribute: () => null };
 
 describe('Set-up step on the roller', () => {
-  it('Confirm leaves Set-up and moves to the first open step', () => {
+  it('Confirm saves the Set-up and stays on it (no auto-advance)', () => {
     const doc = commitWorkflow(emptyDocument('Circle day'), startWorkflow(emptyProgress(), 'circle-field-test', NOW).progress);
     expect(readProgress(doc).runs['circle-field-test']?.currentStepId).toBe('setup');
     const result = handleWorkflowCommand('workflow-confirm-setup', doc, src);
     expect(result.doc).toBeDefined();
     const run = readProgress(result.doc!).runs['circle-field-test']!;
     expect(run.setup?.status).toBe('confirmed');
-    expect(run.currentStepId).toBe('gather-kit');
+    expect(run.currentStepId).toBe('setup');
   });
 
   it('applies typed values (comma decimals) and rejects bad ones', () => {

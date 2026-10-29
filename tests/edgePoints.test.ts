@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { circleResultDetailForRun, edgeAssignmentsFor, edgePointRows, MIN_FIT_EDGE_POINTS, previousEdgePhoto } from '../src/workflows/guided/circleResult';
 import { deleteEdgePointWorkflow, readProgress, retakeOnePhotoInDoc, restoreEdgePointWorkflow, saveEdgeNoteWorkflow } from '../src/workflows/guided/engine';
-import { handleWorkflowCommand, installWorkflowChrome, renderGuidedChrome, renderGuidedOverlay } from '../src/workflows/guided/guidedChrome';
+import { handleWorkflowCommand, installWorkflowChrome, renderGuidedChrome, renderGuidedOverlay, resetGuidedNav } from '../src/workflows/guided/guidedChrome';
 import { clearSwiped } from '../src/screens/basePointList';
 import type { GardenDocument } from '../src/model';
 import { buildCircleDoc } from './fixtures/circleDoc';
@@ -15,6 +15,7 @@ const attrs = (a: Record<string, string>) => ({ getAttribute: (n: string) => a[n
 describe('circle test edge points', () => {
   beforeEach(() => {
     clearSwiped();
+    resetGuidedNav();
     vi.stubGlobal('confirm', () => true);
   });
 
@@ -70,7 +71,8 @@ describe('circle test edge points', () => {
     installWorkflowChrome(() => {}, (u) => { d = u(d); });
     const chrome = renderGuidedChrome(d);
     document.body.append(chrome);
-    expect(chrome.querySelector('[data-testid="edge-fit"]')!.textContent).toMatch(/5 points/);
+    expect(chrome.querySelector('[data-testid="edge-summary"]')!.textContent).toMatch(/^5 points · \d+ pass/);
+    expect(chrome.querySelector<HTMLButtonElement>('[data-testid="edge-fit-open"]')!.textContent).toMatch(/Circle fit/);
     const row = chrome.querySelector<HTMLElement>('[data-testid="edge-row-EDG02"]')!;
     handleWorkflowCommand('workflow-edge-open', d, attrs({ 'data-value': row.dataset.value!, 'data-point': 'EDG02' }));
     const modal = renderGuidedOverlay(d)!;

@@ -3665,7 +3665,9 @@ function buildSurveyView(): HTMLElement {
     wrap.appendChild(renderAddPointPetriChrome(doc));
   }
 
-  if (state.refuseMessage && !state.pointDialog && !state.petriAddPointOpen) {
+  // No global red message over the circle test: its errors sit on the point's row or pop-up
+  // (and in Tools > Error log). The list shows a one-line summary instead.
+  if (state.refuseMessage && !state.pointDialog && !state.petriAddPointOpen && !readProgress(doc).activeId) {
     wrap.appendChild(
       el('div', {
         className: 'refuse refuse--overlay',

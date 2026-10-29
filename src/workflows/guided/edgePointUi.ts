@@ -37,27 +37,53 @@ export function renderEdgeFitSummary(detail: CircleResultDetail): HTMLElement {
   box.dataset.testid = 'edge-fit';
   box.append(el('b', '', t(pointNet, 'edge_fit_title')));
   box.append(el('p', '', detail.verdict.headline));
-  const fit = detail.verdict.fit;
-  if (fit) box.append(el('p', 'edge-fit-num', `⌀ ${fit.diameterM.toFixed(3)} m ± ${Math.round(fit.sigmaDM * 1000)} mm · ${detail.fitIds?.length ?? 0} points${fit.dof > 0 ? ` · rms ${Math.round(fit.rmsM * 1000)} mm` : ''}`));
+  const line = edgeFitLine(detail);
+  if (line) box.append(el('p', 'edge-fit-num', line));
   return box;
 }
 
-export function renderEdgeList(rows: EdgePointRow[], notice: string | null): HTMLElement {
+/** '⌀ 12.001 m ± 12 mm · 8 points · rms 7 mm', or '' before a fit. */
+export function edgeFitLine(detail: CircleResultDetail): string {
+  const fit = detail.verdict.fit;
+  return fit ? `⌀ ${fit.diameterM.toFixed(3)} m ± ${Math.round(fit.sigmaDM * 1000)} mm · ${detail.fitIds?.length ?? 0} points${fit.dof > 0 ? ` · rms ${Math.round(fit.rmsM * 1000)} mm` : ''}` : '';
+}
+
+/** One line, no log: '8 points · 5 pass · 2 amber · 1 red · 1 deleted'. */
+export function edgeSummaryText(rows: EdgePointRow[]): string {
+  const live = rows.filter((r) => !r.deleted);
+  const c = (lv: string) => live.filter((r) => r.level === lv).length;
+  const unused = c('unused') + c('grey');
+  return t(pointNet, 'edge_summary', { n: rows.length, pass: c('green'), amber: c('amber'), red: c('red'), deleted: rows.length - live.length })
+    + (unused ? t(pointNet, 'edge_summary_unused', { unused }) : '');
+}
+
+/**
+ * A button for one child substage: its name, and under it whether it is available (or why not)
+ * and what it does / why now. Not available = still shown, disabled, with the reason.
+ */
+export function substageButton(label: string, cmd: string, testid: string, why: string, opts: { disabled?: boolean; primary?: boolean; data?: Record<string, string> } = {}): HTMLButtonElement {
+  const b = btn('', cmd, `screen-btn substage-btn${opts.primary ? ' screen-primary' : ''}`, opts.data ?? {}, testid);
+  b.append(el('b', 'substage-name', label), el('small', 'substage-why', why));
+  b.dataset.why = why;
+  if (opts.disabled) {
+    b.disabled = true;
+    b.setAttribute('aria-disabled', 'true');
+  }
+  return b;
+}
+
+export function renderEdgeList(rows: EdgePointRow[], opts: { focus?: string | null } = {}): HTMLElement {
   const box = el('div', 'base-list edge-list');
   box.dataset.testid = 'edge-point-list';
   containScroll(box);
   box.append(el('div', 'base-list-head', t(pointNet, 'edge_list_title', { n: rows.filter((r) => !r.deleted).length })));
-  if (notice) {
-    const n = el('p', 'workflow-notice', notice);
-    n.dataset.testid = 'edge-list-notice';
-    box.append(n);
-  }
   if (!rows.length) box.append(el('p', 'roller-hint', t(pointNet, 'edge_list_empty')));
   for (const r of rows) {
     const item = el('div', 'base-list-item');
     item.dataset.testid = `edge-item-${r.id}`;
     wireRowGestures(item, r.id);
-    const b = btn('', 'workflow-edge-open', `base-list-row edge-row edge-row--${r.level}${r.deleted ? ' base-list-deleted' : ''}`, { value: r.photoId, point: r.id }, `edge-row-${r.id}`);
+    if (opts.focus === r.id) item.classList.add('edge-item--focus');
+    const b = btn('', 'workflow-edge-open', `base-list-row edge-row edge-row--${r.level}${r.deleted ? ' base-list-deleted' : ''}${opts.focus === r.id ? ' edge-row--focus' : ''}`, { value: r.photoId, point: r.id }, `edge-row-${r.id}`);
     const head = el('span', 'edge-row-head');
     head.append(el('span', `edge-dot edge-dot--${r.level}`), el('b', '', r.id), el('span', 'edge-row-level', t(pointNet, `edge_level_${r.level}`)));
     b.append(head, el('span', 'edge-row-res', r.deleted ? t(pointNet, 'edge_modal_deleted') : residualText(r)));
@@ -104,6 +130,7 @@ export function renderEdgeModal(opts: {
   body.append(el('b', 'bm-label', t(pointNet, 'edge_modal_photo')));
   // Retake first, full width, right above the photo: opens the retake screen (previous vs current),
   // the same one the photo strip opens.
+  if (photo) body.append(el('p', 'roller-hint', t(pointNet, 'edge_retake_why')));
   if (photo) body.append(btn(t(pointNet, 'edge_modal_retake_btn', { id: row.id }), 'workflow-photos', 'screen-btn screen-primary edge-modal-retake', { step: 'edge-photos', photo: photo.id }, 'edge-modal-retake'));
   if (photo?.thumbnailDataUrl) {
     const img = el('img', 'edge-modal-photo');

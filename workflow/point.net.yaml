@@ -153,6 +153,26 @@ text:
   edge_deleted_notice: "Edge point {id} deleted. The circle is fitted again without it."
   edge_restored_notice: "Edge point {id} restored. The circle is fitted again with it."
   edge_fit_title: Circle so far
+  edge_summary: "{n} points · {pass} pass · {amber} amber · {red} red · {deleted} deleted"
+  edge_summary_unused: " · {unused} not in the fit"
+  edge_add_btn: Add edge point
+  edge_add_why_none: "No edge points yet. Stand on EDG01, face the middle and take its photo."
+  edge_add_why_few: "{n} in the fit so far; 3 fit a circle. Add {more} more."
+  edge_add_why_three: "3 points so far, 1 more gives residuals."
+  edge_add_why_more: "{n} in the fit. Another point checks the others; add one where the gaps are big."
+  edge_add_unmarked: "{id} is not marked yet: open it and Edit taps."
+  edge_add_next: "The next one is {id}."
+  edge_fit_btn: Circle fit
+  edge_fit_why_off: "Needs 3 edge points in the fit ({n} now)."
+  edge_fit_close: Back to the list
+  edge_back_btn: "Back to {step}"
+  edge_back_why_off: "You came here on the roller: scroll it to go to another step."
+  edge_points_btn: "Edge points ({n})"
+  edge_points_why: "Open the edge point list: add, retake, edit, delete or restore a point."
+  edge_points_none: "No edge points yet. The list is on step 8; Add edge point is there."
+  circle_pause_btn: Pause the circle test
+  circle_pause_why: "Back to Home. Everything is kept; Circle test on Home resumes here."
+  edge_retake_why: "Replaces only this photo; the point keeps its name and the circle refits."
   edge_modal_title: "Edge point {id}"
   edge_modal_photo: Photo from this edge point
   edge_modal_taps: "Base points tapped: {ids}"
