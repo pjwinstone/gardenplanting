@@ -11,7 +11,7 @@ describe('circle fixture', () => {
     console.log(det.verdict.state, det.verdict.headline, det.gates.map((g) => g.pointId + ':' + g.cls).join(' '));
     expect(det.gates.length).toBe(5);
     if (process.env.WRITE_FIXTURE) {
-      for (const n of [3, 8]) writeFileSync(`${process.env.WRITE_FIXTURE}/circle-${n}.json`, JSON.stringify(buildCircleDoc(n)));
+      for (const n of [3, 8, 12]) writeFileSync(`${process.env.WRITE_FIXTURE}/circle-${n}.json`, JSON.stringify(buildCircleDoc(n)));
     }
   });
 });

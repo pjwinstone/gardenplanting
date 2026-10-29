@@ -54,6 +54,10 @@ export function edgePhotoHistory(photos: Photo[], names: string[]): Map<string, 
   return edgeSlots(photos, names).ever;
 }
 
+function nameOf(names: string[], n: number): string {
+  return names[n] ?? `EDG${String(n + 1).padStart(2, '0')}`;
+}
+
 function edgeSlots(photos: Photo[], names: string[]): { current: Map<string, string>; ever: Map<string, string> } {
   type Ev = { t: number; k: 0 | 1; i: number; id: string };
   const evs: Ev[] = [];
@@ -76,14 +80,14 @@ function edgeSlots(photos: Photo[], names: string[]): { current: Map<string, str
     } else {
       let n = 0;
       while (used.has(n)) n += 1;
-      if (n >= names.length) continue;
+      // More photos than the Set-up planned: the next point is EDG13, EDG14… (never dropped).
       used.add(n);
       slot.set(e.id, n);
-      ever.set(e.id, names[n]!);
+      ever.set(e.id, nameOf(names, n));
     }
   }
   const out = new Map<string, string>();
-  for (const [id, n] of slot) out.set(id, names[n]);
+  for (const [id, n] of slot) out.set(id, nameOf(names, n));
   return { current: out, ever };
 }
 

@@ -51,7 +51,7 @@ async function drag(p, sel, dx, dy) {
 // 1. Three edge points: the circle is fitted and shown on the edge photo step.
 {
   const p = await open(3);
-  const fit = await p.textContent('[data-testid="edge-fit"]').catch(() => '');
+  const fit = await p.textContent('[data-testid="edge-fit-open"]').catch(() => '');
   check(/⌀ 12\.\d{3} m/.test(fit), `fit shown with 3 edge points: ${fit.replace(/\s+/g, ' ').slice(0, 120)}`);
   await p.locator('[data-testid="edge-point-list"]').scrollIntoViewIfNeeded();
   await shot(p, '1-fit-three-points');
@@ -116,7 +116,7 @@ await shot(p, '7-viewer-bottom');
 await p.tap('[data-testid="workflow-photos-close"]');
 await p.waitForTimeout(300);
 // 7. Swipe left reveals Delete; Delete (confirm) refits; Restore.
-const fitBefore = await p.textContent('[data-testid="edge-fit"]');
+const fitBefore = await p.textContent('[data-testid="edge-fit-open"]');
 await drag(p, '[data-testid="edge-row-EDG03"]', -110, 4);
 check(await p.evaluate(() => document.querySelector('[data-testid="edge-item-EDG03"]').classList.contains('base-list-swiped')), 'swipe left shows Delete');
 check((await p.locator('[data-testid="edge-modal"]').count()) === 0, 'swipe does not open the row');
@@ -124,14 +124,14 @@ await p.locator('[data-testid="edge-item-EDG03"]').scrollIntoViewIfNeeded();
 await shot(p, '8-swiped-delete');
 await p.tap('[data-testid="edge-delete-EDG03"]');
 await p.waitForTimeout(500);
-const fitAfter = await p.textContent('[data-testid="edge-fit"]');
+const fitAfter = await p.textContent('[data-testid="edge-fit-open"]');
 check(/7 points/.test(fitAfter) && fitAfter !== fitBefore, `refit without EDG03: ${fitAfter.replace(/\s+/g, ' ').slice(0, 90)}`);
 check(await p.evaluate(() => document.querySelector('[data-testid="edge-row-EDG03"]').classList.contains('base-list-deleted')), 'EDG03 greyed with Restore');
 await p.locator('[data-testid="edge-item-EDG03"]').scrollIntoViewIfNeeded();
 await shot(p, '9-deleted');
 await p.tap('[data-testid="edge-restore-EDG03"]');
 await p.waitForTimeout(500);
-check(/8 points/.test(await p.textContent('[data-testid="edge-fit"]')), 'Restore refits with 8 points');
+check(/8 points/.test(await p.textContent('[data-testid="edge-fit-open"]')), 'Restore refits with 8 points');
 await shot(p, '10-restored');
 // 8. Edit taps from the pop-up: the tap screen comes up on top.
 await p.tap('[data-testid="edge-row-EDG02"]');
@@ -150,7 +150,7 @@ await p.context().close();
 {
   const p = await open(8);
   const rowText = async (id) => (await p.textContent(`[data-testid="edge-row-${id}"]`)).replace(/\s+/g, ' ');
-  const fit0 = (await p.textContent('[data-testid="edge-fit"]')).replace(/\s+/g, ' ');
+  const fit0 = (await p.textContent('[data-testid="edge-fit-open"]')).replace(/\s+/g, ' ');
   const row0 = await rowText('EDG04');
   await p.tap('[data-testid="edge-row-EDG04"]');
   await p.waitForSelector('[data-testid="edge-modal"]');
@@ -174,7 +174,7 @@ await p.context().close();
   await p.tap('[data-testid="workflow-photos-viewer"] [data-testid="photo-retake"]');
   await p.waitForTimeout(500);
   check((await p.evaluate(() => window.__cameraOpened)) === 1, 'Retake opened the camera once');
-  const mid = (await p.textContent('[data-testid="edge-fit"]')).replace(/\s+/g, ' ');
+  const mid = (await p.textContent('[data-testid="edge-fit-open"]')).replace(/\s+/g, ' ');
   check(/7 points/.test(mid), `old EDG04 photo out of the fit while waiting: ${mid.slice(0, 60)}`);
   // The new photo: the sleeves sit 60 px right of where they were (the camera moved a little).
   await (await p.evaluateHandle(() => window.__cameraInput)).asElement().setInputFiles(process.env.RETAKE_PHOTO ?? 'e2e/fixtures/edge4-retake.jpg');
@@ -193,7 +193,7 @@ await p.context().close();
   }
   await p.tap('[data-testid="photo-tap-save"]');
   await p.waitForTimeout(800);
-  const fit1 = (await p.textContent('[data-testid="edge-fit"]')).replace(/\s+/g, ' ');
+  const fit1 = (await p.textContent('[data-testid="edge-fit-open"]')).replace(/\s+/g, ' ');
   const row1 = await rowText('EDG04');
   check(/8 points/.test(fit1) && fit1 !== fit0, `circle refitted: "${fit0.slice(0, 45)}" -> "${fit1.slice(0, 45)}"`);
   check(row1 !== row0, `EDG04 row updated: "${row0.slice(0, 32)}" -> "${row1.slice(0, 32)}"`);

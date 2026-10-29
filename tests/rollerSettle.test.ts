@@ -91,10 +91,10 @@ describe('row pills and Confirm', () => {
     expect(result.link).toEqual({ to: 'camera', stepId: 'edge-photos', cameraPositionId: 'Edge points' });
   });
 
-  it('Confirm then a settle-and-re-render keeps the new step', () => {
+  it('Confirm then a settle-and-re-render stays on Set-up', () => {
     const doc = commitWorkflow(emptyDocument('Circle day'), startWorkflow(emptyProgress(), 'circle-field-test', NOW).progress);
     const confirmed = handleWorkflowCommand('workflow-confirm-setup', doc, { getAttribute: () => null }).doc!;
-    expect(readProgress(confirmed).runs['circle-field-test']?.currentStepId).toBe('gather-kit');
+    expect(readProgress(confirmed).runs['circle-field-test']?.currentStepId).toBe('setup');
     // the detached-list settle that used to fire after the re-render is now ignored (see above),
     // so nothing writes 'setup' back.
     expect(readProgress(confirmed).runs['circle-field-test']?.setup?.status).toBe('confirmed');

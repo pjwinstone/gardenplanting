@@ -1,0 +1,128 @@
+# circle-test.nets.yaml — the circle test branch as nested sub-nets (src/workflow/petri/subnet.ts).
+#
+# Any place can be refined by a child net (`refines: <net id>`). Entering that place starts the
+# child at its `entry`; the child's `exits` hand the token back. Depth is not limited.
+# A navigation stack (NavStack) holds one frame per open level; Back pops one level and puts
+# focus back on what you were on (e.g. the edge point row).
+#
+# Rules (Paul, 29 Oct 2026):
+#   - No automatic navigation. Only `user: true` transitions move between places or levels.
+#     `auto: true` transitions are background work (refit) and never change the place.
+#     `external: true` is a black box (camera, tap screen, the rest of the app): its controls
+#     live outside this branch.
+#   - Every place shows one control per transition (`control` = data-testid, `{id}` = any point).
+#     A control that is not available stays visible, disabled, with its reason.
+#   - Every place can reach an exit (no dead ends). tests/circleNets.test.ts walks every marking.
+#
+# Level 1 is the app/Home net, level 2 the activity (circle test), level 3 its substages.
+
+root: home
+
+nets:
+  home:                       # level 1 — only the circle test is wired; the rest is a black box
+    title: Home
+    level: 1
+    entry: home
+    exits: [home]
+    places:
+      - {id: home}
+      - {id: circle_test, refines: circle_test}
+      - {id: other_activity, external: true}          # Add point, Tools, … (not ported)
+    transitions:
+      - {id: open_circle_test,   from: home,           to: circle_test,    user: true, control: home-circle-test}
+      - {id: leave_circle_test,  from: circle_test,    to: home,           user: true, control: workflow-pause, child_exit: closed}
+      - {id: open_other,         from: home,           to: other_activity, user: true, external: true}
+      - {id: leave_other,        from: other_activity, to: home,           user: true, external: true}
+
+  circle_test:                # level 2 — the roller of steps; the edge points are one substage
+    title: Circle test
+    level: 2
+    entry: steps
+    exits: [closed]
+    places:
+      - {id: steps}                                    # roller on any other step (black box steps 0–11)
+      - {id: edge_points, refines: edge_points}
+      - {id: closed}
+    transitions:
+      - {id: open_edge_points,  from: steps,       to: edge_points, user: true, control: edge-points-open}
+      - {id: back_to_steps,     from: edge_points, to: steps,       user: true, control: edge-back}
+      - {id: pause,             from: steps,       to: closed,      user: true, control: workflow-pause}
+
+  edge_points:                # level 3 hub — the edge point list
+    title: Edge points
+    level: 3
+    entry: list
+    exits: [list]
+    places:
+      - {id: list}
+      - {id: adding,  refines: edge_add}
+      - {id: point,   refines: edge_edit}
+      - {id: fit,     refines: edge_fit}
+    transitions:
+      - {id: add_point,     from: list,   to: adding, user: true, control: edge-add}
+      - {id: open_point,    from: list,   to: point,  user: true, control: "edge-row-{id}", guard: hasPoints}
+      - {id: delete_point,  from: list,   to: list,   user: true, control: "edge-delete-{id}", guard: hasLivePoint}
+      - {id: restore_point, from: list,   to: list,   user: true, control: "edge-restore-{id}", guard: hasDeletedPoint}
+      - {id: show_fit,      from: list,   to: fit,    user: true, control: edge-fit-open}
+      - {id: add_done,      from: adding, to: list,   user: true, child_exit: done}
+      - {id: point_done,    from: point,  to: list,   user: true, child_exit: closed}
+      - {id: fit_done,      from: fit,    to: list,   user: true, control: edge-fit-close, child_exit: shown}
+
+  edge_add:                   # add one edge point: camera, then its tap screen
+    title: Add edge point
+    level: 4
+    entry: camera
+    exits: [done]
+    places:
+      - {id: camera,    external: true}
+      - {id: tapscreen, external: true}
+      - {id: done}
+    transitions:
+      - {id: photo_in,      from: camera,    to: tapscreen, user: true, external: true}
+      - {id: camera_cancel, from: camera,    to: done,      user: true, external: true}
+      - {id: taps_saved,    from: tapscreen, to: done,      user: true, control: photo-tap-save, external: true}
+      - {id: taps_later,    from: tapscreen, to: done,      user: true, control: photo-tap-close, external: true}
+
+  edge_edit:                  # the edge point pop-up
+    title: Edge point pop-up
+    level: 4
+    entry: open
+    exits: [closed]
+    places:
+      - {id: open}
+      - {id: retake, refines: edge_photo}
+      - {id: taps,   external: true}
+      - {id: closed}
+    transitions:
+      - {id: save,        from: open,   to: closed, user: true, control: edge-modal-save}
+      - {id: cancel,      from: open,   to: closed, user: true, control: edge-modal-cancel}
+      - {id: delete,      from: open,   to: open,   user: true, control: edge-modal-delete,  guard: pointLive}
+      - {id: restore,     from: open,   to: open,   user: true, control: edge-modal-restore, guard: pointDeleted}
+      - {id: retake,      from: open,   to: retake, user: true, control: edge-modal-retake}
+      - {id: edit_taps,   from: open,   to: taps,   user: true, control: edge-modal-taps}
+      - {id: taps_back,   from: taps,   to: closed, user: true, external: true}
+      - {id: retake_back, from: retake, to: closed, user: true, child_exit: done}
+
+  edge_photo:                 # the retake screen (previous vs current), same as the photo strip's
+    title: Retake screen
+    level: 5
+    entry: viewer
+    exits: [done]
+    places:
+      - {id: viewer}
+      - {id: camera, refines: edge_add}
+      - {id: done}
+    transitions:
+      - {id: retake_photo, from: viewer, to: camera, user: true, control: photo-retake}
+      - {id: close,        from: viewer, to: done,   user: true, control: workflow-photos-close}
+      - {id: photo_done,   from: camera, to: done,   user: true, child_exit: done}
+
+  edge_fit:                   # the circle so far; refit runs by itself and never moves you
+    title: Circle fit
+    level: 4
+    entry: shown
+    exits: [shown]
+    places:
+      - {id: shown}
+    transitions:
+      - {id: refit,       from: shown, to: shown, auto: true}     # background: never moves you

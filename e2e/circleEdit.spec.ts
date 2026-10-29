@@ -28,7 +28,7 @@ async function drag(page: Page, testid: string, dx: number, dy: number) {
 
 test('circle fits from 3 edge points', async ({ page }) => {
   await seed(page, 3);
-  await expect(page.getByTestId('edge-fit')).toContainText(/⌀ 12\.\d{3} m .* 3 points/);
+  await expect(page.getByTestId('edge-fit-open')).toContainText(/⌀ 12\.\d{3} m .* 3 points/);
 });
 
 test('edge points: tap opens the pop-up, note typing, save; swipe delete refits; restore', async ({ page }) => {
@@ -49,9 +49,9 @@ test('edge points: tap opens the pop-up, note typing, save; swipe delete refits;
   await drag(page, 'edge-row-EDG03', -110, 4);
   await expect(page.getByTestId('edge-item-EDG03')).toHaveClass(/base-list-swiped/);
   await page.getByTestId('edge-delete-EDG03').tap();
-  await expect(page.getByTestId('edge-fit')).toContainText('7 points');
+  await expect(page.getByTestId('edge-fit-open')).toContainText('7 points');
   await page.getByTestId('edge-restore-EDG03').tap();
-  await expect(page.getByTestId('edge-fit')).toContainText('8 points');
+  await expect(page.getByTestId('edge-fit-open')).toContainText('8 points');
 });
 
 test('Photos viewer scrolls to the last photo', async ({ page }) => {
@@ -72,7 +72,7 @@ test('edge point pop-up: Retake photo opens the retake screen; the new photo ref
     HTMLInputElement.prototype.click = function () { (window as unknown as { __cam: HTMLInputElement }).__cam = this; };
   });
   await seed(page, 8);
-  const fit0 = await page.getByTestId('edge-fit').textContent();
+  const fit0 = await page.getByTestId('edge-fit-open').textContent();
   const row0 = await page.getByTestId('edge-row-EDG04').textContent();
   await page.getByTestId('edge-row-EDG04').tap();
   const btn = page.getByTestId('edge-modal-retake');
@@ -83,7 +83,7 @@ test('edge point pop-up: Retake photo opens the retake screen; the new photo ref
   const viewer = page.getByTestId('workflow-photos-viewer');
   await expect(viewer).toContainText('EDG04 · edge4.jpg');
   await viewer.getByTestId('photo-retake').tap();
-  await expect(page.getByTestId('edge-fit')).toContainText('7 points');
+  await expect(page.getByTestId('edge-fit-open')).toContainText('7 points');
   const cam = await page.evaluateHandle(() => (window as unknown as { __cam: HTMLInputElement }).__cam);
   await cam.asElement()!.setInputFiles('e2e/fixtures/edge4-retake.jpg');
   await expect(page.getByTestId('photo-tap-prompt')).toContainText('Tap BAS01');
@@ -100,8 +100,8 @@ test('edge point pop-up: Retake photo opens the retake screen; the new photo ref
     await page.waitForTimeout(200);
   }
   await page.getByTestId('photo-tap-save').tap();
-  await expect(page.getByTestId('edge-fit')).toContainText('8 points');
-  expect(await page.getByTestId('edge-fit').textContent()).not.toBe(fit0);
+  await expect(page.getByTestId('edge-fit-open')).toContainText('8 points');
+  expect(await page.getByTestId('edge-fit-open').textContent()).not.toBe(fit0);
   expect(await page.getByTestId('edge-row-EDG04').textContent()).not.toBe(row0);
   await page.getByTestId('edge-row-EDG04').tap();
   await page.getByTestId('edge-modal-retake').tap();

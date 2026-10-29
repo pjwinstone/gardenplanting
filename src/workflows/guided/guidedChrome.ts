@@ -14,7 +14,9 @@ import {
   doneBlockerNotice,
 } from './actionNet';
 import { CIRCLE_RESULT_STEP_ID, circleResultDetailForRun, EDGE_PHOTOS_STEP_ID, edgeAssignmentsFor, edgePointRows, MIN_FIT_EDGE_POINTS, previousEdgePhoto, TAPE_DIAMETER_STEP_ID } from './circleResult';
-import { renderEdgeFitSummary, renderEdgeList, renderEdgeModal, wrapViewerModal } from './edgePointUi';
+import { edgeFitLine, edgeSummaryText, renderEdgeFitSummary, renderEdgeList, renderEdgeModal, substageButton, wrapViewerModal } from './edgePointUi';
+import { NavStack, type NavFrame } from '../../workflow/petri/subnet';
+import { photoMarked } from './actionNet';
 import { clearSwiped } from '../../screens/basePointList';
 import { strengthLines } from '../../solver/controlCluster';
 import { GUIDED_WORKFLOWS, workflowById } from './definitions';
@@ -111,6 +113,51 @@ let edgeNoteDraft: string | null = null;
 let panelScroll: { step: string; top: number } | null = null;
 /** One line on the edge point list after a delete or restore; cleared when shown. */
 let edgeNotice: string | null = null;
+/**
+ * Circle test navigation (workflow/nets/circle-test.nets.yaml). One frame per open level; Back,
+ * Save and Cancel pop one level and put focus back on the row you were on. Nothing here moves you
+ * unless you tap: redraws, refits and uploads only redraw in place.
+ */
+const nav = new NavStack();
+/** The edge point row to highlight (and scroll to once, after you come back to the list). */
+let edgeFocus: string | null = null;
+let edgeFocusPending = false;
+let edgeListScroll = 0;
+let edgeFitOpen = false;
+/** Add edge point: the points before the camera opened, so the new one gets the focus. */
+let edgeAddBefore: Set<string> | null = null;
+
+function focusEdgeRow(id: string | null | undefined): void {
+  if (!id) return;
+  edgeFocus = id;
+  edgeFocusPending = true;
+}
+
+/** Where you are in the circle test branch (for tests: only your taps may change it). */
+export function guidedNavState(doc: GardenDocument | null): { step: string | null; overlay: string | null; frames: NavFrame[]; fitOpen: boolean } {
+  const progress = doc ? readProgress(doc) : undefined;
+  const run = progress?.activeId ? progress.runs[progress.activeId] : undefined;
+  return {
+    step: run?.currentStepId ?? null,
+    overlay: photosViewerStep ? `viewer:${photosViewerPhoto ?? photosViewerStep}` : edgeOpen ? `edge:${edgeOpen.pointId}` : null,
+    frames: nav.snapshot(),
+    fitOpen: edgeFitOpen,
+  };
+}
+
+/** Test hook: start from a clean circle test view. */
+export function resetGuidedNav(): void {
+  nav.clear();
+  edgeFocus = null;
+  edgeFocusPending = false;
+  edgeListScroll = 0;
+  edgeFitOpen = false;
+  edgeAddBefore = null;
+  edgeOpen = null;
+  edgeNoteDraft = null;
+  photosViewerStep = null;
+  photosViewerPhoto = null;
+}
 
 export interface PhotoPanelView {
   /** Plain lines from the last photo check (errors first). */
@@ -273,16 +320,8 @@ export function handleWorkflowCommand(
       return {};
     }
     move = confirmSetupWorkflow(progress, values);
-    if (move.changed) {
-      setupDraft = {};
-      const pair = move.progress.activeId ? move.progress.runs[move.progress.activeId] : undefined;
-      const def = move.progress.activeId ? workflowById(move.progress.activeId) : undefined;
-      if (pair && def && pair.currentStepId === SETUP_STEP_ID) {
-        // Confirm acts like Next: on to step 1, never a jump further down the roller.
-        const next = def.steps[0]?.id;
-        if (next) move = { ...scrollWorkflowToStep(move.progress, next), notice: move.notice, changed: true };
-      }
-    }
+    // Confirm saves the Set-up and stays on it: you move on with the roller (no auto-advance).
+    if (move.changed) setupDraft = {};
   }
   else if (cmd === 'workflow-skip') {
     const active = progress.activeId ? progress.runs[progress.activeId] : undefined;
@@ -332,11 +371,16 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-edge-open') {
     const photoId = source.getAttribute('data-value') ?? '';
     const pointId = source.getAttribute('data-point') ?? '';
-    edgeOpen = photoId ? { photoId, pointId } : null;
+    if (!photoId) return {};
+    nav.push({ net: 'edge_points', place: 'list', focus: pointId });
+    edgeOpen = { photoId, pointId };
     edgeNoteDraft = null;
+    edgeFocus = pointId;
     return {};
   }
   else if (cmd === 'workflow-edge-cancel') {
+    const frame = nav.popTo('edge_points');
+    focusEdgeRow(frame?.focus ?? edgeOpen?.pointId);
     edgeOpen = null;
     edgeNoteDraft = null;
     return {};
@@ -344,10 +388,41 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-edge-save') {
     const pointId = source.getAttribute('data-point') ?? edgeOpen?.pointId ?? '';
     const text = edgeNoteDraft;
+    const frame = nav.popTo('edge_points');
+    focusEdgeRow(frame?.focus ?? pointId);
     edgeOpen = null;
     edgeNoteDraft = null;
     if (text === null) return {};
     move = saveEdgeNoteWorkflow(progress, pointId, text);
+  }
+  else if (cmd === 'workflow-edge-add') {
+    // Add edge point: the camera for the edge photo step, at any time (also after 12).
+    const def = progress.activeId ? workflowById(progress.activeId) : undefined;
+    const link = pillLink(def, EDGE_PHOTOS_STEP_ID);
+    if (!link) return {};
+    const run = progress.activeId ? progress.runs[progress.activeId] : undefined;
+    edgeAddBefore = new Set(run ? edgePointRows(doc, run).map((r) => r.id) : []);
+    return { link };
+  }
+  else if (cmd === 'workflow-edge-points') {
+    // Level 2: open the edge point substage from another step; Back returns to that step.
+    const run = progress.activeId ? progress.runs[progress.activeId] : undefined;
+    nav.popTo('circle_test');
+    nav.push({ net: 'circle_test', place: 'steps', focus: run?.currentStepId });
+    move = scrollWorkflowToStep(progress, EDGE_PHOTOS_STEP_ID);
+  }
+  else if (cmd === 'workflow-edge-back') {
+    const frame = nav.popTo('circle_test');
+    if (!frame?.focus) return {};
+    move = scrollWorkflowToStep(progress, frame.focus);
+  }
+  else if (cmd === 'workflow-edge-fit') {
+    edgeFitOpen = true;
+    return {};
+  }
+  else if (cmd === 'workflow-edge-fit-close') {
+    edgeFitOpen = false;
+    return {};
   }
   else if (cmd === 'workflow-edge-delete') {
     const photoId = source.getAttribute('data-value') ?? '';
@@ -355,20 +430,23 @@ export function handleWorkflowCommand(
     const ok = typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(t(pointNet, 'edge_delete_confirm', { id: pointId })) : true;
     if (!ok) return {};
     move = deleteEdgePointWorkflow(progress, pointId, photoId);
+    // Stays where you are (list row greyed with Restore, or the pop-up with Restore).
     if (move.changed) {
       clearSwiped();
-      edgeNotice = t(pointNet, 'edge_deleted_notice', { id: pointId });
+      focusEdgeRow(pointId);
     }
   }
   else if (cmd === 'workflow-edge-restore') {
     const photoId = source.getAttribute('data-value') ?? '';
     const pointId = source.getAttribute('data-point') ?? '';
     move = restoreEdgePointWorkflow(progress, photoId);
-    if (move.changed) edgeNotice = t(pointNet, 'edge_restored_notice', { id: pointId });
+    if (move.changed) focusEdgeRow(pointId);
   }
   else if (cmd === 'workflow-photos') {
     photosViewerStep = stepId || null;
     // One full-screen layer at a time: the retake screen replaces the edge point pop-up.
+    // Its Close goes back one level, to the pop-up.
+    if (edgeOpen) nav.push({ net: 'edge_edit', place: 'open', focus: `${edgeOpen.pointId}|${edgeOpen.photoId}` });
     edgeOpen = null;
     edgeNoteDraft = null;
     // From the photo strip: open on just that photo.
@@ -378,12 +456,23 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-photos-close') {
     photosViewerStep = null;
     photosViewerPhoto = null;
+    const frame = nav.top()?.net === 'edge_edit' ? nav.pop() : undefined;
+    if (frame?.focus) {
+      const [pointId, photoId] = frame.focus.split('|');
+      edgeOpen = { pointId: pointId!, photoId: photoId! };
+    }
     return {};
   }
   else if (cmd === 'workflow-photo-retake') {
     // Photos viewer: Retake supersedes the step's photos and opens the camera straight away.
     const one = source.getAttribute('data-photo');
     const r = one && canonicalStepId(stepId) === EDGE_PHOTOS_STEP_ID ? retakeOnePhotoInDoc(doc, stepId, one) : retakeStepPhotosInDoc(doc, stepId);
+    // Camera, then its tap screen; their Save / Close land on the list with this point in focus.
+    const frame = nav.top()?.net === 'edge_edit' ? nav.pop() : undefined;
+    if (frame) {
+      nav.popTo('edge_points');
+      focusEdgeRow(frame.focus?.split('|')[0]);
+    }
     photosViewerStep = null;
     edgeOpen = null;
     edgeNoteDraft = null;
@@ -490,7 +579,9 @@ function renderRollerPanel(
   // Action states are part of the key: an upload status change must redraw the pill.
   const actions = def.steps.map((step) => deriveActionState(chromeDoc, run, step));
   const edgeSig = currentEdgeSignature(run);
-  const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive(), actions, edgeSig, edgeNotice });
+  // The edge point view state too: a focus to bring back, the fit open, the level stack.
+  const edgeView = { edgeFocus, edgeFocusPending, edgeFitOpen, frames: nav.snapshot() };
+  const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive(), actions, edgeSig, edgeNotice, edgeView });
   // Same content: reuse the panel. The app redraws by emptying the shell and appending again, and
   // a list taken out of the page and put back loses its scroll (scrollTop 0 = Set-up in the
   // capsule). That was the "flips to step 0 with no touch" bug: any background redraw (upload,
@@ -502,6 +593,9 @@ function renderRollerPanel(
     const top = panelScroll && panelScroll.step === run.currentStepId ? panelScroll.top : 0;
     requestAnimationFrame(() => {
       if (cached.panel.isConnected && top) cached.panel.scrollTop = top;
+      // Re-attached list: put its own scroll back (it reads 0 after a detach).
+      const list = cached.panel.querySelector<HTMLElement>('[data-testid="edge-point-list"]');
+      if (list && cached.panel.isConnected) list.scrollTop = edgeListScroll;
       if (cached.panel.isConnected && !cached.busy()) cached.recentre();
     });
     return cached.panel;
@@ -587,6 +681,7 @@ function renderRollerPanel(
     if (currentStep.id === ADD_BASE_POINTS_STEP_ID) panel.append(renderBaseTieForm(run));
     if (currentStep.id === CIRCLE_RESULT_STEP_ID) panel.append(renderCircleResult(chromeDoc, run));
     if (currentStep.id === EDGE_PHOTOS_STEP_ID || currentStep.id === CIRCLE_RESULT_STEP_ID) panel.append(renderEdgePanel(chromeDoc, run, currentStep.id === EDGE_PHOTOS_STEP_ID));
+    else if (def.id === 'circle-field-test') panel.append(renderEdgePointsButton(chromeDoc, run));
     panel.append(renderButtonRow(def, run, currentStep));
   }
   if (currentId !== SETUP_STEP_ID) panel.append(renderRunPhotoStrip(def, run));
@@ -988,7 +1083,7 @@ function renderDetailsSheet(def: WorkflowDefinition, run: WorkflowRun): HTMLElem
     actions.append(button('Skip with a note', 'workflow-skip', { step: stepId }));
     actions.append(button('Untick', 'workflow-untick', { step: stepId }));
   }
-  actions.append(button('Pause', 'workflow-pause'));
+  actions.append(button('Pause', 'workflow-pause', { testid: 'workflow-pause' }));
   actions.append(button('Close', 'workflow-collapse'));
   sheet.append(actions);
   return sheet;
@@ -1320,13 +1415,103 @@ function currentEdgeSignature(run: WorkflowRun): string {
 function renderEdgePanel(doc: GardenDocument | null, run: WorkflowRun, withFit: boolean): HTMLElement {
   const box = el('div', 'roller-setup-form edge-panel');
   box.dataset.testid = 'edge-panel';
+  void withFit;
   const detail = circleResultDetailForRun(doc, run);
   const rows = edgePointRows(doc, run, detail);
-  if (withFit && (detail.fitIds?.length ?? 0) >= MIN_FIT_EDGE_POINTS) box.append(renderEdgeFitSummary(detail));
-  else if (withFit && rows.length) box.append(el('p', 'roller-hint', detail.verdict.headline));
-  box.append(renderEdgeList(rows, edgeNotice));
-  edgeNotice = null;
+  // A photo taken with Add edge point: once it is in the list, it has the focus.
+  if (edgeAddBefore) {
+    const added = rows.find((r) => !edgeAddBefore!.has(r.id));
+    if (added) {
+      focusEdgeRow(added.id);
+      edgeAddBefore = null;
+    }
+  }
+  box.addEventListener('pointerdown', () => { edgeFocusPending = false; }, { passive: true });
+  const summary = el('p', 'edge-summary', edgeSummaryText(rows));
+  summary.dataset.testid = 'edge-summary';
+  box.append(summary);
+  box.append(renderEdgeSubstages(doc, run, rows, detail));
+  if (edgeFitOpen) {
+    const fit = el('div', 'edge-fit-open');
+    fit.dataset.testid = 'edge-fit-panel';
+    fit.append(renderEdgeFitSummary(detail));
+    fit.append(button(t(pointNet, 'edge_fit_close'), 'workflow-edge-fit-close', { testid: 'edge-fit-close', className: 'screen-btn' }));
+    box.append(fit);
+  }
+  const list = renderEdgeList(rows, { focus: edgeFocus });
+  box.append(list);
+  // Keep the list where it was over a redraw; after Save / Cancel / Delete / Restore bring the
+  // row you were on into view, highlighted. Never moves the roller or the level.
+  list.addEventListener('scroll', () => { if (list.isConnected) edgeListScroll = list.scrollTop; }, { passive: true });
+  // The focus stays wanted until you touch the list or the panel yourself (a redraw in between,
+  // e.g. the tap screen closing or an upload, brings the row back again rather than losing it).
+  const pending = edgeFocusPending ? edgeFocus : null;
+  list.addEventListener('pointerdown', () => { edgeFocusPending = false; }, { passive: true });
+  list.addEventListener('touchstart', () => { edgeFocusPending = false; }, { passive: true });
+  // Two frames: after the panel has put back its own scroll position.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (!list.isConnected) return;
+    // Hidden under a full-screen layer (tap screen, camera): bring the row back on the next draw.
+    if (pending && (list.clientHeight === 0 || document.querySelector('.photo-tap, .photo-mark, .bm-root'))) return;
+    const row = pending ? list.querySelector<HTMLElement>(`[data-testid="edge-item-${CSS.escape(pending)}"]`) : null;
+    if (!row) {
+      list.scrollTop = edgeListScroll;
+      return;
+    }
+    // The list and the panel both scroll so the row sits in the middle of the screen.
+    const rr = row.getBoundingClientRect();
+    const lr = list.getBoundingClientRect();
+    list.scrollTop += rr.top - lr.top - (list.clientHeight - rr.height) / 2;
+    edgeListScroll = list.scrollTop;
+    const panel = list.closest<HTMLElement>('.workflow-roller-sheet');
+    if (panel) {
+      const pr = panel.getBoundingClientRect();
+      const lr2 = list.getBoundingClientRect();
+      if (lr2.top < pr.top || lr2.bottom > pr.bottom) panel.scrollTop += lr2.top - pr.top - 8;
+      panelScroll = { step: run.currentStepId, top: panel.scrollTop };
+    }
+  }));
   return box;
+}
+
+/** Level 3 child buttons: Add edge point, Circle fit, Back; each says if it is available and why now. */
+function renderEdgeSubstages(doc: GardenDocument | null, run: WorkflowRun, rows: ReturnType<typeof edgePointRows>, detail: ReturnType<typeof circleResultDetailForRun>): HTMLElement {
+  const bar = el('div', 'edge-substages');
+  bar.dataset.testid = 'edge-substages';
+  // Below 3 points there is no fit yet: count the live points that would go into it.
+  const fitN = detail.fitIds?.length ?? rows.filter((r) => !r.deleted).length;
+  const assign = [...edgeAssignmentsFor(doc, run).values()];
+  const next = rows.length ? `EDG${String(Math.max(...assign.map((id) => Number(id.slice(3)) || 0)) + 1).padStart(2, '0')}` : 'EDG01';
+  const unmarked = rows.find((r) => !r.deleted && doc?.photos.find((p) => p.id === r.photoId && !photoMarked(p)));
+  const why = [
+    !rows.length ? t(pointNet, 'edge_add_why_none')
+      : fitN < MIN_FIT_EDGE_POINTS ? t(pointNet, 'edge_add_why_few', { n: fitN, more: MIN_FIT_EDGE_POINTS - fitN })
+      : fitN === MIN_FIT_EDGE_POINTS ? t(pointNet, 'edge_add_why_three')
+      : t(pointNet, 'edge_add_why_more', { n: fitN }),
+    rows.length ? t(pointNet, 'edge_add_next', { id: next }) : '',
+    unmarked ? t(pointNet, 'edge_add_unmarked', { id: unmarked.id }) : '',
+  ].filter(Boolean).join(' ');
+  bar.append(substageButton(t(pointNet, 'edge_add_btn'), 'workflow-edge-add', 'edge-add', why, { primary: true }));
+  const fitOk = fitN >= MIN_FIT_EDGE_POINTS;
+  bar.append(substageButton(t(pointNet, 'edge_fit_btn'), 'workflow-edge-fit', 'edge-fit-open',
+    fitOk ? `${edgeFitLine(detail)}. ${detail.verdict.headline}` : t(pointNet, 'edge_fit_why_off', { n: fitN }), { disabled: !fitOk || edgeFitOpen }));
+  const back = nav.snapshot().reverse().find((f) => f.net === 'circle_test');
+  const def = workflowById(readProgress(doc ?? undefined).activeId ?? 'circle-field-test');
+  const backTitle = back?.focus ? (back.focus === SETUP_STEP_ID ? 'Set-up' : def?.steps.find((s) => s.id === back.focus)?.title ?? back.focus) : '';
+  bar.append(substageButton(back ? t(pointNet, 'edge_back_btn', { step: backTitle }) : t(pointNet, 'edge_back_btn', { step: 'the step you came from' }), 'workflow-edge-back', 'edge-back',
+    back ? '' : t(pointNet, 'edge_back_why_off'), { disabled: !back }));
+  return bar;
+}
+
+/** Level 2 child button on the other circle test steps: open the edge point list. */
+function renderEdgePointsButton(doc: GardenDocument | null, run: WorkflowRun): HTMLElement {
+  const rows = edgePointRows(doc, run);
+  const bar = el('div', 'edge-substages');
+  bar.dataset.testid = 'circle-substages';
+  bar.append(substageButton(t(pointNet, 'edge_points_btn', { n: rows.length }), 'workflow-edge-points', 'edge-points-open',
+    rows.length ? `${edgeSummaryText(rows)}. ${t(pointNet, 'edge_points_why')}` : t(pointNet, 'edge_points_none')));
+  bar.append(substageButton(t(pointNet, 'circle_pause_btn'), 'workflow-pause', 'workflow-pause', t(pointNet, 'circle_pause_why')));
+  return bar;
 }
 
 /**
