@@ -205,7 +205,8 @@ export type RunLogEntry =
   | { at: string; type: 'config.changed'; changes: { key: string; from: unknown; to: unknown }[] }
   | { at: string; type: 'base-tie.saved'; tie: BaseTie; summary: string }
   | { at: string; type: 'base-tie.removed'; tie: BaseTie }
-  | { at: string; type: 'base-post.saved'; point: string; separationM: number | null };
+  | { at: string; type: 'base-post.saved'; point: string; separationM: number | null }
+  | { at: string; type: 'edge-point.deleted' | 'edge-point.restored'; point: string; photoId: string };
 
 /**
  * 'Grow the base grid' (step id add-base-points, rev 6): one tie from a point already placed to another point on the N/E grid.
@@ -248,6 +249,13 @@ export interface WorkflowRun {
    * Set-up default (post_separation_m). Only used when the bottom sleeve BASnnB is in a photo.
    */
   basePostSeparationM?: Record<string, number>;
+  /**
+   * Circle test: edge points taken out of the fit (swipe left > Delete). The photo stays on
+   * record; Restore puts it back. Keyed by photo, so the other edge points keep their names.
+   */
+  deletedEdgePoints?: { id: string; photoId: string; deletedAt: string }[];
+  /** Circle test: a note per edge point (EDGnn), from the edge point pop-up. */
+  edgeNotes?: Record<string, string>;
   updatedAt: string;
   finishedAt?: string;
   paused?: boolean;

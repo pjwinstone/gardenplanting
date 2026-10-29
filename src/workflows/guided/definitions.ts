@@ -167,6 +167,7 @@ export const circleFieldTest: WorkflowDefinition = {
         'Start at EDG01 and go round in order. Stand on the peg, phone at eye height, landscape, 1×, and turn so the base points are in the frame. One photo, no turning, no tape.',
         'Then tap every base point you can see (the app suggests them from their codes), and the bottom sleeve of any two-sleeve post. It needs at least 4 for a checked point, or 3 with a two-sleeve post. Only 2 in view, both two-sleeve posts: a 2-point fix, amber at best. Fewer turns that point grey.',
         'A bad photo: open Photos and Retake that one. The new photo takes the same edge point.',
+        'From 3 edge points the app fits the circle and shows it here, with each edge point in a list: its colour and its residual (how far it sits off the fitted circle). Tap a point to see its photo, edit its taps, retake it or add a note. Swipe a point left to delete it from the fit; Restore puts it back.',
       ],
       noteLabel: 'Anything odd',
       doneTitle: 'A photo from every edge point',

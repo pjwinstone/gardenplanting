@@ -45,7 +45,7 @@
 
 version: 1
 title: Garden Planting glossary
-revision: 15
+revision: 16
 reviewed_by:
 - agent: geometry-maths-advisor
   agent_id: e7e34885-32ba-4339-98a1-0479c57450a9
@@ -2155,3 +2155,49 @@ terms:
   - base-point
   - base-point-list
   - save-base-point
+- id: edge-point-list
+  term: Edge point list
+  short: Every edge point with a photo, its colour and its residual. Tap one to open it; swipe left to delete it.
+  long: It shows on the edge photo step and the circle result. The list scrolls on its own and never moves
+    the steps. From 3 edge points the circle is fitted and shown above the list; 3 fit exactly, so the
+    residuals start with the 4th point.
+  category: app-screen
+  code_names:
+  - edgePointRows
+  - renderEdgeList
+  related:
+  - residual
+  - edge-point-popup
+- id: residual
+  term: Residual
+  short: How far an edge point sits off the fitted circle, in mm (+ outside, − inside).
+  long: Small residuals mean the points agree with one circle. A large one points at a peg off the edge or a
+    wrong tap. With only 3 edge points there are no residuals, because 3 points always fit a circle.
+  category: quality-check
+  code_names:
+  - residualsM
+  - residualMm
+  related:
+  - edge-point-list
+- id: edge-point-popup
+  term: Edge point pop-up
+  short: The full-screen page for one edge point, with Save and Cancel at the bottom.
+  long: It shows the colour and the reason, the residual, the photo with Edit taps and Retake, a note, and
+    Delete or Restore. The page scrolls, so everything is reachable on a small phone.
+  category: app-screen
+  code_names:
+  - renderEdgeModal
+  related:
+  - edge-point-list
+  - delete-edge-point
+- id: delete-edge-point
+  term: Delete edge point
+  short: Swipe an edge point left, tap Delete, confirm. It leaves the circle fit; its photo stays.
+  long: The circle is fitted again without it, and the other edge points keep their names. The list shows it
+    greyed with Restore, which puts it back and fits again.
+  category: app-screen
+  code_names:
+  - deleteEdgePointWorkflow
+  - restoreEdgePointWorkflow
+  related:
+  - edge-point-list

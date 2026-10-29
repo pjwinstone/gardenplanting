@@ -79,3 +79,27 @@
 .bm-btns { display: flex; gap: 10px; }
 .bm-btns .screen-btn { flex: 1 1 0; min-height: 54px; font-size: 18px; }
 .bm-toggle-btn.screen-choice-on, .bm-switch.screen-choice-on { background: #1d7a4f; color: #fff; border-color: #1d7a4f; }
+
+/* Circle test: full-screen guided layers sit above Tools (50) and below the photo tap screen (90). */
+.bm-root.edge-modal, .bm-root.viewer-modal { z-index: 85; }
+.edge-modal-photo { width: 100%; height: auto; border-radius: 12px; display: block; }
+.edge-modal-acts .screen-btn { flex: 1 1 0; min-height: 52px; font-size: 17px; }
+.edge-modal-delete { color: #a52a1f; border-color: #c0392b; min-height: 52px; }
+.edge-note { font-size: 17px; min-height: 88px; resize: vertical; }
+.edge-row-head { display: flex; align-items: center; gap: 8px; }
+.edge-row-level { font-size: 14px; color: #3d5248; }
+.edge-row-res { font-size: 15px; }
+.edge-dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; background: #9aa5a0; flex: none; }
+.edge-dot--green { background: #1d7a4f; }
+.edge-dot--amber { background: #e2a400; }
+.edge-dot--red { background: #c0392b; }
+.edge-dot--grey { background: #8a8f8c; }
+.edge-dot--unused { background: transparent; border: 2px solid #8a8f8c; box-sizing: border-box; }
+.edge-row--red { border-color: #c0392b; background: #fde3e0; }
+.edge-row--amber { border-color: #e2a400; background: #fff3d6; }
+.edge-fit { padding: 8px 10px; border-radius: 10px; background: #eef4f0; font-size: 15px; }
+.edge-fit p { margin: 2px 0 0; }
+.edge-fit-num { font-weight: 600; }
+.workflow-photos-content .workflow-photo-thumb { width: 100%; height: auto; }
+.edge-modal-retake { width: 100%; min-height: 56px; font-size: 18px; font-weight: 700; }
+.workflow-retake-wide { width: 100%; min-height: 56px; font-size: 18px; }

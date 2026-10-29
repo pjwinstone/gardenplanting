@@ -140,6 +140,32 @@ text:
   modal_sep: "Sleeve separation, centre to centre (m)"
   modal_check_wait: Type the two distances and the diagonal to check them.
   modal_first: "BAS01 is the grid origin, 0,0. It has no tape measurements; only the post type."
+  edge_list_title: "Edge points ({n}). Tap one to open it; swipe left to delete."
+  edge_list_empty: No edge photos yet. Take the first one from EDG01.
+  edge_residual: "Residual {mm} mm"
+  edge_no_residual: No residual yet
+  edge_level_green: Green
+  edge_level_amber: Amber
+  edge_level_red: Red
+  edge_level_grey: Grey
+  edge_level_unused: Not in the fit
+  edge_delete_confirm: "Delete edge point {id}? It is taken out of the circle fit; its photo stays and Restore puts it back."
+  edge_deleted_notice: "Edge point {id} deleted. The circle is fitted again without it."
+  edge_restored_notice: "Edge point {id} restored. The circle is fitted again with it."
+  edge_fit_title: Circle so far
+  edge_modal_title: "Edge point {id}"
+  edge_modal_photo: Photo from this edge point
+  edge_modal_taps: "Base points tapped: {ids}"
+  edge_modal_no_taps: No base points tapped yet.
+  edge_modal_edit_taps: Edit taps
+  edge_modal_retake_btn: "Retake photo of {id}"
+  edge_modal_delete: Delete edge point
+  edge_modal_restore: Restore edge point
+  edge_modal_note: Note (anything odd)
+  edge_modal_save: Save
+  edge_modal_cancel: Cancel
+  edge_modal_deleted: "Deleted: not in the circle fit."
+  viewer_close: Close
   calib_previous: Previous photo
   calib_current: Current photo
   type_base: Base point
