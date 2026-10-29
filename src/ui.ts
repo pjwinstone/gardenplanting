@@ -191,6 +191,7 @@ import {
   type GardenReconcileResult,
 } from './gardenCloudSave';
 import { glossaryPairsForMenu } from './workflow/glossary';
+import { renderGuidedOverlay } from './workflows/guided/guidedChrome';
 import { handleScreenCommand, installScreens, renderScreens, currentScreen } from './screens/pointScreen';
 import { pointForMarkerId } from './workflows/guided/markerSet';
 import type { AutoSleeveRecord as ScreenSleeveRecord, PhotoClick as ScreenPhotoClick } from './model';
@@ -3697,6 +3698,11 @@ function buildSurveyView(): HTMLElement {
   if (!toolsOpen && (!guidedActive || currentScreen() !== 'home')) {
     const screens = renderScreens(doc);
     if (screens) wrap.appendChild(screens);
+  }
+  // Full-screen guided layers (Photos viewer, edge point pop-up): last, above the hamburger.
+  if (!state.menuOpen) {
+    const overlay = renderGuidedOverlay(doc);
+    if (overlay) wrap.appendChild(overlay);
   }
   return wrap;
 }

@@ -1274,6 +1274,54 @@ export function saveBasePostWorkflow(progress: WorkflowProgress, point: string, 
 }
 
 /** Save the three diameter tapes and the edge; ticks 'Tape the diameter'. The circle result re-checks. */
+/** Mark the circle result for a re-check after the edge points changed. */
+function recheckCircle(steps: Record<string, StepState>): Record<string, StepState> {
+  const result = steps['circle-result'];
+  if (result && isSettled(result)) return { ...steps, 'circle-result': mirrorLegacy({ ...result, status: 'needs_recheck' }) };
+  return steps;
+}
+
+/** Take an edge point out of the circle fit (its photo stays; Restore puts it back). */
+export function deleteEdgePointWorkflow(progress: WorkflowProgress, pointId: string, photoId: string, now = new Date().toISOString()): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair || !photoId) return { progress, changed: false };
+  const list = (pair.run.deletedEdgePoints ?? []).filter((d) => d.photoId !== photoId);
+  const run: WorkflowRun = {
+    ...pair.run,
+    deletedEdgePoints: [...list, { id: pointId, photoId, deletedAt: now }],
+    steps: recheckCircle(pair.run.steps),
+    runLog: [...(pair.run.runLog ?? []), { at: now, type: 'edge-point.deleted', point: pointId, photoId }],
+    updatedAt: now,
+  };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+export function restoreEdgePointWorkflow(progress: WorkflowProgress, photoId: string, now = new Date().toISOString()): WorkflowMove {
+  const pair = activePair(progress);
+  const hit = pair?.run.deletedEdgePoints?.find((d) => d.photoId === photoId);
+  if (!pair || !hit) return { progress, changed: false };
+  const run: WorkflowRun = {
+    ...pair.run,
+    deletedEdgePoints: pair.run.deletedEdgePoints!.filter((d) => d.photoId !== photoId),
+    steps: recheckCircle(pair.run.steps),
+    runLog: [...(pair.run.runLog ?? []), { at: now, type: 'edge-point.restored', point: hit.id, photoId }],
+    updatedAt: now,
+  };
+  return { progress: patchRun(progress, pair.def.id, run), changed: true };
+}
+
+/** Save the note on one edge point (empty text removes it). */
+export function saveEdgeNoteWorkflow(progress: WorkflowProgress, pointId: string, note: string, now = new Date().toISOString()): WorkflowMove {
+  const pair = activePair(progress);
+  if (!pair) return { progress, changed: false };
+  const notes = { ...(pair.run.edgeNotes ?? {}) };
+  const text = note.trim();
+  if ((notes[pointId] ?? '') === text) return { progress, changed: false };
+  if (text) notes[pointId] = text;
+  else delete notes[pointId];
+  return { progress: patchRun(progress, pair.def.id, { ...pair.run, edgeNotes: notes, updatedAt: now }), changed: true };
+}
+
 export function saveCircleTapeWorkflow(
   progress: WorkflowProgress,
   diametersM: number[],

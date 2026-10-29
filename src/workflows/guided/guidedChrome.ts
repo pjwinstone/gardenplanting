@@ -13,7 +13,9 @@ import {
   doneBlocker,
   doneBlockerNotice,
 } from './actionNet';
-import { CIRCLE_RESULT_STEP_ID, circleResultDetailForRun, EDGE_PHOTOS_STEP_ID, edgeAssignmentsFor, TAPE_DIAMETER_STEP_ID } from './circleResult';
+import { CIRCLE_RESULT_STEP_ID, circleResultDetailForRun, EDGE_PHOTOS_STEP_ID, edgeAssignmentsFor, edgePointRows, MIN_FIT_EDGE_POINTS, previousEdgePhoto, TAPE_DIAMETER_STEP_ID } from './circleResult';
+import { renderEdgeFitSummary, renderEdgeList, renderEdgeModal, wrapViewerModal } from './edgePointUi';
+import { clearSwiped } from '../../screens/basePointList';
 import { strengthLines } from '../../solver/controlCluster';
 import { GUIDED_WORKFLOWS, workflowById } from './definitions';
 import { diagramSvg } from './diagrams';
@@ -41,6 +43,9 @@ import {
   ADD_BASE_POINTS_STEP_ID,
   linkedPhotosForStep,
   saveCircleTapeWorkflow,
+  deleteEdgePointWorkflow,
+  restoreEdgePointWorkflow,
+  saveEdgeNoteWorkflow,
   scrollWorkflowToStep,
   skipWithNoteWorkflow,
   reviewWorkflow,
@@ -100,6 +105,12 @@ export interface WorkflowCommandResult {
 
 /** Step whose Photos viewer is open, or null. */
 let photosViewerStep: string | null = null;
+/** Circle test: the edge point whose pop-up is open, and its unsaved note. */
+let edgeOpen: { photoId: string; pointId: string } | null = null;
+let edgeNoteDraft: string | null = null;
+let panelScroll: { step: string; top: number } | null = null;
+/** One line on the edge point list after a delete or restore; cleared when shown. */
+let edgeNotice: string | null = null;
 
 export interface PhotoPanelView {
   /** Plain lines from the last photo check (errors first). */
@@ -318,8 +329,48 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-base-tie-remove') {
     move = removeBaseTieWorkflow(progress, source.getAttribute('data-tie') ?? '');
   }
+  else if (cmd === 'workflow-edge-open') {
+    const photoId = source.getAttribute('data-value') ?? '';
+    const pointId = source.getAttribute('data-point') ?? '';
+    edgeOpen = photoId ? { photoId, pointId } : null;
+    edgeNoteDraft = null;
+    return {};
+  }
+  else if (cmd === 'workflow-edge-cancel') {
+    edgeOpen = null;
+    edgeNoteDraft = null;
+    return {};
+  }
+  else if (cmd === 'workflow-edge-save') {
+    const pointId = source.getAttribute('data-point') ?? edgeOpen?.pointId ?? '';
+    const text = edgeNoteDraft;
+    edgeOpen = null;
+    edgeNoteDraft = null;
+    if (text === null) return {};
+    move = saveEdgeNoteWorkflow(progress, pointId, text);
+  }
+  else if (cmd === 'workflow-edge-delete') {
+    const photoId = source.getAttribute('data-value') ?? '';
+    const pointId = source.getAttribute('data-point') ?? '';
+    const ok = typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(t(pointNet, 'edge_delete_confirm', { id: pointId })) : true;
+    if (!ok) return {};
+    move = deleteEdgePointWorkflow(progress, pointId, photoId);
+    if (move.changed) {
+      clearSwiped();
+      edgeNotice = t(pointNet, 'edge_deleted_notice', { id: pointId });
+    }
+  }
+  else if (cmd === 'workflow-edge-restore') {
+    const photoId = source.getAttribute('data-value') ?? '';
+    const pointId = source.getAttribute('data-point') ?? '';
+    move = restoreEdgePointWorkflow(progress, photoId);
+    if (move.changed) edgeNotice = t(pointNet, 'edge_restored_notice', { id: pointId });
+  }
   else if (cmd === 'workflow-photos') {
     photosViewerStep = stepId || null;
+    // One full-screen layer at a time: the retake screen replaces the edge point pop-up.
+    edgeOpen = null;
+    edgeNoteDraft = null;
     // From the photo strip: open on just that photo.
     photosViewerPhoto = source.getAttribute('data-photo');
     return {};
@@ -334,6 +385,8 @@ export function handleWorkflowCommand(
     const one = source.getAttribute('data-photo');
     const r = one && canonicalStepId(stepId) === EDGE_PHOTOS_STEP_ID ? retakeOnePhotoInDoc(doc, stepId, one) : retakeStepPhotosInDoc(doc, stepId);
     photosViewerStep = null;
+    edgeOpen = null;
+    edgeNoteDraft = null;
     photosViewerPhoto = null;
     const def = progress.activeId ? workflowById(progress.activeId) : undefined;
     const link = pillLink(def, stepId) ?? def?.steps.find((item) => item.id === stepId)?.link;
@@ -418,8 +471,9 @@ function appendActive(root: HTMLElement, progress: WorkflowProgress): void {
   if (!def || !run || def.status !== 'ready' || def.steps.length === 0) return;
   const roller = def.id === 'circle-field-test' && def.revision >= 3;
   if (roller && !run.finishedAt) {
-    if (photosViewerStep) root.append(renderPhotosViewer(def, run, photosViewerStep));
-    else if (sheetOpen) root.append(renderDetailsSheet(def, run));
+    // The Photos viewer and the edge point pop-up are full-screen layers (renderGuidedOverlay),
+    // drawn outside this root so nothing (hamburger, Tools) can sit on top of them.
+    if (sheetOpen) root.append(renderDetailsSheet(def, run));
     else root.append(renderRollerPanel(def, run, progress));
     return;
   }
@@ -435,7 +489,8 @@ function renderRollerPanel(
 ): HTMLElement {
   // Action states are part of the key: an upload status change must redraw the pill.
   const actions = def.steps.map((step) => deriveActionState(chromeDoc, run, step));
-  const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive(), actions });
+  const edgeSig = currentEdgeSignature(run);
+  const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive(), actions, edgeSig, edgeNotice });
   // Same content: reuse the panel. The app redraws by emptying the shell and appending again, and
   // a list taken out of the page and put back loses its scroll (scrollTop 0 = Set-up in the
   // capsule). That was the "flips to step 0 with no touch" bug: any background redraw (upload,
@@ -444,7 +499,9 @@ function renderRollerPanel(
   // mid-scroll. This never changes currentStepId; only scroll settle, Next and Back do.
   if (rollerCache && rollerCache.key === key) {
     const cached = rollerCache;
+    const top = panelScroll && panelScroll.step === run.currentStepId ? panelScroll.top : 0;
     requestAnimationFrame(() => {
+      if (cached.panel.isConnected && top) cached.panel.scrollTop = top;
       if (cached.panel.isConnected && !cached.busy()) cached.recentre();
     });
     return cached.panel;
@@ -529,6 +586,7 @@ function renderRollerPanel(
     if (currentStep.id === TAPE_DIAMETER_STEP_ID) panel.append(renderCircleTapeForm(run));
     if (currentStep.id === ADD_BASE_POINTS_STEP_ID) panel.append(renderBaseTieForm(run));
     if (currentStep.id === CIRCLE_RESULT_STEP_ID) panel.append(renderCircleResult(chromeDoc, run));
+    if (currentStep.id === EDGE_PHOTOS_STEP_ID || currentStep.id === CIRCLE_RESULT_STEP_ID) panel.append(renderEdgePanel(chromeDoc, run, currentStep.id === EDGE_PHOTOS_STEP_ID));
     panel.append(renderButtonRow(def, run, currentStep));
   }
   if (currentId !== SETUP_STEP_ID) panel.append(renderRunPhotoStrip(def, run));
@@ -545,7 +603,11 @@ function renderRollerPanel(
   const cache: NonNullable<typeof rollerCache> = { key, panel, busy: () => handle.busy(), recentre, lastScroll: undefined };
   rollerCache = cache;
   list.addEventListener('scroll', () => { if (list.isConnected) cache.lastScroll = list.scrollTop; }, { passive: true });
+  // The panel scrolls too (long step content): a redraw keeps its position on the same step.
+  panel.addEventListener('scroll', () => { if (panel.isConnected) panelScroll = { step: currentId, top: panel.scrollTop }; }, { passive: true });
+  const keepPanel = panelScroll && panelScroll.step === currentId ? panelScroll.top : 0;
   requestAnimationFrame(() => {
+    if (keepPanel && panel.isConnected) panel.scrollTop = keepPanel;
     if (carry !== undefined) list.scrollTop = carry;
     else recentre();
     handle = attachRollerWheel(wheel, rowIds, currentId, (stepId) => {
@@ -740,11 +802,10 @@ function photoStatusLine(photo: Photo): string {
 }
 
 function renderPhotosViewer(def: WorkflowDefinition, run: WorkflowRun, stepId: string): HTMLElement {
-  const sheet = el('section', 'workflow-sheet workflow-photos-sheet');
-  sheet.dataset.testid = 'workflow-photos-viewer';
+  const sheet = el('section', 'workflow-photos-content');
   const step = def.steps.find((s) => s.id === stepId);
-  if (!step) return sheet;
-  sheet.append(el('h2', 'workflow-title', `${rowNumber(def, stepId)} ${step.title}: photos`));
+  if (!step) return wrapViewerModal('', []);
+  const viewerTitle = `${rowNumber(def, stepId)} ${step.title}: photos`;
   const all = stepPhotos(chromeDoc, run, step);
   const photos = photosViewerPhoto && all.some((p) => p.id === photosViewerPhoto) ? all.filter((p) => p.id === photosViewerPhoto) : all;
   const action = deriveActionState(chromeDoc, run, step);
@@ -758,7 +819,11 @@ function renderPhotosViewer(def: WorkflowDefinition, run: WorkflowRun, stepId: s
   const edgeOf = perPhoto ? edgeAssignmentsFor(chromeDoc, run) : new Map<string, string>();
   // Previous (retaken) photo beside the current one, e.g. the calibration photo.
   const c = step.complete;
-  const previous = !perPhoto && chromeDoc && 'on' in c && c.on === 'photo.uploaded' ? supersededPhotosForStep(chromeDoc, c.stationId, run).at(-1) : undefined;
+  // Edge points: the previous photo of that same edge point (opened on one photo).
+  const onePoint = perPhoto && photos.length === 1 ? edgeOf.get(photos[0]!.id) : undefined;
+  const previous = onePoint
+    ? previousEdgePhoto(chromeDoc, run, onePoint)
+    : !perPhoto && chromeDoc && 'on' in c && c.on === 'photo.uploaded' ? supersededPhotosForStep(chromeDoc, c.stationId, run).at(-1) : undefined;
   if (previous) {
     const item = el('div', 'workflow-photo-item workflow-photo-previous');
     item.dataset.testid = 'viewer-previous';
@@ -789,7 +854,9 @@ function renderPhotosViewer(def: WorkflowDefinition, run: WorkflowRun, stepId: s
     }
     item.append(el('div', 'workflow-photo-name', `${previous ? `${t(pointNet, 'calib_current')} · ` : ''}${edgeOf.get(photo.id) ? `${edgeOf.get(photo.id)} · ` : ''}${photo.originalFile?.fileName ?? photo.id}`));
     item.append(el('div', 'roller-hint', photoStatusLine(photo)));
-    const retake = button('Retake', 'workflow-photo-retake', { step: stepId, testid: 'photo-retake' });
+    const retake = button('Retake', 'workflow-photo-retake', { step: stepId, testid: 'photo-retake', primary: photos.length === 1 });
+    // One photo (opened from an edge point): the same big labelled button as the pop-up.
+    if (photos.length === 1) retake.className = 'screen-btn screen-primary workflow-retake-wide';
     retake.dataset.photo = photo.id;
     item.append(retake);
     if (photo.originalFile?.uploadStatus === 'failed') {
@@ -799,8 +866,7 @@ function renderPhotosViewer(def: WorkflowDefinition, run: WorkflowRun, stepId: s
     }
     sheet.append(item);
   }
-  sheet.append(button('Close', 'workflow-photos-close', { testid: 'workflow-photos-close' }));
-  return sheet;
+  return wrapViewerModal(viewerTitle, [sheet]);
 }
 
 function renderPhotoPanel(): HTMLElement {
@@ -1243,4 +1309,63 @@ function renderRunPhotoStrip(def: WorkflowDefinition, run: WorkflowRun): HTMLEle
     }
   }
   return strip;
+}
+
+function currentEdgeSignature(run: WorkflowRun): string {
+  if (run.currentStepId !== EDGE_PHOTOS_STEP_ID && run.currentStepId !== CIRCLE_RESULT_STEP_ID) return '';
+  return JSON.stringify(edgePointRows(chromeDoc, run).map((r) => [r.id, r.photoId, r.level, r.residualMm === undefined ? null : Math.round(r.residualMm), r.deleted]));
+}
+
+/** Edge points step / circle result: the circle so far (from 3 points) and the edge point list. */
+function renderEdgePanel(doc: GardenDocument | null, run: WorkflowRun, withFit: boolean): HTMLElement {
+  const box = el('div', 'roller-setup-form edge-panel');
+  box.dataset.testid = 'edge-panel';
+  const detail = circleResultDetailForRun(doc, run);
+  const rows = edgePointRows(doc, run, detail);
+  if (withFit && (detail.fitIds?.length ?? 0) >= MIN_FIT_EDGE_POINTS) box.append(renderEdgeFitSummary(detail));
+  else if (withFit && rows.length) box.append(el('p', 'roller-hint', detail.verdict.headline));
+  box.append(renderEdgeList(rows, edgeNotice));
+  edgeNotice = null;
+  return box;
+}
+
+/**
+ * Full-screen layers of the guided workflow (Photos viewer, edge point pop-up). The app draws
+ * this after everything else, outside the workflow root, so the hamburger and Tools never sit
+ * on top. Typing in the pop-up keeps a draft and does not redraw; a redraw from elsewhere puts
+ * the caret back.
+ */
+export function renderGuidedOverlay(doc: GardenDocument | null): HTMLElement | null {
+  const progress = doc ? readProgress(doc) : undefined;
+  const id = progress?.activeId;
+  const def = id ? workflowById(id) : undefined;
+  const run = id && progress ? progress.runs[id] : undefined;
+  if (!def || !run || run.finishedAt) return null;
+  if (photosViewerStep) return renderPhotosViewer(def, run, photosViewerStep);
+  if (!edgeOpen) return null;
+  const open = edgeOpen;
+  const row = edgePointRows(doc, run).find((r) => r.photoId === open.photoId);
+  if (!row) {
+    edgeOpen = null;
+    return null;
+  }
+  const active = document.activeElement as HTMLTextAreaElement | null;
+  const focus = active?.dataset?.field === 'edge-note' ? { start: active.selectionStart, end: active.selectionEnd } : null;
+  const modal = renderEdgeModal({
+    row,
+    photo: doc?.photos.find((p) => p.id === row.photoId),
+    run,
+    doc,
+    note: edgeNoteDraft ?? run.edgeNotes?.[row.id] ?? '',
+    onNote: (text) => { edgeNoteDraft = text; },
+  });
+  if (focus) {
+    requestAnimationFrame(() => {
+      const area = modal.querySelector<HTMLTextAreaElement>('[data-field="edge-note"]');
+      if (!area || !modal.isConnected) return;
+      area.focus({ preventScroll: true });
+      area.setSelectionRange(focus.start, focus.end);
+    });
+  }
+  return modal;
 }
