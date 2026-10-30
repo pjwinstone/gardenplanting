@@ -15,7 +15,8 @@ import {
 } from './actionNet';
 import { CIRCLE_RESULT_STEP_ID, circleResultDetailForRun, EDGE_PHOTOS_STEP_ID, edgeAssignmentsFor, edgePointRows, MIN_FIT_EDGE_POINTS, previousEdgePhoto, TAPE_DIAMETER_STEP_ID } from './circleResult';
 import { edgeFitLine, edgeSummaryText, renderEdgeFitSummary, renderEdgeList, renderEdgeModal, substageButton, wrapViewerModal } from './edgePointUi';
-import { NavStack, type NavFrame } from '../../workflow/petri/subnet';
+import { circleEngine, circleFire, circleAt, circleEnter, setCircleFacts, circleNets } from '../../app/circle/circleEngine';
+import { describe as describeScreen, renderButtons, renderHierarchy, stampPlace, type Frame } from '../../engine';
 import { photoMarked } from './actionNet';
 import { clearSwiped } from '../../screens/basePointList';
 import { strengthLines } from '../../solver/controlCluster';
@@ -60,7 +61,6 @@ import {
   type WorkflowMove,
 } from './engine';
 import {
-  attachRollerWheel,
   formatCountsLine,
   reasonLine,
   rollerPositionLabel,
@@ -69,7 +69,6 @@ import {
   rowTitle,
   stateIconChar,
   stateIconClass,
-  wheelHeightPx,
 } from './guidedRoller';
 import { cameraCaptureContext, cameraLink } from './cameraCapture';
 import { canonicalStepId, SETUP_STEP_ID } from './fieldTestMeta';
@@ -88,6 +87,8 @@ let placedRoot: HTMLElement | null = null;
 let chromeRerender: (() => void) | null = null;
 /** Apply a workflow change to the app's *current* document (never a stale copy). */
 let chromeCommit: ((update: (doc: GardenDocument) => GardenDocument) => void) | null = null;
+/** Kept for hosts that set them; the step buttons go through the command path. */
+export function chromeHooks(): unknown[] { return [chromeRerender, chromeCommit]; }
 /** Last roller panel and the state it was drawn from. Reused while nothing changed, so a
  * re-render from elsewhere (photo loop, cloud status, error log) does not rebuild the wheel
  * under the user's finger or swallow a tap on a row pill. */
@@ -118,12 +119,37 @@ let edgeNotice: string | null = null;
  * Save and Cancel pop one level and put focus back on the row you were on. Nothing here moves you
  * unless you tap: redraws, refits and uploads only redraw in place.
  */
-const nav = new NavStack();
+/** The circle test's place comes only from the engine (src/app/circle/circleEngine.ts). */
+let helpOpen = false;
+let allStepsOpen = false;
+function isEdgeStep(id: string | undefined | null): boolean { return id === EDGE_PHOTOS_STEP_ID || id === CIRCLE_RESULT_STEP_ID; }
+/** Guards read these facts; refreshed before every command, so a move is judged on the state you saw. */
+function refreshCircleFacts(doc: GardenDocument, progress: WorkflowProgress, pointId: string | null): void {
+  const run = progress.activeId ? progress.runs[progress.activeId] : undefined;
+  if (!run || progress.activeId !== 'circle-field-test') return;
+  const detail = circleResultDetailForRun(doc, run);
+  const rows = edgePointRows(doc, run, detail);
+  const backTo = circleEngine.stack().find((f) => f.net === 'circle_test')?.focus;
+  const point = rows.find((r) => r.id === (pointId ?? edgeOpen?.pointId));
+  setCircleFacts({
+    points: rows.length,
+    live: rows.filter((r) => !r.deleted).length,
+    deleted: rows.filter((r) => r.deleted).length,
+    fitN: detail.fitIds?.length ?? rows.filter((r) => !r.deleted).length,
+    cameFromStep: !!backTo && !isEdgeStep(backTo),
+    pointDeleted: !!point?.deleted,
+  });
+}
+/** After a step change you made: the engine follows (open the list, or leave it for the step). */
+function followStep(from: string | undefined, to: string | undefined): void {
+  if (from === to) return;
+  if (isEdgeStep(to) && circleAt('circle_test', 'steps')) circleEngine.fire('open_edge_points', { focus: from });
+  else if (!isEdgeStep(to) && circleAt('edge_points', 'list')) circleEngine.fire('pick_step');
+}
 /** The edge point row to highlight (and scroll to once, after you come back to the list). */
 let edgeFocus: string | null = null;
 let edgeFocusPending = false;
 let edgeListScroll = 0;
-let edgeFitOpen = false;
 /** Add edge point: the points before the camera opened, so the new one gets the focus. */
 let edgeAddBefore: Set<string> | null = null;
 
@@ -134,24 +160,26 @@ function focusEdgeRow(id: string | null | undefined): void {
 }
 
 /** Where you are in the circle test branch (for tests: only your taps may change it). */
-export function guidedNavState(doc: GardenDocument | null): { step: string | null; overlay: string | null; frames: NavFrame[]; fitOpen: boolean } {
+export function guidedNavState(doc: GardenDocument | null): { step: string | null; overlay: string | null; frames: Frame[]; fitOpen: boolean; place: string } {
   const progress = doc ? readProgress(doc) : undefined;
   const run = progress?.activeId ? progress.runs[progress.activeId] : undefined;
   return {
     step: run?.currentStepId ?? null,
     overlay: photosViewerStep ? `viewer:${photosViewerPhoto ?? photosViewerStep}` : edgeOpen ? `edge:${edgeOpen.pointId}` : null,
-    frames: nav.snapshot(),
-    fitOpen: edgeFitOpen,
+    frames: circleEngine.stack(),
+    fitOpen: circleAt('edge_fit'),
+    place: circleEngine.path().join(' / '),
   };
 }
 
 /** Test hook: start from a clean circle test view. */
 export function resetGuidedNav(): void {
-  nav.clear();
+  circleEngine.reset();
+  helpOpen = false;
+  allStepsOpen = false;
   edgeFocus = null;
   edgeFocusPending = false;
   edgeListScroll = 0;
-  edgeFitOpen = false;
   edgeAddBefore = null;
   edgeOpen = null;
   edgeNoteDraft = null;
@@ -246,6 +274,7 @@ export function handleWorkflowCommand(
   const workflowId = source.getAttribute('data-workflow') ?? '';
   const stepId = source.getAttribute('data-step') ?? '';
   const progress = readProgress(doc);
+  refreshCircleFacts(doc, progress, source.getAttribute('data-point'));
   if (cmd === 'workflow-open-picker') {
     pickerOpen = true;
     sheetOpen = false;
@@ -305,7 +334,14 @@ export function handleWorkflowCommand(
       if (blocker) move = { ...move, notice: doneBlockerNotice(blocker) };
     }
   }
-  else if (cmd === 'workflow-scroll') move = scrollWorkflowToStep(progress, stepId || '');
+  else if (cmd === 'workflow-scroll' || cmd === 'workflow-step-pick') {
+    const from = progress.activeId ? progress.runs[progress.activeId]?.currentStepId : undefined;
+    move = scrollWorkflowToStep(progress, stepId || '');
+    if (move.changed) followStep(from, stepId);
+    if (cmd === 'workflow-step-pick') allStepsOpen = false;
+  }
+  else if (cmd === 'workflow-steps-all') { allStepsOpen = !allStepsOpen; return {}; }
+  else if (cmd === 'workflow-help') { helpOpen = !helpOpen; return {}; }
   else if (cmd === 'workflow-jump') {
     const kind = source.getAttribute('data-kind') as 'error' | 'warning' | 'open' | 'recheck' | null;
     if (kind) move = jumpWorkflowCount(progress, kind);
@@ -372,15 +408,15 @@ export function handleWorkflowCommand(
     const photoId = source.getAttribute('data-value') ?? '';
     const pointId = source.getAttribute('data-point') ?? '';
     if (!photoId) return {};
-    nav.push({ net: 'edge_points', place: 'list', focus: pointId });
+    if (!circleFire('open_point', { arg: pointId, focus: pointId })) return {};
     edgeOpen = { photoId, pointId };
     edgeNoteDraft = null;
     edgeFocus = pointId;
     return {};
   }
   else if (cmd === 'workflow-edge-cancel') {
-    const frame = nav.popTo('edge_points');
-    focusEdgeRow(frame?.focus ?? edgeOpen?.pointId);
+    circleFire('cancel');
+    focusEdgeRow(circleEngine.focus() ?? edgeOpen?.pointId);
     edgeOpen = null;
     edgeNoteDraft = null;
     return {};
@@ -388,8 +424,8 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-edge-save') {
     const pointId = source.getAttribute('data-point') ?? edgeOpen?.pointId ?? '';
     const text = edgeNoteDraft;
-    const frame = nav.popTo('edge_points');
-    focusEdgeRow(frame?.focus ?? pointId);
+    circleFire('save');
+    focusEdgeRow(circleEngine.focus() ?? pointId);
     edgeOpen = null;
     edgeNoteDraft = null;
     if (text === null) return {};
@@ -401,27 +437,28 @@ export function handleWorkflowCommand(
     const link = pillLink(def, EDGE_PHOTOS_STEP_ID);
     if (!link) return {};
     const run = progress.activeId ? progress.runs[progress.activeId] : undefined;
+    if (!circleFire('add_point', { focus: edgeFocus ?? undefined })) return {};
     edgeAddBefore = new Set(run ? edgePointRows(doc, run).map((r) => r.id) : []);
     return { link };
   }
   else if (cmd === 'workflow-edge-points') {
     // Level 2: open the edge point substage from another step; Back returns to that step.
     const run = progress.activeId ? progress.runs[progress.activeId] : undefined;
-    nav.popTo('circle_test');
-    nav.push({ net: 'circle_test', place: 'steps', focus: run?.currentStepId });
+    if (!circleFire('open_edge_points', { focus: run?.currentStepId })) return {};
     move = scrollWorkflowToStep(progress, EDGE_PHOTOS_STEP_ID);
   }
   else if (cmd === 'workflow-edge-back') {
-    const frame = nav.popTo('circle_test');
-    if (!frame?.focus) return {};
-    move = scrollWorkflowToStep(progress, frame.focus);
+    if (!circleFire('back_to_steps')) return {};
+    const to = circleEngine.focus();
+    if (!to) return {};
+    move = scrollWorkflowToStep(progress, to);
   }
   else if (cmd === 'workflow-edge-fit') {
-    edgeFitOpen = true;
+    circleFire('show_fit');
     return {};
   }
   else if (cmd === 'workflow-edge-fit-close') {
-    edgeFitOpen = false;
+    circleFire('close');
     return {};
   }
   else if (cmd === 'workflow-edge-delete') {
@@ -429,6 +466,8 @@ export function handleWorkflowCommand(
     const pointId = source.getAttribute('data-point') ?? '';
     const ok = typeof window !== 'undefined' && typeof window.confirm === 'function' ? window.confirm(t(pointNet, 'edge_delete_confirm', { id: pointId })) : true;
     if (!ok) return {};
+    // The net move first (its guard reads the points before the change), then the data.
+    if (!circleFire(circleAt('edge_edit') ? 'delete' : 'delete_point', { arg: pointId }) && circleAt('edge_points')) return {};
     move = deleteEdgePointWorkflow(progress, pointId, photoId);
     // Stays where you are (list row greyed with Restore, or the pop-up with Restore).
     if (move.changed) {
@@ -439,6 +478,7 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-edge-restore') {
     const photoId = source.getAttribute('data-value') ?? '';
     const pointId = source.getAttribute('data-point') ?? '';
+    if (!circleFire(circleAt('edge_edit') ? 'restore' : 'restore_point', { arg: pointId }) && circleAt('edge_points')) return {};
     move = restoreEdgePointWorkflow(progress, photoId);
     if (move.changed) focusEdgeRow(pointId);
   }
@@ -446,7 +486,7 @@ export function handleWorkflowCommand(
     photosViewerStep = stepId || null;
     // One full-screen layer at a time: the retake screen replaces the edge point pop-up.
     // Its Close goes back one level, to the pop-up.
-    if (edgeOpen) nav.push({ net: 'edge_edit', place: 'open', focus: `${edgeOpen.pointId}|${edgeOpen.photoId}` });
+    if (edgeOpen) circleFire('retake', { focus: `${edgeOpen.pointId}|${edgeOpen.photoId}` });
     edgeOpen = null;
     edgeNoteDraft = null;
     // From the photo strip: open on just that photo.
@@ -456,10 +496,9 @@ export function handleWorkflowCommand(
   else if (cmd === 'workflow-photos-close') {
     photosViewerStep = null;
     photosViewerPhoto = null;
-    const frame = nav.top()?.net === 'edge_edit' ? nav.pop() : undefined;
-    if (frame?.focus) {
-      const [pointId, photoId] = frame.focus.split('|');
-      edgeOpen = { pointId: pointId!, photoId: photoId! };
+    if (circleFire('close')) {
+      const [pointId, photoId] = (circleEngine.focus() ?? '').split('|');
+      if (pointId && photoId) edgeOpen = { pointId, photoId };
     }
     return {};
   }
@@ -468,11 +507,11 @@ export function handleWorkflowCommand(
     const one = source.getAttribute('data-photo');
     const r = one && canonicalStepId(stepId) === EDGE_PHOTOS_STEP_ID ? retakeOnePhotoInDoc(doc, stepId, one) : retakeStepPhotosInDoc(doc, stepId);
     // Camera, then its tap screen; their Save / Close land on the list with this point in focus.
-    const frame = nav.top()?.net === 'edge_edit' ? nav.pop() : undefined;
-    if (frame) {
-      nav.popTo('edge_points');
-      focusEdgeRow(frame.focus?.split('|')[0]);
-    }
+    // Camera, then its tap screen; their Save / Cancel land on the list with this point in focus.
+    const inPopup = circleAt('edge_photo', 'viewer');
+    const at = circleEngine.stack().find((f) => f.net === 'edge_points');
+    if (inPopup) circleFire('retake_photo');
+    if (inPopup) focusEdgeRow(at?.focus);
     photosViewerStep = null;
     edgeOpen = null;
     edgeNoteDraft = null;
@@ -576,11 +615,13 @@ function renderRollerPanel(
   run: WorkflowRun,
   progress: WorkflowProgress,
 ): HTMLElement {
+  // The engine follows the step you are on (resume lands on the steps or the list, no move).
+  circleEnter(isEdgeStep(run.currentStepId));
   // Action states are part of the key: an upload status change must redraw the pill.
   const actions = def.steps.map((step) => deriveActionState(chromeDoc, run, step));
   const edgeSig = currentEdgeSignature(run);
   // The edge point view state too: a focus to bring back, the fit open, the level stack.
-  const edgeView = { edgeFocus, edgeFocusPending, edgeFitOpen, frames: nav.snapshot() };
+  const edgeView = { edgeFocus, edgeFocusPending, place: circleEngine.path(), helpOpen, allStepsOpen };
   const key = JSON.stringify({ id: progress.activeId, run, notice, sun: sunlightActive(), actions, edgeSig, edgeNotice, edgeView });
   // Same content: reuse the panel. The app redraws by emptying the shell and appending again, and
   // a list taken out of the page and put back loses its scroll (scrollTop 0 = Set-up in the
@@ -619,59 +660,12 @@ function renderRollerPanel(
   top.append(countsLine);
   panel.append(top);
 
-  const wheel = el('div', 'roller-wheel');
-  wheel.style.height = `${wheelHeightPx(run)}px`;
-  const cap = el('div', 'roller-cap');
-  wheel.append(cap);
-  const capTop = (wheelHeightPx(run) - ROW_PX) / 2;
-  cap.style.top = `${capTop}px`;
-  const list = el('div', 'roller-list');
-  list.dataset.rollerList = '1';
-  list.setAttribute('role', 'listbox');
-  const pad = (wheelHeightPx(run) - ROW_PX) / 2;
-  list.style.paddingTop = `${pad}px`;
-  list.style.paddingBottom = `${pad}px`;
-  const rowIds = rollerRowIds(def);
   const currentId = run.currentStepId;
-  const nextNeededId = firstUnsettledStepId(def, run);
-  for (const stepId of rowIds) {
-    const row = el('div', 'roller-row');
-    row.dataset.stepId = stepId;
-    row.setAttribute('role', 'option');
-    const state = stepId === SETUP_STEP_ID
-      ? { status: run.setup?.status === 'unconfirmed' ? 'open' : 'ticked_by_you' }
-      : run.steps[stepId];
-    row.append(el('span', 'roller-n', rowNumber(def, stepId)));
-    const ic = el('span', `roller-ic ${stateIconClass(state?.status ?? 'open')}`, stateIconChar(state?.status ?? 'open', stepId));
-    row.append(ic);
-    const title = el('span', 'roller-t' + (stepId === currentId ? ' roller-t-cur' : ''), rowTitle(def, stepId));
-    row.append(title);
-    if (stepId === nextNeededId && stepId !== currentId) {
-      const dot = el('span', 'roller-next-dot', '');
-      dot.setAttribute('aria-label', 'Next needed');
-      dot.dataset.testid = 'roller-next-needed';
-      row.append(dot);
-    }
-    if (stepId === currentId) {
-      const step = def.steps.find((item) => item.id === stepId);
-      // Pill colour and text come only from the step's action sub-net (action.net.yaml).
-      const action = step ? deriveActionState(chromeDoc, run, step) : undefined;
-      const pill = step && action ? actionPillLabel(step, action) : undefined;
-      if (pill && action) {
-        const pc = pillCommandFor(chromeDoc, run, step!, action);
-        const node = button(pill, pc.cmd, { className: actionPillClass(action), step: stepId, testid: 'roller-pill' });
-        node.dataset.action = action.place;
-        const photoId = action.markPhotoId ?? action.photoId;
-        if (photoId) node.dataset.photoId = photoId;
-        if (pc.disabled) node.disabled = true;
-        row.append(node);
-      }
-      row.append(button('?', 'workflow-expand', { className: 'roller-q', step: stepId }));
-    }
-    list.append(row);
-  }
-  wheel.append(list);
-  panel.append(wheel);
+  const crumbs = el('div', 'eng-crumbs', circleEngine.stack().slice(1).map((f) => circleNets.nets[f.net]!.title).join(' › '));
+  crumbs.dataset.testid = 'eng-crumbs';
+  panel.append(crumbs);
+  panel.append(renderStepBar(def, run));
+  if (helpOpen) panel.append(renderHelpPanel());
 
   const currentStep = def.steps.find((item) => item.id === currentId);
   if (currentId === SETUP_STEP_ID) {
@@ -687,42 +681,71 @@ function renderRollerPanel(
   if (currentId !== SETUP_STEP_ID) panel.append(renderRunPhotoStrip(def, run));
   if (notice) panel.append(el('p', 'workflow-notice', notice));
 
-  const recentre = () => {
-    const currentRow = list.querySelector<HTMLElement>(`[data-step-id="${CSS.escape(currentId)}"]`);
-    if (currentRow && list.clientHeight > 0) list.scrollTop = currentRow.offsetTop - pad;
-  };
-  // A redraw with new content while the user is mid-scroll keeps their position on the new list.
-  const prev = rollerCache;
-  const carry = prev && prev.busy() ? prev.lastScroll : undefined;
-  let handle: { busy: () => boolean } = { busy: () => false };
-  const cache: NonNullable<typeof rollerCache> = { key, panel, busy: () => handle.busy(), recentre, lastScroll: undefined };
-  rollerCache = cache;
-  list.addEventListener('scroll', () => { if (list.isConnected) cache.lastScroll = list.scrollTop; }, { passive: true });
-  // The panel scrolls too (long step content): a redraw keeps its position on the same step.
+  rollerCache = { key, panel, busy: () => false, recentre: () => {}, lastScroll: undefined };
+  // The panel scrolls (long step content): a redraw keeps its position on the same step.
   panel.addEventListener('scroll', () => { if (panel.isConnected) panelScroll = { step: currentId, top: panel.scrollTop }; }, { passive: true });
   const keepPanel = panelScroll && panelScroll.step === currentId ? panelScroll.top : 0;
-  requestAnimationFrame(() => {
-    if (keepPanel && panel.isConnected) panel.scrollTop = keepPanel;
-    if (carry !== undefined) list.scrollTop = carry;
-    else recentre();
-    handle = attachRollerWheel(wheel, rowIds, currentId, (stepId) => {
-      if (stepId === currentId) return;
-      const update = (doc: GardenDocument): GardenDocument => {
-        const move = scrollWorkflowToStep(readProgress(doc), stepId);
-        return move.changed ? commitWorkflow(doc, move.progress) : doc;
-      };
-      // Must reach the app's state.doc; a bare rerender redraws from the old doc and snaps back.
-      if (chromeCommit) chromeCommit(update);
-      else if (chromeDoc) {
-        chromeDoc = update(chromeDoc);
-        chromeRerender?.();
-      }
-    });
-  });
+  requestAnimationFrame(() => { if (keepPanel && panel.isConnected) panel.scrollTop = keepPanel; });
   return panel;
 }
 
-const ROW_PX = 44;
+/**
+ * Step buttons (they replace the roller): the current step with its pill and ?, the next step,
+ * All steps (every step as a button) and Help. Each pick is a user move of the circle_test net.
+ */
+function renderStepBar(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
+  const bar = el('div', 'step-bar');
+  bar.dataset.testid = 'step-bar';
+  const ids = rollerRowIds(def);
+  const currentId = run.currentStepId;
+  const at = ids.indexOf(currentId);
+  const nextId = firstUnsettledStepId(def, run) ?? ids[at + 1];
+  const stepBtn = (stepId: string, kind: string, testid: string) => {
+    const state = stepId === SETUP_STEP_ID ? { status: run.setup?.status === 'unconfirmed' ? 'open' : 'ticked_by_you' } : run.steps[stepId];
+    const b = button('', 'workflow-step-pick', { className: `step-btn${stepId === currentId ? ' step-btn--cur' : ''}`, step: stepId, testid });
+    b.append(el('small', '', kind));
+    b.append(el('span', `roller-ic ${stateIconClass(state?.status ?? 'open')}`, stateIconChar(state?.status ?? 'open', stepId)));
+    b.append(el('b', '', ` ${rowNumber(def, stepId)} ${rowTitle(def, stepId)}`));
+    return b;
+  };
+  const cur = el('div', 'step-cur');
+  cur.dataset.testid = 'step-current';
+  cur.append(stepBtn(currentId, 'Now', 'step-current-btn'));
+  const step = def.steps.find((item) => item.id === currentId);
+  const action = step ? deriveActionState(chromeDoc, run, step) : undefined;
+  const pill = step && action ? actionPillLabel(step, action) : undefined;
+  if (pill && action) {
+    const pc = pillCommandFor(chromeDoc, run, step!, action);
+    const node = button(pill, pc.cmd, { className: actionPillClass(action), step: currentId, testid: 'roller-pill' });
+    node.dataset.action = action.place;
+    const photoId = action.markPhotoId ?? action.photoId;
+    if (photoId) node.dataset.photoId = photoId;
+    if (pc.disabled) node.disabled = true;
+    cur.append(node);
+  }
+  if (step) cur.append(button('?', 'workflow-expand', { className: 'roller-q', step: currentId }));
+  bar.append(cur);
+  if (nextId && nextId !== currentId) bar.append(stepBtn(nextId, 'Next', 'step-next'));
+  else bar.append(el('div', 'step-btn', 'No next step'));
+  bar.append(button(allStepsOpen ? 'Hide steps' : 'All steps', 'workflow-steps-all', { className: 'step-btn step-all', testid: 'step-all' }));
+  bar.append(button(helpOpen ? 'Close help' : 'Help', 'workflow-help', { className: 'step-btn step-help', testid: 'step-help' }));
+  if (allStepsOpen) {
+    const all = el('div', 'step-list');
+    all.dataset.testid = 'step-list';
+    for (const id of ids) all.append(stepBtn(id, '', `step-pick-${id}`));
+    bar.append(all);
+  }
+  return bar;
+}
+
+/** Help: the net hierarchy (from the YAML) with where you are marked. */
+function renderHelpPanel(): HTMLElement {
+  const box = el('div', 'help-panel');
+  box.dataset.testid = 'help-panel';
+  const w = circleEngine.where();
+  box.append(renderHierarchy(document, circleNets, { nets: circleEngine.stack().map((f) => f.net), net: w.net, place: w.place }));
+  return box;
+}
 
 function renderSetupForm(_def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
   const form = el('div', 'roller-setup-form');
@@ -1431,7 +1454,7 @@ function renderEdgePanel(doc: GardenDocument | null, run: WorkflowRun, withFit: 
   summary.dataset.testid = 'edge-summary';
   box.append(summary);
   box.append(renderEdgeSubstages(doc, run, rows, detail));
-  if (edgeFitOpen) {
+  if (circleAt('edge_fit')) {
     const fit = el('div', 'edge-fit-open');
     fit.dataset.testid = 'edge-fit-panel';
     fit.append(renderEdgeFitSummary(detail));
@@ -1474,7 +1497,10 @@ function renderEdgePanel(doc: GardenDocument | null, run: WorkflowRun, withFit: 
   return box;
 }
 
-/** Level 3 child buttons: Add edge point, Circle fit, Back; each says if it is available and why now. */
+/**
+ * Level 3 child buttons, drawn by the engine's renderer from edge_points@list: one per enabled
+ * move, with its status and reason. Add edge point is pinned (sticky) at the top of the panel.
+ */
 function renderEdgeSubstages(doc: GardenDocument | null, run: WorkflowRun, rows: ReturnType<typeof edgePointRows>, detail: ReturnType<typeof circleResultDetailForRun>): HTMLElement {
   const bar = el('div', 'edge-substages');
   bar.dataset.testid = 'edge-substages';
@@ -1491,15 +1517,30 @@ function renderEdgeSubstages(doc: GardenDocument | null, run: WorkflowRun, rows:
     rows.length ? t(pointNet, 'edge_add_next', { id: next }) : '',
     unmarked ? t(pointNet, 'edge_add_unmarked', { id: unmarked.id }) : '',
   ].filter(Boolean).join(' ');
-  bar.append(substageButton(t(pointNet, 'edge_add_btn'), 'workflow-edge-add', 'edge-add', why, { primary: true }));
-  const fitOk = fitN >= MIN_FIT_EDGE_POINTS;
-  bar.append(substageButton(t(pointNet, 'edge_fit_btn'), 'workflow-edge-fit', 'edge-fit-open',
-    fitOk ? `${edgeFitLine(detail)}. ${detail.verdict.headline}` : t(pointNet, 'edge_fit_why_off', { n: fitN }), { disabled: !fitOk || edgeFitOpen }));
-  const back = nav.snapshot().reverse().find((f) => f.net === 'circle_test');
+  const backTo = circleEngine.stack().find((f) => f.net === 'circle_test')?.focus;
   const def = workflowById(readProgress(doc ?? undefined).activeId ?? 'circle-field-test');
-  const backTitle = back?.focus ? (back.focus === SETUP_STEP_ID ? 'Set-up' : def?.steps.find((s) => s.id === back.focus)?.title ?? back.focus) : '';
-  bar.append(substageButton(back ? t(pointNet, 'edge_back_btn', { step: backTitle }) : t(pointNet, 'edge_back_btn', { step: 'the step you came from' }), 'workflow-edge-back', 'edge-back',
-    back ? '' : t(pointNet, 'edge_back_why_off'), { disabled: !back }));
+  const backTitle = backTo ? (backTo === SETUP_STEP_ID ? 'Set-up' : def?.steps.find((s) => s.id === backTo)?.title ?? backTo) : '';
+  setCircleFacts({
+    points: rows.length,
+    live: rows.filter((r) => !r.deleted).length,
+    deleted: rows.filter((r) => r.deleted).length,
+    fitN,
+    cameFromStep: !!backTo && !isEdgeStep(backTo),
+  });
+  if (!circleAt('edge_points', 'list')) return bar;
+  const view = describeScreen(circleEngine, {
+    label: (id) => (id === 'add_point' ? t(pointNet, 'edge_add_btn') : id === 'show_fit' ? t(pointNet, 'edge_fit_btn') : id === 'back_to_steps' ? t(pointNet, 'edge_back_btn', { step: backTitle || 'the step you came from' }) : undefined),
+    text: (id) => (id === 'add_point' ? why : id === 'show_fit' ? `${edgeFitLine(detail)}. ${detail.verdict.headline}` : id === 'back_to_steps' ? '' : undefined),
+  });
+  const cmds: Record<string, string> = { add_point: 'workflow-edge-add', show_fit: 'workflow-edge-fit', back_to_steps: 'workflow-edge-back' };
+  stampPlace(bar, circleEngine);
+  const btns = view.buttons.filter((b) => cmds[b.id]);
+  const pin = renderButtons(document, btns.filter((b) => b.id === 'add_point'), { cmd: (b) => cmds[b.id]! });
+  pin.classList.add('edge-add-pin');
+  pin.dataset.testid = 'edge-add-pin';
+  bar.append(pin);
+  bar.append(renderButtons(document, btns.filter((b) => b.id !== 'add_point'), { cmd: (b) => cmds[b.id]! }));
+  for (const node of bar.querySelectorAll<HTMLButtonElement>('button')) node.classList.add('substage-btn');
   return bar;
 }
 
@@ -1527,7 +1568,7 @@ export function renderGuidedOverlay(doc: GardenDocument | null): HTMLElement | n
   const run = id && progress ? progress.runs[id] : undefined;
   if (!def || !run || run.finishedAt) return null;
   if (photosViewerStep) return renderPhotosViewer(def, run, photosViewerStep);
-  if (!edgeOpen) return null;
+  if (!edgeOpen || !circleAt('edge_edit', 'open')) return null;
   const open = edgeOpen;
   const row = edgePointRows(doc, run).find((r) => r.photoId === open.photoId);
   if (!row) {

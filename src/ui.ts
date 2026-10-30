@@ -192,6 +192,7 @@ import {
 } from './gardenCloudSave';
 import { glossaryPairsForMenu } from './workflow/glossary';
 import { renderGuidedOverlay } from './workflows/guided/guidedChrome';
+import { circleCameraEvent } from './app/circle/circleEngine';
 import { handleScreenCommand, installScreens, renderScreens, currentScreen } from './screens/pointScreen';
 import { pointForMarkerId } from './workflows/guided/markerSet';
 import type { AutoSleeveRecord as ScreenSleeveRecord, PhotoClick as ScreenPhotoClick } from './model';
@@ -442,6 +443,8 @@ async function openAimingPreview(
   cancel.setAttribute('data-testid', 'camera-cancel');
   cancel.addEventListener('click', () => {
     stopInAppCamera();
+    // Add edge point: Cancel in the camera is a move of the net (back to the list, nothing added).
+    if (circleCameraEvent('camera_cancel')) setState({});
   });
 
   const note = document.createElement('p');
@@ -591,6 +594,8 @@ async function handleCameraPositionCapture(
       logError(`Camera position ${cameraPositionId}: ${check.message}`, { source: 'photo', severity: 'info' });
       setCloudMessage(check.message);
       // Net: app_rejects_evidence. Red error with the reason; the row pill reads Retake.
+      // Add edge point: a refused photo closes the camera place, back on the list with the reason.
+      if (circleCameraEvent('camera_cancel')) setState({});
       if (stepId) {
         const move = rejectEvidenceWorkflow(readProgress(state.doc), stepId, check.message);
         if (move.changed) setDoc(commitWorkflow(state.doc, move.progress), null);
@@ -598,6 +603,8 @@ async function handleCameraPositionCapture(
       return;
     }
     logError(`Camera position ${cameraPositionId} photo: ${check.message}`, { source: 'photo', severity: 'info' });
+    // Add edge point: the photo is in; the net moves camera -> tap screen.
+    circleCameraEvent('photo_in');
     await applyAgainPhotoThumb(pointId, preview.dataUrl, file, preview.pixels);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Could not read photo.';
@@ -626,7 +633,10 @@ async function beginSurveyCapture(onFile: (file: File) => void, cameraOptions?: 
         readFile: readInstalledNativeFile,
         cameraOptions,
       });
-      if (choice.route === 'cancelled') return;
+      if (choice.route === 'cancelled') {
+        if (circleCameraEvent('camera_cancel')) setState({});
+        return;
+      }
       if (choice.route === 'library') {
         openCaptureInput('library', onFile);
         return;
@@ -2805,6 +2815,7 @@ async function onShellClick(e: Event): Promise<void> {
     return;
   }
   if (cmd === 'close-photo-mark') {
+    circleCameraEvent('taps_later');
     if (tapDraft) setCloudMessage('Photo kept. Mark it later from the photo.');
     closePhotoMark();
     return;
@@ -2822,6 +2833,7 @@ async function onShellClick(e: Event): Promise<void> {
     return;
   }
   if (cmd === 'photo-tap-save') {
+    circleCameraEvent('taps_saved');
     saveGuidedTaps();
     return;
   }
