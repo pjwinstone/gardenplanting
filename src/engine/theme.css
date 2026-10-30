@@ -1,0 +1,24 @@
+/* Engine theme: CSS variables and classes keyed by role and style token. Swap this file to retheme. */
+:root {
+  --eng-primary-bg: #1f7a4d; --eng-primary-fg: #fff;
+  --eng-secondary-bg: #fbf8f1; --eng-secondary-fg: #1d2a22;
+  --eng-danger-bg: #fff1ef; --eng-danger-fg: #a3271b;
+  --eng-nav-bg: transparent; --eng-nav-fg: #1d2a22;
+  --eng-ok: #1f7a4d; --eng-warn: #b7791f; --eng-bad: #c0392b;
+  --eng-radius: 12px; --eng-gap: 8px;
+}
+.eng-bar { display: grid; gap: var(--eng-gap); }
+.eng-btn { display: block; width: 100%; text-align: left; border-radius: var(--eng-radius); padding: 10px 14px; border: 2px solid #ddd6c8; font: inherit; }
+.eng-btn b { display: block; font-size: 1.1em; }
+.eng-why { display: block; font-size: .85em; opacity: .85; }
+.eng-r-primary { background: var(--eng-primary-bg); color: var(--eng-primary-fg); border-color: var(--eng-primary-bg); }
+.eng-r-secondary { background: var(--eng-secondary-bg); color: var(--eng-secondary-fg); }
+.eng-r-danger { background: var(--eng-danger-bg); color: var(--eng-danger-fg); }
+.eng-r-nav { background: var(--eng-nav-bg); color: var(--eng-nav-fg); }
+.eng-s-ok { border-left: 6px solid var(--eng-ok); }
+.eng-s-warn { border-left: 6px solid var(--eng-warn); }
+.eng-s-bad { border-left: 6px solid var(--eng-bad); }
+.eng-btn:disabled { opacity: .5; }
+.eng-crumbs { font-size: .8em; opacity: .7; margin: 0 0 4px; }
+.eng-help details { margin-left: 12px; }
+.eng-help .eng-here { font-weight: 700; background: #fff3c4; }

@@ -83,7 +83,7 @@ test('edge point pop-up: Retake photo opens the retake screen; the new photo ref
   const viewer = page.getByTestId('workflow-photos-viewer');
   await expect(viewer).toContainText('EDG04 · edge4.jpg');
   await viewer.getByTestId('photo-retake').tap();
-  await expect(page.getByTestId('edge-fit-open')).toContainText('7 points');
+  await expect(page.getByTestId('edge-summary')).toContainText('7 points');
   const cam = await page.evaluateHandle(() => (window as unknown as { __cam: HTMLInputElement }).__cam);
   await cam.asElement()!.setInputFiles('e2e/fixtures/edge4-retake.jpg');
   await expect(page.getByTestId('photo-tap-prompt')).toContainText('Tap BAS01');

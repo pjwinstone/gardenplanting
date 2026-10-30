@@ -1,3 +1,4 @@
+@import "../engine/theme.css";
 /* Rebuilt screens: Home, Add point, photo strip, photo viewer. */
 .screen-sheet { position: absolute; left: 8px; right: 8px; bottom: calc(var(--wf-safe-bottom, 0px) + 24px); z-index: 37; padding: 10px; border-radius: 22px; background: rgba(255,255,255,.92); box-shadow: 0 16px 40px rgba(0,0,0,.3); font: 15px/1.3 -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #10221a; max-height: 80vh; overflow-y: auto; }
 .screen-home { display: flex; gap: 10px; }
@@ -107,6 +108,18 @@
 /* Circle test sub-net buttons: name, then available / why not and what it does. */
 .edge-summary { margin: 0 0 8px; font-weight: 700; font-size: 16px; }
 .edge-substages { display: grid; gap: 8px; margin: 0 0 10px; }
+/* Add edge point stays on screen however far the list or panel scrolls (Paul, TestFlight 0.7.25). */
+.edge-add-pin { position: sticky; top: 0; z-index: 3; padding: 4px 0; background: var(--sheet-bg, #f6f2e9); }
+@media (max-height: 500px) { .edge-add-pin .eng-why { display: none; } }
+.step-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0 10px; }
+.step-bar .step-all, .step-bar .step-help { grid-column: span 1; }
+.step-btn { text-align: left; border-radius: 12px; padding: 8px 12px; border: 2px solid #ddd6c8; background: #fbf8f1; font: inherit; }
+.step-btn small { display: block; font-size: 12px; opacity: .75; }
+.step-btn--cur { border-color: #1f7a4d; background: #e7f3ec; }
+.step-list { grid-column: 1 / -1; display: grid; gap: 6px; }
+.step-list .step-btn--cur { font-weight: 700; }
+.eng-crumbs { font-size: 12px; opacity: .7; margin: 0 0 4px; }
+.help-panel { margin: 0 0 10px; max-height: 60vh; overflow: auto; border: 1px solid #ddd6c8; border-radius: 12px; padding: 8px; background: #fff; font-size: 14px; }
 .substage-btn { display: flex; flex-direction: column; align-items: flex-start; text-align: left; width: 100%; min-height: 56px; padding: 8px 12px; }
 .substage-btn .substage-name { font-size: 17px; }
 .substage-btn .substage-why { font-size: 13px; font-weight: 400; line-height: 1.3; opacity: 0.9; }

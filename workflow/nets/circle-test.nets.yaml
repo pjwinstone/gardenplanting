@@ -1,128 +1,125 @@
-# circle-test.nets.yaml — the circle test branch as nested sub-nets (src/workflow/petri/subnet.ts).
+# circle-test.nets.yaml — Garden Planting: the circle test branch on the engine (src/engine).
+# Loaded by src/app/circle/circleEngine.ts. Docs: docs/nets/circle-test.md (generated:
+# npx tsx scripts/gen-net-docs.ts). Revisions are a hash of each net's logic (src/engine/net.ts).
 #
-# Any place can be refined by a child net (`refines: <net id>`). Entering that place starts the
-# child at its `entry`; the child's `exits` hand the token back. Depth is not limited.
-# A navigation stack (NavStack) holds one frame per open level; Back pops one level and puts
-# focus back on what you were on (e.g. the edge point row).
-#
-# Rules (Paul, 29 Oct 2026):
-#   - No automatic navigation. Only `user: true` transitions move between places or levels.
-#     `auto: true` transitions are background work (refit) and never change the place.
-#     `external: true` is a black box (camera, tap screen, the rest of the app): its controls
-#     live outside this branch.
-#   - Every place shows one control per transition (`control` = data-testid, `{id}` = any point).
-#     A control that is not available stays visible, disabled, with its reason.
-#   - Every place can reach an exit (no dead ends). tests/circleNets.test.ts walks every marking.
-#
-# Level 1 is the app/Home net, level 2 the activity (circle test), level 3 its substages.
+# Rules: only `user` moves change the screen; `app` moves change data only (load-time check).
+# Reaching a child's exit closes it and fires the parent's `on_exit` move in the same tap,
+# restoring the focus the parent kept (the row you were on). Every net is checked for dead ends,
+# traps and dead moves (tests/circleEngine.test.ts).
 
 root: home
 
 nets:
-  home:                       # level 1 — only the circle test is wired; the rest is a black box
+  home:
     title: Home
-    level: 1
-    entry: home
-    exits: [home]
+    text: The app's start screen. Only the circle test is on the engine so far.
+    entry: hub
+    exits: []
     places:
-      - {id: home}
-      - {id: circle_test, refines: circle_test}
-      - {id: other_activity, external: true}          # Add point, Tools, … (not ported)
+      - {id: hub, title: Home, screen: panel, text: Pick an activity.}
+      - {id: circle, refines: circle_test, text: The circle test is open.}
     transitions:
-      - {id: open_circle_test,   from: home,           to: circle_test,    user: true, control: home-circle-test}
-      - {id: leave_circle_test,  from: circle_test,    to: home,           user: true, control: workflow-pause, child_exit: closed}
-      - {id: open_other,         from: home,           to: other_activity, user: true, external: true}
-      - {id: leave_other,        from: other_activity, to: home,           user: true, external: true}
+      - {id: open_circle_test, from: hub, to: circle, label: Circle test, role: primary, text: Start or resume the circle test.}
+      - {id: circle_closed, from: circle, to: hub, on_exit: closed}
 
-  circle_test:                # level 2 — the roller of steps; the edge points are one substage
+  circle_test:
     title: Circle test
-    level: 2
+    text: The steps of the circle field test. Step buttons show the current and next step, plus All steps.
     entry: steps
     exits: [closed]
     places:
-      - {id: steps}                                    # roller on any other step (black box steps 0–11)
-      - {id: edge_points, refines: edge_points}
-      - {id: closed}
+      - {id: steps, title: Circle test, screen: panel, text: One step at a time; pick a step with the step buttons.}
+      - {id: edge, refines: edge_points, text: The edge point list (steps Edge photos and Circle result).}
+      - {id: closed, text: The circle test is put away (Later); its data is kept.}
     transitions:
-      - {id: open_edge_points,  from: steps,       to: edge_points, user: true, control: edge-points-open}
-      - {id: back_to_steps,     from: edge_points, to: steps,       user: true, control: edge-back}
-      - {id: pause,             from: steps,       to: closed,      user: true, control: workflow-pause}
+      - {id: open_edge_points, from: steps, to: edge, control: edge-points-open, label: Edge points, role: primary, order: 1, text: Open the list of edge points.}
+      - {id: pick_step, from: steps, to: steps, control: step-pick, label: Go to step, role: nav, order: 2, text: Move to another step.}
+      - {id: pause, from: steps, to: closed, control: workflow-pause, label: Later, role: nav, order: 9, text: Put the test away and come back later.}
+      - {id: edge_closed, from: edge, to: steps, on_exit: back}
 
-  edge_points:                # level 3 hub — the edge point list
+  edge_points:
     title: Edge points
-    level: 3
+    text: The hub of the circle test. Add edge point is always at the top.
     entry: list
-    exits: [list]
+    exits: [back]
     places:
-      - {id: list}
-      - {id: adding,  refines: edge_add}
-      - {id: point,   refines: edge_edit}
-      - {id: fit,     refines: edge_fit}
+      - {id: list, title: Edge points, screen: list, summary: "{points} points · {pass} pass · {amber} amber · {red} red · {deleted} deleted", text: Every edge point with its residual and colour.}
+      - {id: adding, refines: edge_add, text: Adding one edge point.}
+      - {id: point, refines: edge_edit, text: One point's pop-up is open.}
+      - {id: fit, refines: edge_fit, text: The circle fit is shown.}
+      - {id: back, text: Left the list for another step.}
     transitions:
-      - {id: add_point,     from: list,   to: adding, user: true, control: edge-add}
-      - {id: open_point,    from: list,   to: point,  user: true, control: "edge-row-{id}", guard: hasPoints}
-      - {id: delete_point,  from: list,   to: list,   user: true, control: "edge-delete-{id}", guard: hasLivePoint}
-      - {id: restore_point, from: list,   to: list,   user: true, control: "edge-restore-{id}", guard: hasDeletedPoint}
-      - {id: show_fit,      from: list,   to: fit,    user: true, control: edge-fit-open}
-      - {id: add_done,      from: adding, to: list,   user: true, child_exit: done}
-      - {id: point_done,    from: point,  to: list,   user: true, child_exit: closed}
-      - {id: fit_done,      from: fit,    to: list,   user: true, control: edge-fit-close, child_exit: shown}
+      - {id: add_point, from: list, to: adding, control: edge-add, label: Add edge point, icon: "+", role: primary, order: 1, text: Take the next edge point's photo.}
+      - {id: show_fit, from: list, to: fit, control: edge-fit-open, label: Circle fit, role: secondary, order: 2, guard: canFit, text: The circle from the points in the fit.}
+      - {id: back_to_steps, from: list, to: back, control: edge-back, label: Back to the step you came from, role: nav, order: 3, guard: cameFromStep, text: Return to the step you were on.}
+      - {id: pick_step, from: list, to: back, control: step-pick, label: Go to step, role: nav, order: 4, text: Move to another step.}
+      - {id: open_point, from: list, to: point, control: "edge-row-{id}", label: Open point, role: secondary, order: 10, guard: hasPoints, text: Open one point's pop-up.}
+      - {id: delete_point, from: list, to: list, control: "edge-delete-{id}", label: Delete, role: danger, order: 11, guard: hasLivePoint, text: Swipe left on a row to delete it (Restore undoes).}
+      - {id: restore_point, from: list, to: list, control: "edge-restore-{id}", label: Restore, role: secondary, order: 12, guard: hasDeletedPoint, text: Put a deleted point back.}
+      - {id: refit, from: list, to: list, kind: app, text: The fit recomputes by itself when points change; you stay where you are.}
+      - {id: add_done, from: adding, to: list, on_exit: done}
+      - {id: point_done, from: point, to: list, on_exit: closed}
+      - {id: fit_done, from: fit, to: list, on_exit: closed}
 
-  edge_add:                   # add one edge point: camera, then its tap screen
+  edge_add:
     title: Add edge point
-    level: 4
+    text: The camera, then the tap screen for the new photo. Save or Cancel goes back to the list.
     entry: camera
     exits: [done]
     places:
-      - {id: camera,    external: true}
-      - {id: tapscreen, external: true}
-      - {id: done}
+      - {id: camera, title: Camera, screen: camera, text: The camera is open (landscape).}
+      - {id: tapscreen, title: Tap the base points, screen: form, text: Tap the base points you can see in the new photo.}
+      - {id: done, text: Back to the list, the new point highlighted.}
     transitions:
-      - {id: photo_in,      from: camera,    to: tapscreen, user: true, external: true}
-      - {id: camera_cancel, from: camera,    to: done,      user: true, external: true}
-      - {id: taps_saved,    from: tapscreen, to: done,      user: true, control: photo-tap-save, external: true}
-      - {id: taps_later,    from: tapscreen, to: done,      user: true, control: photo-tap-close, external: true}
+      - {id: photo_in, from: camera, to: tapscreen, control: camera-shutter, label: Take photo, role: primary, text: The photo comes back from the camera.}
+      - {id: camera_cancel, from: camera, to: done, control: camera-cancel, label: Cancel, role: nav, text: Close the camera; nothing is added.}
+      - {id: taps_saved, from: tapscreen, to: done, control: photo-tap-save, label: Save, role: primary, text: Save the taps and go back to the list.}
+      - {id: taps_later, from: tapscreen, to: done, control: photo-tap-close, label: Later, role: nav, text: Keep the photo, tap it later from its row.}
 
-  edge_edit:                  # the edge point pop-up
+  edge_edit:
     title: Edge point pop-up
-    level: 4
+    text: One edge point full screen, with its photo, residual and note.
     entry: open
     exits: [closed]
     places:
-      - {id: open}
-      - {id: retake, refines: edge_photo}
-      - {id: taps,   external: true}
-      - {id: closed}
+      - {id: open, title: Edge point, screen: popup, text: The point's photo, residual, note and actions.}
+      - {id: retake, refines: edge_photo, text: The retake screen (previous vs current).}
+      - {id: taps, title: Tap the base points, screen: form, text: Re-tap the base points in this photo.}
+      - {id: closed, text: Back to the list on this point.}
     transitions:
-      - {id: save,        from: open,   to: closed, user: true, control: edge-modal-save}
-      - {id: cancel,      from: open,   to: closed, user: true, control: edge-modal-cancel}
-      - {id: delete,      from: open,   to: open,   user: true, control: edge-modal-delete,  guard: pointLive}
-      - {id: restore,     from: open,   to: open,   user: true, control: edge-modal-restore, guard: pointDeleted}
-      - {id: retake,      from: open,   to: retake, user: true, control: edge-modal-retake}
-      - {id: edit_taps,   from: open,   to: taps,   user: true, control: edge-modal-taps}
-      - {id: taps_back,   from: taps,   to: closed, user: true, external: true}
-      - {id: retake_back, from: retake, to: closed, user: true, child_exit: done}
+      - {id: retake, from: open, to: retake, control: edge-modal-retake, label: Retake, icon: "⟳", role: primary, order: 1, text: Take this point's photo again.}
+      - {id: edit_taps, from: open, to: taps, control: edge-modal-taps, label: Tap base points, role: secondary, order: 2, text: Fix the taps on this photo.}
+      - {id: save, from: open, to: closed, control: edge-modal-save, label: Save, role: primary, order: 3, text: Keep the note and go back.}
+      - {id: cancel, from: open, to: closed, control: edge-modal-cancel, label: Cancel, role: nav, order: 4, text: Go back without saving the note.}
+      - {id: delete, from: open, to: open, control: edge-modal-delete, label: Delete, role: danger, order: 5, guard: pointLive, text: Leave it out of the fit (Restore undoes).}
+      - {id: restore, from: open, to: open, control: edge-modal-restore, label: Restore, role: secondary, order: 6, guard: pointDeleted, text: Put it back in the fit.}
+      - {id: taps_back, from: taps, to: closed, control: photo-tap-save, label: Save, role: primary, text: Save the taps and go back to the list.}
+      - {id: retake_back, from: retake, to: open, on_exit: back}
+      - {id: retake_saved, from: retake, to: closed, on_exit: done}
 
-  edge_photo:                 # the retake screen (previous vs current), same as the photo strip's
+  edge_photo:
     title: Retake screen
-    level: 5
+    text: The previous and current photo side by side.
     entry: viewer
-    exits: [done]
+    exits: [back, done]
     places:
-      - {id: viewer}
-      - {id: camera, refines: edge_add}
-      - {id: done}
+      - {id: viewer, title: Photos, screen: popup, text: Previous vs current photo.}
+      - {id: camera, refines: edge_add, text: The new photo is being taken.}
+      - {id: back, text: Closed, back to the pop-up.}
+      - {id: done, text: New photo in, back to the list on this point.}
     transitions:
-      - {id: retake_photo, from: viewer, to: camera, user: true, control: photo-retake}
-      - {id: close,        from: viewer, to: done,   user: true, control: workflow-photos-close}
-      - {id: photo_done,   from: camera, to: done,   user: true, child_exit: done}
+      - {id: retake_photo, from: viewer, to: camera, control: photo-retake, label: Retake, role: primary, text: Open the camera for a new photo.}
+      - {id: close, from: viewer, to: back, control: workflow-photos-close, label: Close, role: nav, text: Back to the pop-up.}
+      - {id: photo_done, from: camera, to: done, on_exit: done}
 
-  edge_fit:                   # the circle so far; refit runs by itself and never moves you
+  edge_fit:
     title: Circle fit
-    level: 4
+    text: The circle from the points in the fit, with its verdict.
     entry: shown
-    exits: [shown]
+    exits: [closed]
     places:
-      - {id: shown}
+      - {id: shown, title: Circle fit, screen: panel, text: Centre, radius and the worst residual.}
+      - {id: closed, text: Back to the list.}
     transitions:
-      - {id: refit,       from: shown, to: shown, auto: true}     # background: never moves you
+      - {id: close, from: shown, to: closed, control: edge-fit-close, label: Close, role: nav, text: Back to the edge point list.}
+      - {id: refit, from: shown, to: shown, kind: app, text: Refit runs by itself; you stay here.}
