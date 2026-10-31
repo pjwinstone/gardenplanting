@@ -340,6 +340,19 @@ export function handleWorkflowCommand(
     if (move.changed) followStep(from, stepId);
     if (cmd === 'workflow-step-pick') allStepsOpen = false;
   }
+  else if (cmd === 'workflow-step-back') {
+    const def = progress.activeId ? workflowById(progress.activeId) : undefined;
+    const run = progress.activeId ? progress.runs[progress.activeId] : undefined;
+    if (!def || !run) return {};
+    const ids = rollerRowIds(def);
+    const prev = ids[ids.indexOf(run.currentStepId) - 1];
+    setCircleFacts({ prevStep: prev ?? '' });
+    if (!prev || !circleFire('back_step', { focus: run.currentStepId })) return {};
+    move = scrollWorkflowToStep(progress, prev);
+    // Landing on an edge step from a non-edge one opens its list (part of the same tap).
+    if (move.changed && isEdgeStep(prev) && circleAt('circle_test', 'steps')) circleEngine.fire('open_edge_points', { focus: run.currentStepId });
+    panelScroll = null;
+  }
   else if (cmd === 'workflow-steps-all') { allStepsOpen = !allStepsOpen; return {}; }
   else if (cmd === 'workflow-help') { helpOpen = !helpOpen; return {}; }
   else if (cmd === 'workflow-jump') {
@@ -700,6 +713,7 @@ function renderStepBar(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
   const currentId = run.currentStepId;
   const at = ids.indexOf(currentId);
   const nextId = firstUnsettledStepId(def, run) ?? ids[at + 1];
+  const prevId = at > 0 ? ids[at - 1] : undefined;
   const stepBtn = (stepId: string, kind: string, testid: string) => {
     const state = stepId === SETUP_STEP_ID ? { status: run.setup?.status === 'unconfirmed' ? 'open' : 'ticked_by_you' } : run.steps[stepId];
     const b = button('', 'workflow-step-pick', { className: `step-btn${stepId === currentId ? ' step-btn--cur' : ''}`, step: stepId, testid });
@@ -724,6 +738,13 @@ function renderStepBar(def: WorkflowDefinition, run: WorkflowRun): HTMLElement {
     cur.append(node);
   }
   if (step) cur.append(button('?', 'workflow-expand', { className: 'roller-q', step: currentId }));
+  // Back: the net's back_step move (status and reason from the engine; disabled on the first step).
+  setCircleFacts({ prevStep: prevId ? `${rowNumber(def, prevId)} ${rowTitle(def, prevId)}` : '' });
+  const backView = describeScreen(circleEngine, { label: (id) => (id === 'back_step' && prevId ? `Back: ${rowNumber(def, prevId)} ${rowTitle(def, prevId)}` : undefined) })
+    .buttons.filter((b) => b.id === 'back_step');
+  const back = renderButtons(document, backView, { cmd: () => 'workflow-step-back' });
+  back.classList.add('step-back-row');
+  bar.append(back);
   bar.append(cur);
   if (nextId && nextId !== currentId) bar.append(stepBtn(nextId, 'Next', 'step-next'));
   else bar.append(el('div', 'step-btn', 'No next step'));

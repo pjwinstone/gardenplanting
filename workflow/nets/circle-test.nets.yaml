@@ -33,6 +33,7 @@ nets:
       - {id: closed, text: The circle test is put away (Later); its data is kept.}
     transitions:
       - {id: open_edge_points, from: steps, to: edge, control: edge-points-open, label: Edge points, role: primary, order: 1, text: Open the list of edge points.}
+      - {id: back_step, from: steps, to: steps, control: step-back, label: Back, icon: "‹", role: nav, order: 0, guard: hasPrevStep, text: Go back to the previous step.}
       - {id: pick_step, from: steps, to: steps, control: step-pick, label: Go to step, role: nav, order: 2, text: Move to another step.}
       - {id: pause, from: steps, to: closed, control: workflow-pause, label: Later, role: nav, order: 9, text: Put the test away and come back later.}
       - {id: edge_closed, from: edge, to: steps, on_exit: back}
@@ -52,6 +53,7 @@ nets:
       - {id: add_point, from: list, to: adding, control: edge-add, label: Add edge point, icon: "+", role: primary, order: 1, text: Take the next edge point's photo.}
       - {id: show_fit, from: list, to: fit, control: edge-fit-open, label: Circle fit, role: secondary, order: 2, guard: canFit, text: The circle from the points in the fit.}
       - {id: back_to_steps, from: list, to: back, control: edge-back, label: Back to the step you came from, role: nav, order: 3, guard: cameFromStep, text: Return to the step you were on.}
+      - {id: back_step, from: list, to: back, control: step-back, label: Back, icon: "‹", role: nav, order: 0, guard: hasPrevStep, text: Go back to the previous step.}
       - {id: pick_step, from: list, to: back, control: step-pick, label: Go to step, role: nav, order: 4, text: Move to another step.}
       - {id: open_point, from: list, to: point, control: "edge-row-{id}", label: Open point, role: secondary, order: 10, guard: hasPoints, text: Open one point's pop-up.}
       - {id: delete_point, from: list, to: list, control: "edge-delete-{id}", label: Delete, role: danger, order: 11, guard: hasLivePoint, text: Swipe left on a row to delete it (Restore undoes).}

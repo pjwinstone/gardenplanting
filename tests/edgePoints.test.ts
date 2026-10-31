@@ -27,7 +27,7 @@ describe('circle test edge points', () => {
     const det = circleResultDetailForRun(d, runOf(d));
     expect(det.verdict.fit?.diameterM).toBeGreaterThan(11);
     expect(det.fitIds).toEqual(['EDG01', 'EDG02', 'EDG03']);
-    expect(det.verdict.guidance[0]).toMatch(/3 edge points fit a circle exactly/);
+    expect(det.verdict.headline).toMatch(/^Exact fit through 3 points/);
     const rows = edgePointRows(d, runOf(d), det);
     expect(rows.map((r) => r.id)).toEqual(['EDG01', 'EDG02', 'EDG03']);
     expect(rows.every((r) => r.residualMm === undefined)).toBe(true);
