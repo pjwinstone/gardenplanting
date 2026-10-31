@@ -16,7 +16,7 @@ The app's start screen. Only the circle test is on the engine so far.
 | open_circle_test (user) | Circle test | hub → circle |  | Start or resume the circle test. |
 | circle_closed (user) |  | circle → hub (child exit closed) |  |  |
 
-### Circle test (`circle_test`, rev b94c026a)
+### Circle test (`circle_test`, rev d6f02832)
 
 The steps of the circle field test. Step buttons show the current and next step, plus All steps.
 
@@ -29,11 +29,12 @@ The steps of the circle field test. Step buttons show the current and next step,
 | Move | Button | From → To | Guard | What it does |
 |---|---|---|---|---|
 | open_edge_points (user) | Edge points | steps → edge |  | Open the list of edge points. |
+| back_step (user) | ‹ Back | steps → steps | hasPrevStep | Go back to the previous step. |
 | pick_step (user) | Go to step | steps → steps |  | Move to another step. |
 | pause (user) | Later | steps → closed |  | Put the test away and come back later. |
 | edge_closed (user) |  | edge → steps (child exit back) |  |  |
 
-#### Edge points (`edge_points`, rev ffc4d4b3)
+#### Edge points (`edge_points`, rev 1cd1bae8)
 
 The hub of the circle test. Add edge point is always at the top.
 
@@ -50,6 +51,7 @@ The hub of the circle test. Add edge point is always at the top.
 | add_point (user) | + Add edge point | list → adding |  | Take the next edge point's photo. |
 | show_fit (user) | Circle fit | list → fit | canFit | The circle from the points in the fit. |
 | back_to_steps (user) | Back to the step you came from | list → back | cameFromStep | Return to the step you were on. |
+| back_step (user) | ‹ Back | list → back | hasPrevStep | Go back to the previous step. |
 | pick_step (user) | Go to step | list → back |  | Move to another step. |
 | open_point (user) | Open point | list → point | hasPoints | Open one point's pop-up. |
 | delete_point (user) | Delete | list → list | hasLivePoint | Swipe left on a row to delete it (Restore undoes). |

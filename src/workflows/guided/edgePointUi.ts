@@ -45,15 +45,22 @@ export function renderEdgeFitSummary(detail: CircleResultDetail): HTMLElement {
 /** '⌀ 12.001 m ± 12 mm · 8 points · rms 7 mm', or '' before a fit. */
 export function edgeFitLine(detail: CircleResultDetail): string {
   const fit = detail.verdict.fit;
-  return fit ? `⌀ ${fit.diameterM.toFixed(3)} m ± ${Math.round(fit.sigmaDM * 1000)} mm · ${detail.fitIds?.length ?? 0} points${fit.dof > 0 ? ` · rms ${Math.round(fit.rmsM * 1000)} mm` : ''}` : '';
+  if (!fit) return '';
+  const n = detail.fitIds?.length ?? 0;
+  // No redundancy: exact through the points, so no ± or rms to show.
+  if (fit.dof <= 0) return `⌀ ${fit.diameterM.toFixed(3)} m · ${n} points · exact fit, no check possible`;
+  return `⌀ ${fit.diameterM.toFixed(3)} m ± ${Math.round(fit.sigmaDM * 1000)} mm · ${n} points · rms ${Math.round(fit.rmsM * 1000)} mm`;
 }
 
 /** One line, no log: '8 points · 5 pass · 2 amber · 1 red · 1 deleted'. */
 export function edgeSummaryText(rows: EdgePointRow[]): string {
   const live = rows.filter((r) => !r.deleted);
   const c = (lv: string) => live.filter((r) => r.level === lv).length;
-  const unused = c('unused') + c('grey');
+  // Grey points are in the fit (only unchecked); only 'unused' ones are left out of it.
+  const unused = c('unused');
+  const grey = c('grey');
   return t(pointNet, 'edge_summary', { n: rows.length, pass: c('green'), amber: c('amber'), red: c('red'), deleted: rows.length - live.length })
+    + (grey ? t(pointNet, 'edge_summary_grey', { grey }) : '')
     + (unused ? t(pointNet, 'edge_summary_unused', { unused }) : '');
 }
 

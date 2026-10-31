@@ -234,6 +234,23 @@ describe('step buttons (circle_test@steps) and Help', () => {
     expect(b.disabled).toBe(true);
     expect(b.textContent).toMatch(/pick a step/);
   });
+  it('back_step: every step has Back to the previous step; the first has it disabled with its reason', () => {
+    start(3);
+    cmd('workflow-steps-all');
+    const ids = [...view().querySelectorAll<HTMLElement>('[data-testid^="step-pick-"]')].map((b) => b.dataset.step!);
+    for (let i = ids.length - 1; i > 0; i -= 1) {
+      cmd('workflow-step-pick', { 'data-step': ids[i]! });
+      const b = tid(view(), 'step-back')!;
+      expect(b.disabled, ids[i]).toBe(false);
+      expect(b.textContent).toMatch(/^‹ Back: /);
+      cmd('workflow-step-back');
+      expect(runOf(doc).currentStepId).toBe(ids[i - 1]);
+      expect(path()).toMatch(/edge-photos|circle-result/.test(ids[i - 1]!) ? /edge_points@list$/ : /circle_test@steps$/);
+    }
+    const first = tid(view(), 'step-back')!;
+    expect(first.disabled).toBe(true);
+    expect(first.textContent).toMatch(/first step/);
+  });
   it('Help shows the hierarchy with where you are marked', () => {
     start(3);
     cmd('workflow-help');

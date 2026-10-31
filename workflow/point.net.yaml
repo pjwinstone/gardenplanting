@@ -154,6 +154,7 @@ text:
   edge_restored_notice: "Edge point {id} restored. The circle is fitted again with it."
   edge_fit_title: Circle so far
   edge_summary: "{n} points · {pass} pass · {amber} amber · {red} red · {deleted} deleted"
+  edge_summary_grey: " · {grey} unchecked"
   edge_summary_unused: " · {unused} not in the fit"
   edge_add_btn: Add edge point
   edge_add_why_none: "No edge points yet. Stand on EDG01, face the middle and take its photo."

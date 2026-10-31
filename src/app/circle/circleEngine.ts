@@ -12,14 +12,17 @@ export interface CircleFacts {
   fitN: number;
   cameFromStep: boolean;
   pointDeleted: boolean;
+  /** Title of the previous step, or '' on the first one. */
+  prevStep: string;
 }
-let facts: CircleFacts = { points: 0, live: 0, deleted: 0, fitN: 0, cameFromStep: false, pointDeleted: false };
+let facts: CircleFacts = { points: 0, live: 0, deleted: 0, fitN: 0, cameFromStep: false, pointDeleted: false, prevStep: '' };
 export function setCircleFacts(f: Partial<CircleFacts>): void { facts = { ...facts, ...f }; }
 export function circleFacts(): CircleFacts { return facts; }
 
 export const circleGuards: Record<string, Guard> = {
   canFit: () => (facts.fitN >= 3 ? { ok: true } : { ok: false, why: `Needs 3 edge points in the fit (${facts.fitN} now).` }),
   cameFromStep: () => (facts.cameFromStep ? { ok: true } : { ok: false, why: 'You came here from the steps: pick a step to go to another one.' }),
+  hasPrevStep: () => (facts.prevStep ? { ok: true } : { ok: false, why: 'This is the first step.' }),
   hasPoints: () => (facts.points > 0 ? { ok: true } : { ok: false, why: 'No edge points yet.' }),
   hasLivePoint: () => (facts.live > 0 ? { ok: true } : { ok: false, why: 'No point to delete.' }),
   hasDeletedPoint: () => (facts.deleted > 0 ? { ok: true } : { ok: false, why: 'Nothing deleted.' }),

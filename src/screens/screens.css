@@ -112,6 +112,8 @@
 .edge-add-pin { position: sticky; top: 0; z-index: 3; padding: 4px 0; background: var(--sheet-bg, #f6f2e9); }
 @media (max-height: 500px) { .edge-add-pin .eng-why { display: none; } }
 .step-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 6px 0 10px; }
+.step-back-row { grid-column: 1 / -1; }
+.step-back-row .eng-btn { padding: 6px 12px; }
 .step-bar .step-all, .step-bar .step-help { grid-column: span 1; }
 .step-btn { text-align: left; border-radius: 12px; padding: 8px 12px; border: 2px solid #ddd6c8; background: #fbf8f1; font: inherit; }
 .step-btn small { display: block; font-size: 12px; opacity: .75; }

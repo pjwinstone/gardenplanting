@@ -362,6 +362,16 @@ export function circleVerdict(input: CircleCheckInput): CircleVerdict {
   const base: CircleVerdict = { state: 'weak', headline: '', guidance, fit, maxGapDeg, coverageDeg, warnings };
   const fitLine = `Fitted diameter ${(fit.diameterM).toFixed(3)} m ± ${mm(fit.sigmaDM)}`;
 
+  // 3 points: a circle through 3 points is exact (no redundancy). Residuals are 0 by construction
+  // and the ± is only the a-priori propagation, so no pass, no fail and no 'not a circle' yet.
+  if (fit.dof <= 0) {
+    return {
+      ...base,
+      state: 'needs-data',
+      headline: `Exact fit through ${points.length} points: ⌀ ${fit.diameterM.toFixed(3)} m. No check possible yet: a 4th point gives the first residuals.`,
+      guidance,
+    };
+  }
   // Not a circle: χ² or the residual RMS against what the covariance expects.
   if (!fit.chi2Pass || fit.rmsM > 2 * fit.expectedRmsM) {
     const worst = fit.residualsM.map((v, i) => ({ v, id: points[i].id })).sort((p, q) => Math.abs(q.v) - Math.abs(p.v))[0];

@@ -229,7 +229,6 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
     }
     if (red.length && verdict.state === 'green') verdict.state = 'amber';
     verdict.guidance = [...extra, ...verdict.guidance];
-    if (usable.length === MIN_FIT_EDGE_POINTS) verdict.guidance.unshift('3 edge points fit a circle exactly, so there are no residuals yet. A 4th point gives the first check.');
     return { verdict, gates: out.gates, network, fx, unlevelled, fitIds: usable.map((p) => p.pointId) };
   } catch (err) {
     return { ...needs(`The edge photos do not solve yet: ${(err as Error).message}`, ['Check each edge photo has 4 or more base points tapped.']), network, fx, unlevelled };
