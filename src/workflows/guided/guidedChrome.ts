@@ -135,7 +135,9 @@ function refreshCircleFacts(doc: GardenDocument, progress: WorkflowProgress, poi
     points: rows.length,
     live: rows.filter((r) => !r.deleted).length,
     deleted: rows.filter((r) => r.deleted).length,
-    fitN: detail.fitIds?.length ?? rows.filter((r) => !r.deleted).length,
+    fitN: detail.fitIds?.length ?? 0,
+    usableN: detail.usableIds?.length ?? 0,
+    fitWhy: detail.verdict.headline,
     cameFromStep: !!backTo && !isEdgeStep(backTo),
     pointDeleted: !!point?.deleted,
   });
@@ -1526,7 +1528,8 @@ function renderEdgeSubstages(doc: GardenDocument | null, run: WorkflowRun, rows:
   const bar = el('div', 'edge-substages');
   bar.dataset.testid = 'edge-substages';
   // Below 3 points there is no fit yet: count the live points that would go into it.
-  const fitN = detail.fitIds?.length ?? rows.filter((r) => !r.deleted).length;
+  // Points in the fit; before the fit runs, the points whose taps are enough to go into it.
+  const fitN = detail.fitIds?.length ?? detail.usableIds?.length ?? 0;
   const assign = [...edgeAssignmentsFor(doc, run).values()];
   const next = rows.length ? `EDG${String(Math.max(...assign.map((id) => Number(id.slice(3)) || 0)) + 1).padStart(2, '0')}` : 'EDG01';
   const unmarked = rows.find((r) => !r.deleted && doc?.photos.find((p) => p.id === r.photoId && !photoMarked(p)));
@@ -1545,13 +1548,15 @@ function renderEdgeSubstages(doc: GardenDocument | null, run: WorkflowRun, rows:
     points: rows.length,
     live: rows.filter((r) => !r.deleted).length,
     deleted: rows.filter((r) => r.deleted).length,
-    fitN,
+    fitN: detail.fitIds?.length ?? 0,
+    usableN: detail.usableIds?.length ?? 0,
+    fitWhy: detail.verdict.headline,
     cameFromStep: !!backTo && !isEdgeStep(backTo),
   });
   if (!circleAt('edge_points', 'list')) return bar;
   const view = describeScreen(circleEngine, {
     label: (id) => (id === 'add_point' ? t(pointNet, 'edge_add_btn') : id === 'show_fit' ? t(pointNet, 'edge_fit_btn') : id === 'back_to_steps' ? t(pointNet, 'edge_back_btn', { step: backTitle || 'the step you came from' }) : undefined),
-    text: (id) => (id === 'add_point' ? why : id === 'show_fit' ? `${edgeFitLine(detail)}. ${detail.verdict.headline}` : id === 'back_to_steps' ? '' : undefined),
+    text: (id) => (id === 'add_point' ? why : id === 'show_fit' ? [edgeFitLine(detail), detail.verdict.headline].filter(Boolean).join('. ') : id === 'back_to_steps' ? '' : undefined),
   });
   const cmds: Record<string, string> = { add_point: 'workflow-edge-add', show_fit: 'workflow-edge-fit', back_to_steps: 'workflow-edge-back' };
   stampPlace(bar, circleEngine);

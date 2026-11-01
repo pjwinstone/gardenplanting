@@ -32,3 +32,24 @@ describe('3 edge points: an exact fit, not an error', () => {
     expect(edgeFitLine(det4)).toMatch(/± \d+ mm · 4 points · rms/);
   });
 });
+
+describe('tapped and saved points go into the fit from the first one (Paul, 31 Oct 2026)', () => {
+  it('1 and 2 tapped points wait for the fit (not "not in the fit"); the 3rd gives the exact fit', () => {
+    for (const n of [1, 2]) {
+      const d = buildCircleDoc(n);
+      const run = readProgress(d).runs['circle-field-test']!;
+      const det = circleResultDetailForRun(d, run);
+      expect(det.usableIds).toHaveLength(n);
+      const rows = edgePointRows(d, run, det);
+      for (const r of rows) {
+        expect(r.level).toBe('grey');
+        expect(r.reason).toBe(`Taps saved. Goes into the fit when 3 points have their taps (${n} now).`);
+      }
+      expect(edgeSummaryText(rows)).not.toMatch(/not in the fit/);
+    }
+    const d3 = buildCircleDoc(3);
+    const det3 = circleResultDetailForRun(d3, readProgress(d3).runs['circle-field-test']!);
+    expect(det3.fitIds).toEqual(['EDG01', 'EDG02', 'EDG03']);
+    expect(det3.verdict.headline).toMatch(/^Exact fit through 3 points/);
+  });
+});
