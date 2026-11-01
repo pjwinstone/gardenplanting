@@ -159,12 +159,12 @@ text:
   edge_add_btn: Add edge point
   edge_add_why_none: "No edge points yet. Stand on EDG01, face the middle and take its photo."
   edge_add_why_few: "{n} in the fit so far; 3 fit a circle. Add {more} more."
-  edge_add_why_three: "3 points so far, 1 more gives residuals."
+  edge_add_why_three: "3 in the fit: the circle fits exactly. A 4th point (optional) gives the first check."
   edge_add_why_more: "{n} in the fit. Another point checks the others; add one where the gaps are big."
   edge_add_unmarked: "{id} is not marked yet: open it and Edit taps."
   edge_add_next: "The next one is {id}."
   edge_fit_btn: Circle fit
-  edge_fit_why_off: "Needs 3 edge points in the fit ({n} now)."
+  edge_fit_why_off: "Needs 3 edge points with their base points tapped ({n} now)."
   edge_fit_close: Back to the list
   edge_back_btn: "Back to {step}"
   edge_back_why_off: "You came here on the roller: scroll it to go to another step."

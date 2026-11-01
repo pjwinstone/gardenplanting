@@ -143,6 +143,8 @@ export interface CircleResultDetail {
   unlevelled: number;
   /** Edge points in the circle fit, in the order of `verdict.fit.residualsM`. */
   fitIds?: string[];
+  /** Edge points whose photo has enough base points tapped to go into the fit (fit or not). */
+  usableIds?: string[];
 }
 
 /** Minimum edge points for a circle fit (3 fit exactly; residuals need 4 or more). */
@@ -187,7 +189,7 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
     return tied.length >= 3 || (tied.length === 2 && tied.every((x) => x.dyPx != null));
   });
   if (usable.length < MIN_FIT_EDGE_POINTS) {
-    return { ...needs(`${usable.length} edge photo${usable.length === 1 ? '' : 's'} with 3 or more base points tapped (or 2 two-sleeve posts). The circle fits from 3; 8 or more give a check.`, ['Take one photo from each edge point and tap the base points in it.']), network, fx, unlevelled };
+    return { ...needs(`${usable.length} edge photo${usable.length === 1 ? '' : 's'} with 3 or more base points tapped (or 2 two-sleeve posts). The circle fits from 3; 8 or more give a check.`, ['Take one photo from each edge point and tap the base points in it.']), network, fx, unlevelled, usableIds: usable.map((p) => p.pointId) };
   }
   const centre = control.reduce((s, c) => ({ x: s.x + c.x / control.length, y: s.y + c.y / control.length }), { x: 0, y: 0 });
   try {
@@ -229,9 +231,9 @@ export function circleResultDetailForRun(doc: GardenDocument | null | undefined,
     }
     if (red.length && verdict.state === 'green') verdict.state = 'amber';
     verdict.guidance = [...extra, ...verdict.guidance];
-    return { verdict, gates: out.gates, network, fx, unlevelled, fitIds: usable.map((p) => p.pointId) };
+    return { verdict, gates: out.gates, network, fx, unlevelled, fitIds: usable.map((p) => p.pointId), usableIds: usable.map((p) => p.pointId) };
   } catch (err) {
-    return { ...needs(`The edge photos do not solve yet: ${(err as Error).message}`, ['Check each edge photo has 4 or more base points tapped.']), network, fx, unlevelled };
+    return { ...needs(`The edge photos do not solve yet: ${(err as Error).message}`, ['Check the base point taps in each edge photo (3 or more each; 4 make a checked point).']), network, fx, unlevelled, usableIds: usable.map((p) => p.pointId) };
   }
 }
 
@@ -258,6 +260,7 @@ export function edgePointRows(doc: GardenDocument | null | undefined, run: Workf
   const deleted = new Map((run.deletedEdgePoints ?? []).map((d) => [d.photoId, d]));
   const gate = new Map(detail.gates.map((g) => [g.pointId, g]));
   const fitIds = detail.fitIds ?? [];
+  const usable = new Set(detail.usableIds ?? []);
   const res = detail.verdict.fit?.residualsM ?? [];
   const live: EdgePointRow[] = [];
   const gone: EdgePointRow[] = [];
@@ -274,7 +277,12 @@ export function edgePointRows(doc: GardenDocument | null | undefined, run: Workf
       photoId,
       level: g ? g.cls : 'unused',
       ...(residualMm !== undefined ? { residualMm } : {}),
-      reason: g ? (g.reasons[0] ?? '') : 'Not in the fit yet: tap 3 or more base points in its photo (or 2 two-sleeve posts).',
+      // Taps saved and enough of them: it waits for the fit (fewer than 3 such points, or the fit
+      // did not solve). Only a photo without enough taps is 'not in the fit'.
+      ...(!g && usable.has(id) ? { level: 'grey' as const } : {}),
+      reason: g ? (g.reasons[0] ?? '')
+        : usable.has(id) ? (usable.size < MIN_FIT_EDGE_POINTS ? `Taps saved. Goes into the fit when ${MIN_FIT_EDGE_POINTS} points have their taps (${usable.size} now).` : `Taps saved. ${detail.verdict.headline}`)
+        : 'Not in the fit yet: tap 3 or more base points in its photo (or 2 two-sleeve posts).',
       deleted: false,
     });
   }

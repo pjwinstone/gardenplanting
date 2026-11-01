@@ -79,7 +79,7 @@ describe('edge point list (edge_points@list)', () => {
     expect(tid(pin, 'edge-add')!.disabled).toBe(false);
     const fit = tid(h, 'edge-fit-open')!;
     expect(fit.disabled).toBe(true);
-    expect(fit.textContent).toMatch(/Needs 3 edge points in the fit \(2 now\)/);
+    expect(fit.textContent).toMatch(/Needs 3 edge points with their base points tapped \(2 now\)/);
     expect(tid(h, 'edge-substages')!.dataset.place).toBe('list');
   });
   it('add_point opens the camera place; photo_in the tap screen; Save returns to the list, new point highlighted', () => {

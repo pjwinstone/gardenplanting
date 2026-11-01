@@ -10,17 +10,22 @@ export interface CircleFacts {
   live: number;
   deleted: number;
   fitN: number;
+  /** Points with enough taps to go into the fit, and the fit's headline (the reason when it fails). */
+  usableN: number;
+  fitWhy: string;
   cameFromStep: boolean;
   pointDeleted: boolean;
   /** Title of the previous step, or '' on the first one. */
   prevStep: string;
 }
-let facts: CircleFacts = { points: 0, live: 0, deleted: 0, fitN: 0, cameFromStep: false, pointDeleted: false, prevStep: '' };
+let facts: CircleFacts = { points: 0, live: 0, deleted: 0, fitN: 0, usableN: 0, fitWhy: '', cameFromStep: false, pointDeleted: false, prevStep: '' };
 export function setCircleFacts(f: Partial<CircleFacts>): void { facts = { ...facts, ...f }; }
 export function circleFacts(): CircleFacts { return facts; }
 
 export const circleGuards: Record<string, Guard> = {
-  canFit: () => (facts.fitN >= 3 ? { ok: true } : { ok: false, why: `Needs 3 edge points in the fit (${facts.fitN} now).` }),
+  canFit: () => (facts.fitN >= 3 ? { ok: true }
+    : facts.usableN >= 3 ? { ok: false, why: facts.fitWhy }
+    : { ok: false, why: `Needs 3 edge points with their base points tapped (${facts.usableN} now).` }),
   cameFromStep: () => (facts.cameFromStep ? { ok: true } : { ok: false, why: 'You came here from the steps: pick a step to go to another one.' }),
   hasPrevStep: () => (facts.prevStep ? { ok: true } : { ok: false, why: 'This is the first step.' }),
   hasPoints: () => (facts.points > 0 ? { ok: true } : { ok: false, why: 'No edge points yet.' }),
